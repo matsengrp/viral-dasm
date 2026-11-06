@@ -125,3 +125,72 @@ rule gate1_score_reference:
         " --report {output.report}"
         " --device cuda"
         " > {log} 2>&1"
+
+
+rule canary:
+    """Gate 2: train dasm-85k for 20,000 steps on the full-depth corpus.
+
+    Ten evaluations at the reference's 2,000-step cadence, compared point by
+    point against the curve `data/reference/` carries. A dropped censoring
+    source, a lost mask, the wrong reference sequence, a fold off by one or a
+    wrong `min_delta` all move the curve from the first evaluation.
+
+    Roughly 2-2.5 hours at flash-off rates, against the reference's 50.6
+    minutes with flash on. The real number is measured by `gate2` below and
+    is itself a deliverable: it sets the nine-run budget in matsengrp/
+    viral-dasm#1, which currently costs M3 at flash-on rates.
+
+    `--seed` is a wildcard so the two-seed tolerance measurement is the same
+    rule run twice, and each seed gets its own `output_dir` -- the resume
+    pattern protects a run against dying, not against two attempts sharing a
+    directory.
+    """
+    input:
+        config=f"{CONFIG_DIR}/{CANARY_MODEL}_canary.yaml",
+        corpus_guard=f"{ARTIFACT_ROOT}/corpus_guard/full_depth.json",
+        config_check=f"{GATE_DIR}/check_config_canary.json",
+    output:
+        done=touch(f"{ARTIFACT_ROOT}/canary/seed{{seed}}/training_complete.done"),
+    params:
+        outdir=f"{ARTIFACT_ROOT}/canary/seed{{seed}}",
+        parquet=str(FULL_DEPTH.path),
+    log:
+        f"{ARTIFACT_ROOT}/logs/canary_seed{{seed}}.log",
+    shell:
+        "{TRAIN_ENV} python scripts/train.py"
+        " --config {input.config}"
+        " --parquet {params.parquet}"
+        " --output-dir {params.outdir}"
+        " --seed {wildcards.seed}"
+        " --device cuda"
+        " > {log} 2>&1"
+
+
+rule gate2:
+    """Compare a canary's ten evaluations against the reference curve.
+
+    Without `--tolerance` this reports the deltas and checks only what does
+    not depend on one: ten rows at the right steps, and a learning rate still
+    at 1e-3. The tolerance comes from running `canary` at two seeds and
+    taking the per-row spread, which has to be written down before the full
+    run is launched rather than fitted to its result.
+    """
+    input:
+        done=f"{ARTIFACT_ROOT}/canary/seed{{seed}}/training_complete.done",
+        reference=f"data/reference/{CANARY_MODEL}_rep0_eval_through_20000.csv",
+    output:
+        report=f"{GATE_DIR}/gate2_seed{{seed}}.json",
+    params:
+        canary_dir=f"{ARTIFACT_ROOT}/canary/seed{{seed}}",
+        tolerance=lambda w: (
+            f"--tolerance {config['tolerance']}" if "tolerance" in config else ""
+        ),
+    log:
+        f"{ARTIFACT_ROOT}/logs/gate2_seed{{seed}}.log",
+    shell:
+        "python scripts/gate2_compare_curve.py"
+        " --canary-dir {params.canary_dir}"
+        " --reference-csv {input.reference}"
+        " --report {output.report}"
+        " {params.tolerance}"
+        " > {log} 2>&1"
