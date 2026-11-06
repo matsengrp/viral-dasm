@@ -39,7 +39,16 @@ human; a mismatch at step 16,000 specifically is the ``min_delta`` signature.
 GISAID: per-evaluation aggregate scalars. No sequence, no per-sample data.
 """
 
+# ruff: noqa: I001 -- import order in this file is load-bearing; see below.
 from __future__ import annotations
+
+# `dasm2` first, above anything that pulls pyarrow in -- pandas does. Arrow
+# fixes its C++ default memory pool at first import, and `dasm2/__init__.py`
+# calls `use_system_arrow_pool()` to steer it off mimalloc, which under
+# pyarrow 25 requests transparent huge pages. Whichever import lands first
+# wins, and dasm2's complaint about losing goes to a Snakemake log nobody
+# reads. `tests/test_import_order.py` keeps this honest.
+import dasm2  # noqa: F401  (imported first for its side effects)
 
 import argparse
 import json
@@ -134,7 +143,9 @@ def main() -> None:
         )
 
     merged = reference.merge(
-        measured[["global_step", *NUMERIC_COLUMNS, "is_best", "lr"]],
+        measured[["global_step", *NUMERIC_COLUMNS, "is_best", "lr"]].rename(
+            columns={"lr": "lr_canary"}
+        ),
         on="global_step",
         suffixes=("_ref", "_canary"),
     )
@@ -158,7 +169,7 @@ def main() -> None:
             f"{row['val_loss_canary']:>11.6f} {row['val_loss_delta']:>+10.6f} "
             f"{row['avg_train_loss_delta']:>+12.6f} "
             f"{row['val_aa_acc_mutated_delta']:>+13.6f} "
-            f"{best:>16}{flag} {row['lr']:>8.1e}"
+            f"{best:>16}{flag} {row['lr_canary']:>8.1e}"
         )
     print()
 
@@ -188,7 +199,7 @@ def main() -> None:
     )
 
     # Checks that do not need a tolerance.
-    off_lr = merged[merged["lr"] != EXPECTED_LR]
+    off_lr = merged[merged["lr_canary"] != EXPECTED_LR]
     if not off_lr.empty:
         failures.append(
             f"the canary's learning rate left {EXPECTED_LR:.0e} at step(s) "
