@@ -1,0 +1,78 @@
+# Gate 0: the whole training path in under a minute.
+#
+# TEMPLATE. `scripts/render_config.py` fills the brace-delimited slots below
+# from config.yaml and writes the rendered file into the artifact root.
+#
+# This is a wiring test, not a science run. Five steps on 400 PCPs; the
+# numbers mean nothing. What it exercises is the wiring the multi-day runs
+# depend on: Parquet load -> tokenization at Spike's real length -> censor
+# table load and application -> forward -> backward -> eval.
+#
+# The two failure modes it covers are both silent. A censoring field that
+# stops reaching the transform trains perfectly well and reports a number for
+# a condition it did not run. A corpus-shaping flag that stops reaching prep
+# leaves two arms training on the same rows and reporting a flat ladder.
+# Sixty seconds here is the cheapest thing that catches either, and
+# `scripts/check_rendered_config.py` catches the rest.
+#
+# The slice spans both eras, so a broken clade-to-era assignment cannot pass:
+# `prepare_viral_parquet` raises on an era matching zero rows.
+#
+# **This is a deliberate rewrite, not a port.** `dasm2-experiments`'
+# `2026-09-02-v12-sampling-depth-ladder/configs/fast_test.template.yaml` runs
+# the same five steps against `PerSiteParentChildHead` with an
+# `IdentityEncoder`, because that is the cheapest way to reach the data path
+# and the ladder trained that head anyway. viral-dasm's M1 does not: the
+# context-independent baseline is a later milestone, and a fast test that
+# never builds a transformer would leave the encoder, the SF projection and
+# the SelectionFactorHead -- the whole modelling half of what M1 ports --
+# untouched until Gate 1. So this runs the real architecture at a toy size.
+# It costs seconds, not sub-seconds.
+#
+# NO neutral_model block. Rates come from the Parquet, as in the real runs.
+#
+# GISAID: reads GISAID-derived PCPs. Everything it writes lands under the
+# artifact root, not in the repository.
+
+model:
+    encoder:
+        type: TransformerEncoder
+        nhead: 4
+        d_model_per_head: 8
+        num_layers: 5
+        dim_feedforward: 128
+        dropout: 0.1
+        vocab_size: 21
+        d_pos: 16
+        flash_attention: false
+
+    heads:
+        - head_type: SelectionFactorHead
+
+tasks:
+    - head_type: SelectionFactorHead
+      loss_config:
+          loss_type: whichmut
+      loss_weight: 1.0
+
+optimizer:
+    optimizer_name: AdamW
+    learning_rate: 0.001
+    weight_decay: 1.0e-04
+    betas: [0.9, 0.999]
+
+max_train_steps: {MAX_TRAIN_STEPS}
+eval_every_steps: 2
+max_eval_steps: 2
+early_stopping_patience: 30
+early_stopping_min_delta: 1.0e-5
+batch_size: 2
+val_batch_size: 2
+dataset_mode: streaming
+num_dataloader_workers: 0
+
+censored_mutations_file: {CENSORED_MUTATIONS_FILE}
+censored_clades_file: {CENSORED_CLADES_FILE}
+censor_mode: {CENSOR_MODE}
+masked_nt_sites_file: {MASKED_NT_SITES_FILE}
+reference_sequence_file: {REFERENCE_SEQUENCE_FILE}

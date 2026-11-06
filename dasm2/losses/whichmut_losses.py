@@ -1,0 +1,91 @@
+"""Whichmut and AAO Whichmut losses — first-class ``nn.Module`` Loss classes.
+
+These wrap the pure-function math kernels in
+``dasm2.losses.{whichmut_loss,aao_whichmut_loss}``. The pre-#621
+plain-Python wrapper classes (used only by ``AAHWhichmutHead``) are
+promoted to ``nn.Module`` subclasses so loss-owned parameters (none today,
+reserved for future) participate cleanly in the optimizer's parameter
+graph via ``model.task_losses``.
+"""
+
+from __future__ import annotations
+
+from typing import Dict
+
+from torch import Tensor, nn
+
+from dasm2.losses.aao_whichmut_loss import compute_aao_whichmut_loss_batch
+from dasm2.losses.whichmut_loss import (
+    compute_whichmut_loss_batch,
+    predict_whichmut_child_codons,
+)
+
+
+def _require(batch: Dict[str, Tensor], keys: tuple[str, ...], context: str) -> None:
+    missing = [k for k in keys if k not in batch]
+    if missing:
+        raise ValueError(
+            f"{context} missing required batch keys: {missing}. "
+            f"Got keys: {list(batch.keys())}."
+        )
+
+
+class WhichmutLoss(nn.Module):
+    """Whichmut codon-level loss (gauge-anchoring via synonymous mutations)."""
+
+    _REQUIRED = (
+        "codon_parents_idxs",
+        "codon_children_idxs",
+        "codon_neutral_rates",
+        "loss_mask",
+    )
+
+    def forward(self, predictions: Tensor, batch: Dict[str, Tensor]) -> Tensor:
+        _require(batch, self._REQUIRED, "WhichmutLoss")
+        return compute_whichmut_loss_batch(
+            selection_factors=predictions,
+            neutral_rates=batch["codon_neutral_rates"],
+            codon_parents_idxs=batch["codon_parents_idxs"],
+            codon_children_idxs=batch["codon_children_idxs"],
+            mask=batch["loss_mask"],
+        )
+
+    def predict_child_codons(
+        self, predictions: Tensor, batch: Dict[str, Tensor]
+    ) -> Tensor:
+        """Top-1 reachable child-codon prediction per position, ``(B, L)``.
+
+        Implementing this opts whichmut into the conditional codon-accuracy
+        metric group (``whichmut_codon`` provider, issue #738): the metric
+        provider resolves its extractor by looking up ``predict_child_codons``
+        on the task's loss. The name is deliberately distinct from DASM's
+        ``predict_codons`` — whichmut predicts *which mutation* conditioned on
+        a mutation occurring (argmax over reachable single-NT children), not a
+        top-1 over the full codon distribution, so the two are mutually
+        exclusive gates that must not co-activate on one task.
+        """
+        _require(
+            batch,
+            ("codon_neutral_rates", "codon_parents_idxs"),
+            "WhichmutLoss.predict_child_codons",
+        )
+        return predict_whichmut_child_codons(
+            selection_factors=predictions,
+            neutral_rates=batch["codon_neutral_rates"],
+            codon_parents_idxs=batch["codon_parents_idxs"],
+        )
+
+
+class AAOWhichmutLoss(nn.Module):
+    """AAO Whichmut AA-level loss (no gauge anchoring; pair with WhichmutLoss)."""
+
+    _REQUIRED = ("aao_neutral_rates", "aa_children_idxs", "loss_mask")
+
+    def forward(self, predictions: Tensor, batch: Dict[str, Tensor]) -> Tensor:
+        _require(batch, self._REQUIRED, "AAOWhichmutLoss")
+        return compute_aao_whichmut_loss_batch(
+            selection_factors=predictions,
+            aao_neutral_rates=batch["aao_neutral_rates"],
+            aa_children_idxs=batch["aa_children_idxs"],
+            mask=batch["loss_mask"],
+        )
