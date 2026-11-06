@@ -85,7 +85,15 @@ def mat_pcp_path(key: str) -> Path:
 
 @dataclass(frozen=True)
 class Corpus:
-    """A prepared Parquet, with the integers that identify it."""
+    """A prepared Parquet, with the things that identify it.
+
+    ``source_pcp_md5`` is the pin that matters: the Parquet inherits its row
+    order verbatim from that mat-pcp file, and the paper's fold 0 is a
+    function of row order. ``md5`` is the Parquet's own, recorded so a
+    rebuild's effect is visible, but not a gate -- a rebuild recomputes
+    ``nt_rates``/``nt_csps`` and picks its own row-group boundaries, so the
+    bytes can move while every row stays where it was.
+    """
 
     name: str
     path: Path
@@ -93,6 +101,8 @@ class Corpus:
     n_rows: int
     row_order_digest: str
     parquet_cache_budget_gb: float
+    source_pcp: Path
+    source_pcp_md5: str
 
 
 def corpus(name: str) -> Corpus:
@@ -105,6 +115,8 @@ def corpus(name: str) -> Corpus:
         n_rows=int(entry["n_rows"]),
         row_order_digest=entry["row_order_digest"],
         parquet_cache_budget_gb=float(entry["parquet_cache_budget_gb"]),
+        source_pcp=Path(entry["source_pcp"]),
+        source_pcp_md5=entry["source_pcp_md5"],
     )
 
 

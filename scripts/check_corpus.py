@@ -1,4 +1,4 @@
-"""Prove the corpus is the file the paper's 90/10 split was drawn from.
+"""Prove the corpus gives the paper's 90/10 split.
 
 The paper holds out fold 0 of a 10-fold ``cv_seed`` 42 split, and that split is
 a **row-positional draw**. With no ``group_col``, ``dasm2``'s Parquet path
@@ -10,33 +10,40 @@ a **row-positional draw**. With no ``group_col``, ``dasm2``'s Parquet path
 
 with ``n_rows`` taken from the Parquet footers. So the *index set* held out is
 fixed by ``(seed, num_folds, n_rows)`` alone, and **which PCP is held out is
-fixed by which row sits at each index**. A file with the same rows in a
-different order is a different 90/10 split.
+fixed by which row sits at each index**.
 
-This also overrides the Parquet's own ``in_train`` column, which holds a
-different partition (1,435,844 / 158,930) and is discarded whenever
-``--cv-fold`` is passed.
+**The corpus can be rebuilt and still give the same fold 0.** The builder
+copies the mat-pcp PCP file's row order verbatim -- nothing in it sorts,
+samples or shuffles. So what has to be pinned is that input file, not the
+Parquet built from it, and this guard checks the input's md5.
 
-**A content-keyed pin could not replace row order.** ``(clade, parent, child)``
-is not unique here -- 911,927 distinct triples across 1,594,774 rows, because
-mat-pcp counts are per-branch events and the same transition recurs on many
-branches. The positional draw scatters a triple's copies across folds, so the
-split is not recoverable from a key set. Hence an order-sensitive digest: a
+The Parquet's own md5 is reported but **not** a gate. A rebuild recomputes
+``nt_rates`` and ``nt_csps`` and picks its own row-group boundaries and
+compression, so the file's bytes may differ while every row stays where it
+was. Failing on that would block a legitimate rebuild and would say nothing
+about the split.
+
+**A content-keyed pin could not replace row order either.** ``(clade, parent,
+child)`` is not unique here -- 911,927 distinct triples across 1,594,774 rows,
+because mat-pcp counts are per-branch events and the same transition recurs on
+many branches. The positional draw scatters a triple's copies across folds, so
+the split is not recoverable from a key set. Hence an order-sensitive digest: a
 sorted or set-based one would pass on a reordered file, which is the single
 failure this guard exists to catch.
 
-Three checks, all cheap relative to a training run, plus the md5:
+The checks, in order of what they would cost you to get wrong:
 
-1. row count
-2. fold-0 split sizes
-3. the row-order digest
+1. The source PCP file's md5. Row order is inherited from it.
+2. Row count.
+3. Fold-0 split sizes.
+4. The row-order digest.
 
 Then it writes the fold-0 membership beside the Parquet so a later reader can
 check the split without re-deriving it.
 
 GISAID: the membership array is per-row derived data and goes to the artifact
-root on the cluster. The three integers and the digest are aggregate and are
-pinned in ``config.yaml``.
+root on the cluster. The counts and the digest are aggregate and are pinned in
+``config.yaml``.
 """
 
 from __future__ import annotations
@@ -114,7 +121,7 @@ def main() -> None:
     parser.add_argument(
         "--skip-md5",
         action="store_true",
-        help="skip the md5 of a 1.8 GB file when only the split is in question",
+        help="skip both md5s when only the split itself is in question",
     )
     args = parser.parse_args()
 
@@ -167,12 +174,31 @@ def main() -> None:
             f"not a prep detail."
         )
 
+    source_md5 = None
     md5 = None
     if not args.skip_md5:
+        # The pin that matters. Row order is inherited from this file, so a
+        # different one here is a different fold 0 no matter what the builder
+        # does.
+        source_md5 = file_md5(spec.source_pcp)
+        print(f"  source PCP md5:   {source_md5}  expected {spec.source_pcp_md5}")
+        if source_md5 != spec.source_pcp_md5:
+            failures.append(
+                f"the source PCP file {spec.source_pcp} has md5 {source_md5}, "
+                f"not {spec.source_pcp_md5}. The corpus inherits its row order "
+                f"from this file, so a different one gives a different 90/10 "
+                f"split. mat-pcp rebuilds its results tree in place, which is "
+                f"exactly how this changes without anyone deciding to change it."
+            )
+
+        # Reported, not gated: a rebuild recomputes nt_rates/nt_csps and picks
+        # its own row-group boundaries, so these bytes can move while every row
+        # stays where it was. The digest above is what the split depends on.
         md5 = file_md5(spec.path)
-        print(f"  md5:              {md5}  expected {spec.md5}")
-        if md5 != spec.md5:
-            failures.append(f"md5 is {md5}, not {spec.md5}.")
+        note = "matches" if md5 == spec.md5 else "DIFFERS from"
+        print(
+            f"  parquet md5:      {md5}  ({note} the recorded {spec.md5}; not a gate)"
+        )
 
     if args.membership_output is not None and not failures:
         args.membership_output.parent.mkdir(parents=True, exist_ok=True)
@@ -195,6 +221,9 @@ def main() -> None:
         "n_val": n_val,
         "row_order_digest": digest,
         "md5": md5,
+        "md5_matches_recorded": None if md5 is None else md5 == spec.md5,
+        "source_pcp": str(spec.source_pcp),
+        "source_pcp_md5": source_md5,
         "passed": not failures,
         "failures": failures,
     }

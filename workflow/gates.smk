@@ -34,8 +34,13 @@ CONFIG_DIR = f"{ARTIFACT_ROOT}/configs"
 #: and the failure is silent: the run trains ~34x too slowly to finish. The
 #: thread caps because without them each dataloader worker sizes its BLAS
 #: pools from the host core count.
+#: ``PYTHONUNBUFFERED`` because a rule that redirects stdout to a file gets
+#: 8 KB block buffering, and a run of several hours then shows nothing for
+#: its first hour. The trainer's own JSONL log is written per evaluation
+#: either way, but the human-readable log should not lag it.
 TRAIN_ENV = (
-    "OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1"
+    "PYTHONUNBUFFERED=1"
+    " OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1"
     " NUMEXPR_NUM_THREADS=1"
     f" DASM2_PARQUET_CACHE_BUDGET_GB={FULL_DEPTH.parquet_cache_budget_gb}"
 )

@@ -27,20 +27,33 @@ mat_pcp:
 
 # The prepared corpora.
 #
-# `full_depth` is PINNED, not built. The paper's held-out set is fold 0 of a
-# 10-fold cv_seed-42 split, and that split is a row-positional draw -- the
-# index set comes from (seed, num_folds, n_rows) and which PCP sits at each
-# index comes from the file's row order. Rebuilding the file would reshuffle
-# the partition even if every row survived, so the file itself is the input.
-# See workflow/corpus.smk and scripts/check_corpus.py.
+# `full_depth` is BUILT, not pinned -- and the paper's 90/10 split survives the
+# rebuild. Fold 0 is a row-positional draw: the held-out index set comes from
+# (seed, num_folds, n_rows), and which PCP sits at each index comes from the
+# Parquet's row order. That row order is copied verbatim from the mat-pcp PCP
+# file below; nothing in the builder sorts, samples or shuffles. Verified by
+# comparing the first 50,000 rows of each: 50,000/50,000 positionally
+# identical on (clade, parent, child).
+#
+# So what has to be pinned is the mat-pcp file, not the Parquet. That file is
+# an input viral-dasm receives rather than produces, and its md5 is checked
+# before anything is built from it.
+#
+# The Parquet's own md5 is recorded but NOT a gate. A rebuild recomputes
+# `nt_rates` and `nt_csps` and picks its own row-group boundaries and
+# compression, so the file's bytes may move while every row stays where it
+# was. The row-order digest is what the split depends on, and it is the hard
+# check.
 #
 # M2 adds the three thinned arms here. Those have no reference curve to match
-# and draw their own folds, so they are built, not pinned.
+# and draw their own folds.
 corpora:
     full_depth:
         path: /fh/fast/matsen_e/shared/bcr-mut-sel/dasm2/experiments/2026-09-02-v12-sampling-depth-ladder/parquet/S/full_depth.parquet
-        md5: 54070366804c4dd487eda47e9a027f68
         n_rows: 1594774
+        # The mat-pcp output this corpus is built from, and whose row order it
+        # inherits. This is the pin that matters.
+        source_pcp: /fh/fast/matsen_e/shared/viral-dasm/mat-pcp/results/gisaid-and-public_2026-08-06_v12/pcps/S/all_pcps_dasm_ready.csv.gz
         source_pcp_manifest: s2SpikeGisaidAll-2026-08-06-v12
         source_pcp_md5: abbe9c756e74b07c8ff387c98bec573b
         # blake2b-128 over the stream of per-row blake2b(clade\tparent\tchild, 16)
@@ -48,6 +61,8 @@ corpora:
         # set-based digest would pass on a reordered file, and a reordered file
         # is a different 90/10 split.
         row_order_digest: 6ac408a82a1feb2a1d7d50fb0293a60b
+        # Recorded, not gated. See above.
+        md5: 54070366804c4dd487eda47e9a027f68
         # The row-group cache budget this file needs. The library's 2 GB
         # default caps the cache below the shuffle buffer's working set, and
         # the failure is silent: the run trains ~34x too slowly to finish.
