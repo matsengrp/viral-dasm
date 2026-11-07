@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
 from dasm2.config import HookConfig
-from dasm2.training.checkpoint_selection import PERIODIC_MARKER
 from dasm2.training.hooks.base import TrainingHook
 
 if TYPE_CHECKING:
@@ -15,7 +14,13 @@ class CheckpointSaveHook(TrainingHook):
     """Hook to save model checkpoints after each training cycle."""
 
     #: Marks step-cadence saves in the filename; only these are rotated.
-    PERIODIC_TAG = PERIODIC_MARKER
+    #:
+    #: Upstream this came from ``training/checkpoint_selection.py``, which
+    #: shared it with the readers that pick a final checkpoint out of a
+    #: finished run's directory. This fork has no such reader -- it names the
+    #: checkpoint it wants -- so the module is not vendored and the writer
+    #: owns the marker.
+    PERIODIC_TAG = "periodic"
     #: Step-cadence saves kept: the newest, plus one in case it is truncated.
     PERIODIC_KEEP = 2
 
