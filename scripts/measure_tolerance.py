@@ -113,14 +113,18 @@ def main() -> None:
         rows.append(row)
     table = pd.DataFrame(rows)
 
+    # What the runs differ in is the caller's choice, and it decides what the
+    # number means: two seeds in one tree measure seed variation, two runs at
+    # one seed in one tree measure run-to-run nondeterminism, and the second is
+    # the tighter null. The header names the runs rather than asserting what
+    # varied, because this script cannot tell.
     header = (
-        f"# Gate 2 tolerance, measured from {len(curves)} canary runs "
-        f"differing only in --seed.\n"
+        f"# Gate 2 tolerance, measured from {len(curves)} canary runs.\n"
         f"# runs: {', '.join(str(Path(d).name) for d in args.canary_dir)}\n"
         f"# tolerance = observed spread x {args.safety}, floored at "
         f"{MIN_TOLERANCE}.\n"
-        f"# Two seeds understate the spread they estimate; raising the seed "
-        f"count is how to tighten this.\n"
+        f"# {len(curves)} runs understate the spread they estimate; raising "
+        f"the run count is how to tighten this.\n"
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(header + table.to_csv(index=False, float_format="%.6f"))

@@ -71,6 +71,25 @@ and a diff against the source commit stays meaningful. `tests/test_fork.py`
 enforces what that name would otherwise hide: `dasm2.__file__` has to resolve
 inside this repository, and no dependency may install a different one.
 
+**If you have the private repository installed, read this before deleting
+anything from `dasm2/`.** An editable install of it puts a finder on
+`sys.meta_path` that maps the *name* `dasm2` to the directory it was installed
+from, and resolves submodules against that directory rather than against this
+package's `__path__`. A module you delete here therefore still imports, served
+from the other checkout, and every gate goes green on code this repository does
+not contain. Deleting a file and watching the gates pass is not evidence the
+file stopped running.
+
+Three things make that visible rather than silent. `assert_dasm2_is_this_repo`
+in [`scripts/lib.py`](scripts/lib.py) sweeps `sys.modules` after the import and
+fails on any `dasm2` module resolving outside this tree; every script that
+imports `dasm2` calls it. `tests/test_import_order.py` requires `lib` to be
+imported before `dasm2`, since `lib` is what puts the repository root on
+`sys.path` and a script run never puts it there by itself. And
+`tests/test_fork.py` runs the same sweep in a subprocess started outside the
+repository. Checking the package root alone passes while a submodule leaks, so
+all three check module by module.
+
 ## The gates
 
 The port is checked against runs the private repository already made, on the
@@ -83,5 +102,13 @@ same corpus, the same fold and the same seed.
 | `check_corpus` | minutes | the corpus is the file the paper's 90/10 split was drawn from |
 | `gate1` | minutes, no training | the reference checkpoint scores 7.766710 here, over exactly 158,137 loss-mask positions |
 
-Two more land separately: a 20,000-step canary against the reference's first
-ten evaluations, and a full run to the learning-rate floor.
+Two more land separately: `gate2`, a 20,000-step canary compared against the
+reference's first ten evaluations, and `gate3`, a full run to the
+learning-rate floor.
+
+`gate2` compares two curves that no amount of care makes identical, so its
+tolerance is measured rather than chosen: `scripts/measure_tolerance.py` takes
+the spread across two runs and doubles it. What those two runs differ in
+decides what the tolerance means. Two seeds in one tree measure seed variation;
+two runs at one seed in one tree measure run-to-run nondeterminism, which is
+the tighter null and the one a prune should be judged against.
