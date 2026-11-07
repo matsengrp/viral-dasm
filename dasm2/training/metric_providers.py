@@ -1,4 +1,4 @@
-"""Capability-driven validation-metric providers (issue #738).
+"""Capability-driven validation-metric providers.
 
 Validation metric groups (child-codon prediction, selection-factor
 distribution) used to be gated by ``isinstance`` checks against the
@@ -57,7 +57,6 @@ from torch import Tensor
 
 from dasm2.heads.base import Capability
 from dasm2.heads.factory import HEAD_REGISTRY
-from dasm2.losses.dms_matrix import DMSMatrixCalibrationLoss
 from dasm2.training.codon_metrics import (
     CodonPredictionMetrics,
     mutated_codon_accuracy_from_counts,
@@ -233,8 +232,10 @@ METRIC_PROVIDERS: List[MetricProvider] = [
         update=_update_sf,
         metrics_from_counts=SelectionFactorMetrics.metrics_from_counts,
         counts_are_int=False,
-        # The sf update reads codon keys a dense DMS-matrix batch does not have.
-        excluded_loss_classes=(DMSMatrixCalibrationLoss,),
+        # Upstream this excluded the dense DMS-matrix loss, whose batches carry
+        # no codon keys for the sf update to read. That loss has no factory
+        # branch in this fork, so the exclusion could never fire; the mechanism
+        # is left unused rather than kept alive by a dead class to name.
     ),
 ]
 

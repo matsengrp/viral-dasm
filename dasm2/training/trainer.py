@@ -1,6 +1,6 @@
 """Protein evolution trainer with task-based multi-objective training.
 
-Drives training as a step-based loop (issue #578): a single ``while True``
+Drives training as a step-based loop: a single ``while True``
 over optimizer steps, with validation on a configurable cadence and all
 checkpoint/best-model bookkeeping pinned to evaluation boundaries. The
 multi-cycle wrapper is preserved for cycle-level concerns (branch-length
@@ -217,7 +217,7 @@ class StepWindowAccumulator:
 
 @dataclass(frozen=True)
 class _PassPosition:
-    """A saved position inside a data pass, ready to replay (issue #525)."""
+    """A saved position inside a data pass, ready to replay."""
 
     draws: List[int]
     pass_start_rng: Dict[str, Any]
@@ -234,7 +234,7 @@ def _has_persistent_iterator(loader: DataLoader) -> bool:
 
     A fresh torch iterator draws ``_base_seed`` from the global RNG before its
     sampler draws; a reset one does not (``_BaseDataLoaderIter``), so the two
-    give different batch orders from the same RNG state (issue #525).
+    give different batch orders from the same RNG state.
     """
     return getattr(_base_loader(loader), "_iterator", None) is not None
 
@@ -290,7 +290,7 @@ def _is_token_budget(loader: DataLoader) -> bool:
 
 
 def _capture_pass_start_rng(loaders: List[DataLoader]) -> Dict[str, Any]:
-    """Snapshot what a pass's batch order can come from (issue #525).
+    """Snapshot what a pass's batch order can come from.
 
     That is the global streams, plus the generator Accelerate gives a
     shuffled loader under DDP (``synchronized_generator``, broadcast from
@@ -353,7 +353,7 @@ def _effective_batch_size(task_batch_size: Optional[int], default: int) -> int:
 
 
 #: Fraction of ``MemAvailable`` the in-flight prefetched batches may occupy
-#: before the window-covering prefetch depth is refused (issue #1272). Deep
+#: before the window-covering prefetch depth is refused. Deep
 #: queues of long padded batches were a bursty host-RAM footprint that OOM-killed
 #: workers in issue #724, so the raise is conditional on this headroom.
 _PREFETCH_RAM_FRACTION = 0.25
@@ -493,13 +493,13 @@ class Trainer:
     # A window whose loss is non-finite on ANY rank is skipped (no optimizer
     # step) so a single degenerate sample on one rank cannot desync the
     # gradient all-reduce. If this many windows are skipped *consecutively*,
-    # training is genuinely diverging and we fail loudly instead (issue #724).
+    # training is genuinely diverging and we fail loudly instead.
     _MAX_NONFINITE_WINDOWS = 10
 
     # A run can also rot slowly: intermittent skips, each followed by a finite
     # window, never trip the consecutive check. Fail when more than
     # _MAX_SKIPS_PER_RATE_WINDOW (1%) of the last _SKIP_RATE_WINDOW windows were
-    # skipped (issue #1640). Skips are rank-synchronized, so every rank raises
+    # skipped. Skips are rank-synchronized, so every rank raises
     # together.
     _SKIP_RATE_WINDOW = 1000
     _MAX_SKIPS_PER_RATE_WINDOW = 10
@@ -592,14 +592,14 @@ class Trainer:
                 instead of fixed-size batches. None keeps fixed-size batching.
             dataloader_prefetch_factor: Per-worker DataLoader prefetch depth
                 (only used when ``num_dataloader_workers > 0``). Lower on
-                memory-constrained nodes (issue #724).
+                memory-constrained nodes.
             dataloader_pin_memory: Whether to pin DataLoader host memory
-                (CUDA only). Disable under host-RAM pressure (issue #724).
+                (CUDA only). Disable under host-RAM pressure.
             data_seed: Base seed of the token-budget batch order (the run's
                 ``--seed``); carried in :class:`TrainingState` so a resumed
                 run replays the same order.
             source_task_configs: Task descriptors to emit from
-                :meth:`export_metadata` when ``tasks`` is empty (issue #974).
+                :meth:`export_metadata` when ``tasks`` is empty.
                 ``loss_config`` and ``loss_weight`` are per-task facts that no
                 amount of inspecting the model can recover, so a Trainer built
                 without live Tasks — ``load_checkpoint`` is the canonical case
@@ -608,7 +608,7 @@ class Trainer:
                 is non-empty, which is then the single source of truth.
             source_launch_info: World size and backend precision mode to emit
                 from :meth:`export_metadata` when this Trainer's ``backend``
-                is not the one the run actually trained under (issue #1027).
+                is not the one the run actually trained under.
                 Same carry-through role as ``source_task_configs``: a
                 ``load_checkpoint`` Trainer is always handed a fabricated
                 ``SingleGPUBackend`` reporting world size ``1`` and
@@ -618,7 +618,7 @@ class Trainer:
                 ``create_trainer`` and ``resume_training`` both are, so
                 neither sets it.
             source_neutral_rates_source: Where the source checkpoint's
-                training rates came from (issue #1299), for a Trainer built
+                training rates came from, for a Trainer built
                 without live Tasks. Same carry-through role as
                 ``source_task_configs``: with no training datasets to inspect,
                 :meth:`export_metadata` re-emits this. Ignored when ``tasks``
@@ -626,7 +626,7 @@ class Trainer:
                 evaluation file.
             combine_gradient_hooks: Top-level (not per-task) hooks controlling
                 how multiple tasks' gradients on shared parameters are
-                combined before the optimizer step (issue #1144). None/empty
+                combined before the optimizer step. None/empty
                 (the default) reproduces today's plain-sum combination
                 exactly — every existing config exercises this path. At most
                 one entry is supported; two combination strategies cannot
@@ -635,7 +635,7 @@ class Trainer:
                 check below): ``torch.autograd.grad`` bypasses the DDP
                 reducer that ``self.backend.backward()`` normally drives.
             head_optimizer: Optional second optimizer scoped to exactly one
-                head's own parameters (issue #1220), built by the caller
+                head's own parameters, built by the caller
                 with ``create_optimizer(head_module, head_optimizer_config,
                 ...)`` over a ``model`` whose main optimizer already
                 excludes that same head's parameters via
@@ -759,7 +759,7 @@ class Trainer:
         self._data_passes: float = 0.0
         self._loader_cycle: int = 0
         self._current_cycle: int = 0
-        # Position inside the current data pass (issue #525), snapshotted in
+        # Position inside the current data pass, snapshotted in
         # TrainingState: micro-batches each live train iterator has yielded,
         # and the global RNG state just before those iterators were built.
         # ``_resume_pass_position`` holds the restored pair until the first
@@ -809,7 +809,7 @@ class Trainer:
         self.learning_rate = (
             self._get_current_learning_rate() if optimizer is not None else 0.0
         )
-        # head_optimizer's own initial LR (issue #1220) is captured by
+        # head_optimizer's own initial LR is captured by
         # HeadOptimizerState itself at construction; see the head_learning_rate
         # property below.
 
@@ -838,7 +838,7 @@ class Trainer:
             self.scheduler_config,
             (WarmupPolynomialSchedulerConfig, CosineWarmRestartsSchedulerConfig),
         )
-        # head_optimizer's own plateau scheduler (issue #1220) — see
+        # head_optimizer's own plateau scheduler — see
         # _create_head_scheduler for when this is/isn't built.
         if self.head_optimizer_state is not None:
             self.head_optimizer_state.replace_scheduler(self._create_head_scheduler())
@@ -1129,7 +1129,7 @@ class Trainer:
             )
 
     def _create_head_scheduler(self) -> Optional[ReduceLROnPlateau]:
-        """Create head_optimizer's own plateau scheduler (issue #1220), if any.
+        """Create head_optimizer's own plateau scheduler, if any.
 
         Reuses ``scheduler_config``'s own ``factor``/``eval_patience`` — the
         head optimizer doesn't get an independently-tunable schedule, just
@@ -1160,7 +1160,7 @@ class Trainer:
     def _step_head_scheduler(
         self, tasks: List["Task"], per_task_val: Dict[str, float]
     ) -> None:
-        """Step head_optimizer's plateau scheduler (issue #1220), if any.
+        """Step head_optimizer's plateau scheduler, if any.
 
         Steps on the *raw* (unscaled) validation loss of the task whose
         ``head_type`` matches ``head_optimizer_head_type`` — the same
@@ -1193,7 +1193,7 @@ class Trainer:
 
     @property
     def head_optimizer(self) -> Optional[torch.optim.Optimizer]:
-        """The head-scoped optimizer (issue #1220), delegated to head_optimizer_state."""
+        """The head-scoped optimizer, delegated to head_optimizer_state."""
         return (
             self.head_optimizer_state.optimizer
             if self.head_optimizer_state is not None
@@ -1492,7 +1492,7 @@ class Trainer:
             prefetch_window: Micro-batches drawn back to back from each
                 loader before any forward pass (``gradient_accumulation_steps``
                 for training, 1 for validation). With workers, the prefetch
-                depth is raised so the window is in flight (issue #1272).
+                depth is raised so the window is in flight.
 
         Returns:
             List of configured DataLoaders.
@@ -1523,7 +1523,7 @@ class Trainer:
             # pin_memory enables async CPU→GPU DMA transfers. This locks
             # page memory, so on memory-constrained nodes callers can disable
             # it via dataloader_kwargs={"pin_memory": False} or the
-            # ``dataloader_pin_memory`` config field (issue #724).
+            # ``dataloader_pin_memory`` config field.
             if self._is_cuda_device and "pin_memory" not in task_kwargs:
                 task_kwargs["pin_memory"] = self.dataloader_pin_memory
             # Per-sample lengths (a pass over ``aa_parents``), computed once
@@ -1551,7 +1551,7 @@ class Trainer:
                 # poisoned by force_spawn() calls elsewhere (e.g. BL
                 # optimization).
                 task_kwargs["multiprocessing_context"] = "fork"
-            # Token-budget batching (issue #724): form variable-size micro-batches
+            # Token-budget batching: form variable-size micro-batches
             # bounded by padded tokens so a long-sequence cluster holds fewer rows
             # and no rank's padded forward blows up. Needs cheap per-sample lengths
             # (evolutionary heads expose ``aa_parents``); other datasets fall back
@@ -1766,7 +1766,7 @@ class Trainer:
             batch: Batch data from task's dataset.
             task: Task specifying which head to use.
             active_metrics: Validation metric accumulators eligible for this
-                task (issue #738), built by
+                task, built by
                 :func:`metric_providers.build_active_metrics`. Each is fed
                 the per-batch tensor its extractor pulls from this forward's
                 predictions. ``None`` on the training path (metrics are
@@ -1843,7 +1843,7 @@ class Trainer:
         We all-reduce the flag anyway (mirroring the non-finite-loss guard in
         :meth:`_forward_backward_window`) so the retry/skip decision is provably
         identical on every rank — a per-rank divergence here would deadlock the
-        next collective exactly as the old per-rank loss raise did (issue #724).
+        next collective exactly as the old per-rank loss raise did.
 
         ``_check_gradients`` still raises locally on NaN *weights* (unrecoverable
         and rank-consistent, since weights only diverge if gradients do, which the
@@ -1882,7 +1882,7 @@ class Trainer:
         )
         self._optimizer_step_metrics.record_step(pre_clip_norm, self.gradient_clip_val)
         self.optimizer.step()
-        # head_optimizer (issue #1220) shares this same clipped-gradient
+        # head_optimizer shares this same clipped-gradient
         # snapshot — clip_grad_norm_ above already covers every model
         # parameter, head-optimizer-owned or not, as a single global clip;
         # this just applies the already-clipped head gradients with the
@@ -1896,8 +1896,8 @@ class Trainer:
 
         Defaults to ``_get_n_loss_positions`` (``loss_mask.sum()``). A loss
         implementing :class:`SelfNormalizingLoss` overrides this with its own
-        label unit — e.g. CSP (#679) counts substituted sites while sharing
-        DASM's broad ``loss_mask`` (issue #688).
+        label unit — e.g. CSP counts substituted sites while sharing
+        DASM's broad ``loss_mask``.
         """
         loss = task.loss
         if isinstance(loss, SelfNormalizingLoss):
@@ -1916,7 +1916,7 @@ class Trainer:
         first goes through the model's ``prepare_training_batch``, which may
         narrow its ``loss_mask`` in the dict (the site-masked DASM, #1550). This is what
         lets :meth:`_process_window` divide each task by its *own* window total
-        ``N_t = Σ_i n_{t,i}`` instead of the pooled ``Σ_t Σ_i n`` (issue #688).
+        ``N_t = Σ_i n_{t,i}`` instead of the pooled ``Σ_t Σ_i n``.
         The per-task label *count* (``_task_n_labels``) reads only ``loss_mask``
         / ``n_loss_labels`` and does not call ``move_batch_to_device``; the
         cross-rank *reduction* below is the only device-touching step here.
@@ -1926,7 +1926,7 @@ class Trainer:
         across ranks, dividing by the cross-rank *mean* of each task's per-rank
         label count makes the final per-parameter update equal the single-GPU
         ``(1/N_t)·Σ_global ∇`` — exactly as the previous global ``1/mean_n``
-        scaling did for the pooled total (see #607).
+        scaling did for the pooled total.
         """
         local = [0] * len(tasks)
         for batches in window_microbatches:
@@ -1949,7 +1949,7 @@ class Trainer:
         Mirrors the head/non-head split
         ``dasm2.training.hooks.overfit_guard.freeze_task_head`` already makes
         for one task at a time; this returns the complementary set across all
-        tasks at once, for ``combine_gradient_hooks`` dispatch (issue #1144).
+        tasks at once, for ``combine_gradient_hooks`` dispatch.
 
         Not every entry here is genuinely *contended* between tasks — e.g. a
         ``task_losses`` submodule only one task owns still lands in this
@@ -2073,7 +2073,7 @@ class Trainer:
         them on the gradient all-reduce. all-reducing a non-finite flag makes
         every rank reach the same decision at the same micro-batch.
 
-        When ``self.combine_gradient_hooks`` is non-empty (issue #1144), a
+        When ``self.combine_gradient_hooks`` is non-empty, a
         micro-batch with 2+ contributing tasks routes through
         ``_backward_with_gradient_combine`` instead of
         ``self.backend.backward(micro_loss)`` — ``micro_loss`` is still built
@@ -2162,7 +2162,7 @@ class Trainer:
         zero-label logging record returned (``n=0`` keeps it out of the loss
         mean). Fails loudly — on every rank at once — if windows keep coming
         back non-finite, which means training is genuinely diverging rather than
-        hitting a rare degenerate sample (issue #724).
+        hitting a rare degenerate sample.
 
         ``reason`` ("loss" or "gradient") is surfaced in the skip warning so the
         log distinguishes which guard fired — a key signal when relaunching to
@@ -2216,7 +2216,7 @@ class Trainer:
         """Per-task-normalized backward + optimizer step for one accumulation window.
 
         Each task ``t`` is normalized by its own window-total label count
-        ``N_t`` rather than the pooled ``Σ_t N_t`` (issue #688):
+        ``N_t`` rather than the pooled ``Σ_t N_t``:
 
             grad = Σ_t (loss_weight_t / N_t) · Σ_i ∇ task_sum_{t,i}
 
@@ -2716,7 +2716,7 @@ class Trainer:
 
         # Building loaders can draw from the global RNG (Accelerate seeds a
         # shuffled loader's generator from it), so a pending mid-pass resume
-        # is taken, with the save-time RNG state, before they exist (#525).
+        # is taken, with the save-time RNG state, before they exist.
         resume_position = self._take_resume_pass_position(budget)
         train_loaders, val_loaders = self._create_dataloaders_for_tasks(
             dataloader_kwargs, tasks=tasks
@@ -2747,7 +2747,7 @@ class Trainer:
         desc = f"Step-train [{task_names}]" if is_joint else f"Train {task_names}"
         self.model.train()
 
-        # Diagnostics (issue #724): enable faulthandler so a fatal abort — e.g.
+        # Diagnostics: enable faulthandler so a fatal abort — e.g.
         # the NCCL watchdog's SIGABRT on a collective timeout — dumps every
         # thread's stack, and optionally arm a per-step stall watchdog when
         # DASM2_STEP_WATCHDOG_SECONDS is set. Both are no-ops in the common case.
@@ -2825,12 +2825,12 @@ class Trainer:
                     # Draw one full accumulation window (G micro-batches) *before*
                     # any forward pass, so each task's window-total label count is
                     # known before its gradient is computed — the precondition for
-                    # per-task normalization (issue #688). The window always closes
+                    # per-task normalization. The window always closes
                     # at exactly ``gradient_accumulation_steps`` micro-batches, so
                     # every iteration steps the optimizer (no partial windows).
                     # Arm the per-step stall watchdog around the whole iteration —
                     # data draw included, since a freeze can sit in data loading
-                    # (issue #724). Cancelled once the window completes below.
+                    #. Cancelled once the window completes below.
                     if watchdog_seconds is not None:
                         faulthandler.dump_traceback_later(watchdog_seconds, repeat=True)
                     window_start_time = time.perf_counter()
@@ -2849,11 +2849,11 @@ class Trainer:
                     # Data-load time for this window (the _draw_micro_batch loop above),
                     # measured separately from forward+backward so the forensics can
                     # tell a slow data draw apart from slow compute — the cycle-1 slow
-                    # batches (issue #724) died with FLAT GPU memory, so whether the
+                    # batches died with FLAT GPU memory, so whether the
                     # time is host-side (data) or device-side (forward) is decisive.
                     data_load_ms = (time.perf_counter() - window_start_time) * 1000
 
-                    # Long-batch forensics (issue #724): flushed, per-rank, BEFORE the
+                    # Long-batch forensics: flushed, per-rank, BEFORE the
                     # forward, so a heavy window that SIGSEGVs one rank still leaves a
                     # record of its padded length + that rank's CUDA memory.
                     if long_batch_codons is not None:
@@ -2874,7 +2874,7 @@ class Trainer:
                                 flush=True,
                             )
 
-                    # Per-sequence window detail (issue #724): one flushed line per
+                    # Per-sequence window detail: one flushed line per
                     # suspect row (long or high-parent-N), pre-forward, so the exact
                     # PCPs in a crashing window are captured even if the step dies.
                     # Gated to the crash window (when DASM2_CAPTURE_WINDOW_STEPS is
@@ -2950,11 +2950,11 @@ class Trainer:
             # persistent-worker loaders survive across cycles (the persistent
             # Accelerator retains each prepared loader, so the iterators are
             # never GC'd and their workers never exit), leaking
-            # ~workers-per-rank each cycle until the host OOMs (issue #724).
+            # ~workers-per-rank each cycle until the host OOMs.
             self._teardown_loaders(train_loaders, val_loaders, train_iters)
 
     def _take_resume_pass_position(self, budget: StepBudget) -> Optional[_PassPosition]:
-        """Consume the pass position ``restore_training_state`` left (issue #525).
+        """Consume the pass position ``restore_training_state`` left.
 
         Returns it, with the current (save-time) RNG state, only for the first
         invocation after a mid-task resume (``budget.start_step > 0``). Every
@@ -3240,7 +3240,7 @@ class Trainer:
         optimizer_step_metrics = self._optimizer_step_metrics.compute()
         self._optimizer_step_metrics.reset()
         # Merged into the same dict rather than threaded through as its own
-        # logger-signature parameter (issue #1144): ``_log_eval_metrics``
+        # logger-signature parameter: ``_log_eval_metrics``
         # already forwards ``optimizer_step_metrics`` to the logger as a
         # flat per-key merge, so any ``combine_gradient_hooks`` diagnostics
         # (e.g. PCGradHook's conflict fraction) ride along for free. Empty
@@ -3370,7 +3370,7 @@ class Trainer:
         addition to ``common`` cannot silently shadow a branch-specific
         argument.
 
-        ``per_task_metrics`` (issue #738) maps task key to one flat dict
+        ``per_task_metrics`` maps task key to one flat dict
         merging every validation metric group eligible for that task
         (child-codon #620 + selection-factor #678 §7). In single-task mode
         the sole entry is unwrapped and forwarded as ``val_metrics``; in
@@ -3496,8 +3496,8 @@ class Trainer:
         numbers of batches, so it is not each task's own count.
 
         ``per_task_metrics`` maps task key to a single flat dict merging
-        every validation metric group eligible for that task (issue #738):
-        child-codon prediction (#620) and selection-factor distribution
+        every validation metric group eligible for that task:
+        child-codon prediction and selection-factor distribution
         (#678 §7). Eligibility is resolved by the capability-driven
         provider registry (:mod:`dasm2.training.metric_providers`) — the
         head's declared output space for SF, the loss's ``predict_codons``
@@ -3531,7 +3531,7 @@ class Trainer:
                 # (today ``move_batch_to_device`` returns a *new* dict, but
                 # this ordering doesn't depend on that).
                 n_pos = self._task_n_labels(task, batch)
-                # Same per-task denominator as training (issue #688): a
+                # Same per-task denominator as training: a
                 # SelfNormalizingLoss reports its own label unit, so logged
                 # train and val losses for the task stay on one scale (and the
                 # val loss that drives early stopping is not miscalibrated).
@@ -3853,7 +3853,7 @@ class Trainer:
             optimizer_config=self._reconstruct_optimizer_config(),
             new_lr=new_lr,
             module=self.unwrapped_model,
-            # Excludes head_optimizer's own parameters, if any (issue #1220).
+            # Excludes head_optimizer's own parameters, if any.
             exclude_module=(
                 self.head_optimizer_state.module
                 if self.head_optimizer_state is not None
@@ -3867,7 +3867,7 @@ class Trainer:
         if self.is_main_process:
             print(f"  Cycle {cycle + 1}: Reset optimizer with lr={new_lr:.3e}")
 
-        # Mirror the same LR reset for head_optimizer (issue #1220), seeded
+        # Mirror the same LR reset for head_optimizer, seeded
         # from its own initial LR rather than the main optimizer's — the two
         # optimizers' LRs never mix.
         if self.head_optimizer_state is not None:
@@ -3912,7 +3912,7 @@ class Trainer:
         """Rebuild an optimizer over ``module``'s params at ``new_lr``, backend-prepared.
 
         Shared rebuild sequence for both the main-optimizer and
-        head_optimizer (issue #1220) branches of
+        head_optimizer branches of
         :meth:`_reset_optimizer_with_adjusted_lr`: apply the adjusted LR to
         an otherwise-unchanged config, rebuild the optimizer, and hand it to
         the backend (DDP/accelerate wrap; no-op for ``SingleGPUBackend``).
@@ -3953,7 +3953,7 @@ class Trainer:
             current_lr: Current LR to blend from. Defaults to the main
                 optimizer's current LR (``_get_current_learning_rate()``).
                 Pass ``head_optimizer``'s current LR here to reuse this same
-                geometric-mean schedule for it (issue #1220) without mixing
+                geometric-mean schedule for it without mixing
                 the two optimizers' LR values together.
             initial_lr: Initial LR to blend toward. Defaults to
                 ``self.learning_rate`` (the main optimizer's initial LR).
@@ -4002,7 +4002,7 @@ class Trainer:
 
     @property
     def neutral_rates_source(self) -> Optional[NeutralRatesSource]:
-        """Where this run's training rates come from (issue #1299).
+        """Where this run's training rates come from.
 
         Read off the live training datasets when there are tasks. A Trainer
         built without them (``load_checkpoint``) returns the carried
@@ -4078,7 +4078,7 @@ class Trainer:
     ) -> None:
         """Refuse to export metadata that contradicts the model being saved.
 
-        The bug class this closes (issue #974) is ``export_metadata`` writing
+        The bug class this closes is ``export_metadata`` writing
         a ``heads`` / ``tasks`` view that disagrees with the weights
         ``save_model`` puts next to it. Two shapes of that were live: a head
         owning parameters produced a loud ``RuntimeError: Unexpected key(s)``
@@ -4148,7 +4148,7 @@ class Trainer:
         (issue #974). ``training_metadata.num_processes`` and
         ``training_metadata.mixed_precision`` are two more such non-model
         facts — launch-environment ones — and get the same treatment via
-        :meth:`_resolve_metadata_launch_info` (issue #1027).
+        :meth:`_resolve_metadata_launch_info`.
 
         Args:
             command: Command line arguments (defaults to sys.argv)
@@ -4162,7 +4162,7 @@ class Trainer:
             - training_metadata: Git, system, command, and notes
         """
         # Reconstruct the model config from the *model*, not from
-        # ``self.tasks`` (issue #974). ``heads`` used to be collected from
+        # ``self.tasks``. ``heads`` used to be collected from
         # ``task.head_config`` with a manual ``seen_head_types`` dedup pass,
         # which silently emitted ``heads: []`` for any Trainer built without
         # live Tasks — ``load_checkpoint`` being the one that matters, so a
@@ -4182,11 +4182,11 @@ class Trainer:
         # attribute, not per-task, and unlike encoder/head weights it's a
         # plain Python float (not a state_dict tensor), so a checkpoint
         # reloaded via create_model_from_config(training_config.model)
-        # silently loses it if it isn't in this block (#877: caused dasm2
-        # oe-plot/likelihood to reconstruct the model without wiggle,
-        # collapsing OE-overlap calibration — the same failure mode
-        # experiments/compara-training/results/v8eval/RESULTS.md documented
-        # as needing a manual post-hoc metadata patch on the v7/v8 checkpoints).
+        # silently loses it if it isn't in this block. The failure is silent
+        # and downstream: scoring code rebuilds the model without wiggle, and
+        # the calibration it produces is then wrong rather than absent, so the
+        # checkpoint has to carry the value -- the scoring path cannot recover
+        # it.
         model_config = self.unwrapped_model.to_config()
         head_configs: List[HeadConfig] = model_config.heads
         # Not a Trainer field: read off ``CoreModel``'s own tracking of
@@ -4199,7 +4199,7 @@ class Trainer:
         # run would otherwise get ``freeze_encoder=True`` written into its
         # checkpoint even though ``--freeze_encoder`` was never passed,
         # spuriously conflicting with a later ``--resume
-        # --freeze_encoder=False`` (issue #1076).
+        # --freeze_encoder=False``.
         freeze_encoder = self.unwrapped_model.encoder_frozen_via_freeze_call
         # v4 ``tasks: [...]`` block (issue #621 Task #6): one entry per
         # task with its declarative ``loss_config`` and ``loss_weight``.
@@ -4470,7 +4470,7 @@ class Trainer:
             )
         if state.rank_pass_positions is not None:
             # Each rank takes its own position, which under token-budget
-            # batching can differ from rank 0's (issue #525). The rest of the
+            # batching can differ from rank 0's. The rest of the
             # snapshot is rank 0's: batch order does not depend on it there,
             # and fixed-size ranks stay in step.
             if len(state.rank_pass_positions) != self.backend.num_processes:
@@ -4493,7 +4493,7 @@ class Trainer:
         # Restore initial learning rate (for geometric mean LR computation)
         self.learning_rate = state.learning_rate
 
-        # head_optimizer (issue #1220): fail fast on presence mismatch, same
+        # head_optimizer: fail fast on presence mismatch, same
         # pattern as the scheduler check above, then restore state/LR.
         if (self.head_optimizer_state is None) != (
             state.head_optimizer_state_dict is None
@@ -4503,7 +4503,7 @@ class Trainer:
                 f"{self.head_optimizer_state is not None}, checkpoint has "
                 f"head_optimizer_state={state.head_optimizer_state_dict is not None}"
             )
-        # head_scheduler (issue #1220): same presence-mismatch pattern.
+        # head_scheduler: same presence-mismatch pattern.
         # Independent of the head_optimizer check above — head_scheduler is
         # None whenever the configured scheduler isn't reduce_on_plateau,
         # even with a head_optimizer present (see _create_head_scheduler).
@@ -4571,7 +4571,7 @@ class Trainer:
 
         # Restore RNG states (capture_rng_states always produces a non-empty
         # dict). Under DDP each rank takes its own saved streams when the
-        # checkpoint holds them (issue #525), else rank 0's.
+        # checkpoint holds them, else rank 0's.
         assert state.rng_states, "TrainingState.rng_states must not be empty"
         rng_states = state.rng_states
         if state.rank_pass_positions is not None:
@@ -4594,7 +4594,7 @@ class Trainer:
 
         Under DDP this is a collective: every rank must call it in step,
         because it gathers each rank's pass position and RNG streams before
-        the main process writes (issue #525).
+        the main process writes.
 
         Args:
             output_dir: Directory to save checkpoint (not full filepath)
@@ -4624,7 +4624,7 @@ class Trainer:
         return output_path
 
     def _gather_rank_pass_positions(self) -> Optional[List[Dict[str, Any]]]:
-        """Under DDP, every rank's pass position and RNG streams, in rank order (#525).
+        """Under DDP, every rank's pass position and RNG streams, in rank order.
 
         A token-budget pass can deal ranks unequal batch counts, so ranks run
         out at different steps and their ``loader_cycle``, draw counts and
@@ -4680,7 +4680,7 @@ class Trainer:
 
         The filename carries this run's token (from the logger's run ID) so a
         second attempt writing into the same directory cannot produce a file
-        indistinguishable from the first's (issue #1011).
+        indistinguishable from the first's.
 
         Args:
             output_dir: Directory for the checkpoint
@@ -4735,7 +4735,7 @@ class Trainer:
         )
 
     def _reconstruct_head_optimizer_config(self) -> Optional[OptimizerConfig]:
-        """Reconstruct head_optimizer's OptimizerConfig (issue #1220).
+        """Reconstruct head_optimizer's OptimizerConfig.
 
         Delegates to :meth:`HeadOptimizerState.to_optimizer_config`. Returns
         None when no head_optimizer is configured.

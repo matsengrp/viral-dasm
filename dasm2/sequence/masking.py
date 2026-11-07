@@ -288,7 +288,7 @@ def filter_pcps_with_only_masked_mutations(
 
 
 # ---------------------------------------------------------------------------
-# UShER censor tables (#1079)
+# UShER censor tables
 # ---------------------------------------------------------------------------
 #
 # The functions above express a *codon-granular, clade-independent* mask, which
@@ -305,7 +305,7 @@ def filter_pcps_with_only_masked_mutations(
 # The coordinate table is the *more general* representation, though, so the codon
 # mask is expressible in it rather than being a parallel mechanism: a global codon
 # site is a clade-independent site mask, which is exactly what
-# `CensorSpec.site_nt_indices` already means. `with_global_codon_sites` (#1083)
+# `CensorSpec.site_nt_indices` already means. `with_global_codon_sites`
 # does that merge, so both mask files reach the loss through one code path.
 
 CENSOR_TABLE_COLUMNS = ("clade", "nt_site", "nt_index", "from_nt", "to_nt")
@@ -334,7 +334,7 @@ MASKED_NT_SITES_COLUMNS = ("nt_site", "nt_index", "reason")
 # agreeing is load-bearing, so a test pins it.
 
 
-# The censoring ablation's arms (#1079). "both" is the only coherent objective;
+# The censoring ablation's arms. "both" is the only coherent objective;
 # the two single-half modes exist to demonstrate that the halves do different
 # things, since each on its own still trains and produces a plausible curve.
 #
@@ -441,7 +441,7 @@ def empty_censor_spec() -> CensorSpec:
 def censored_codon_sites(spec: CensorSpec) -> Set[int]:
     """1-indexed codon sites this clade censors at least one candidate in.
 
-    The site class the fitness comparison splits on (#1079). A model-external
+    The site class the fitness comparison splits on. A model-external
     metric is computed separately over these sites and over the rest, because
     the two are where censoring predicts an effect and where it predicts at most
     an indirect one.
@@ -939,14 +939,14 @@ def _merge_global_nt_indices(
 def load_reference_base_idxs(
     fasta_path: Path, num_codons: Optional[int] = None
 ) -> Tensor:
-    """Base indices of a gene's reference sequence, for reversion censoring (#1099).
+    """Base indices of a gene's reference sequence, for reversion censoring.
 
     The input to :class:`~dasm2.data.transforms.CensorReferenceReversions`. Read
     from the aggregate manifest's ``founder_sequence``, which for v11 resolves to
     ``clade_founders/{gene}/19A.fa`` -- Wuhan-Hu-1, the reference every reversion
     in that rule reverts *to*. Resolved through the registry rather than as a raw
     path so a run against a different tree cannot silently pick up this tree's
-    file, the same reason ``global_mask_path`` takes that route (#1083).
+    file, the same reason ``global_mask_path`` takes that route.
 
     Args:
         fasta_path: Gene-local reference FASTA. Only the first record is read;

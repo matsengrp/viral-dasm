@@ -117,7 +117,7 @@ DEFAULT_TRAIN_FRACTION = 0.8
 
 # Training's main process runs single-threaded. This pin used to happen as a
 # side effect of importing the BL hooks; it is kept explicit here so moving
-# that pin into the BL workers (#1471) doesn't change training's
+# that pin into the BL workers doesn't change training's
 # floating-point reduction order.
 TRAINING_NUM_THREADS = 1
 
@@ -138,7 +138,7 @@ def _attach_info_print_handler(logger_name: str, print_fn: Callable[..., None]) 
     ``train_model`` runs attach this handler so selected INFO lines surface in
     the run log via the rank-guarded ``_print``: the CV-split helpers' held-out
     group ids and per-fold counts, and the Parquet backend's cache budget and
-    its source (issue #1272).
+    its source.
 
     Idempotent: re-invoking with the same ``print_fn`` does not stack handlers.
     """
@@ -372,11 +372,11 @@ def _validate_resume_cli_args(
     Note:
         ``--multi_gpu`` is *not* checked here. It used to be rejected because
         ``resume_training()`` hard-wired a ``SingleGPUBackend``; it now takes
-        the backend the run is launched under (issue #1027). The world size
+        the backend the run is launched under. The world size
         itself is validated by :func:`_validate_resume_world_size_matches`,
         which needs the backend and so runs later.
 
-        ``freeze_encoder`` is not checked here either (issue #1076):
+        ``freeze_encoder`` is not checked here either:
         ``TrainingConfig.freeze_encoder`` is now part of the checkpoint's
         recorded config, so ``resume_training()`` applies it (or not)
         exactly as the interrupted run had it, and a ``--freeze_encoder``
@@ -566,7 +566,7 @@ def _validate_resume_mixed_precision_matches(
     size — nothing downstream would ever fail. The flag is a launch-time
     argument, not part of ``TrainingConfig``, so ``resume_training`` cannot
     recover it from the checkpoint's config; it is recorded in
-    ``training_metadata.mixed_precision`` instead (issue #1027).
+    ``training_metadata.mixed_precision`` instead.
 
     Args:
         checkpoint_path: Path to the resume checkpoint (for the error message).
@@ -738,7 +738,7 @@ def _create_model_and_maybe_load_checkpoint(
     # Migrate legacy state dict keys (e.g., self_attn → self_attention) so
     # warm-starting from an older checkpoint doesn't silently miss every
     # renamed parameter. ``--resume`` already migrates via resume_training();
-    # this is the fine-tuning path's equivalent (issue #199).
+    # this is the fine-tuning path's equivalent.
     serialization_version = metadata.get("serialization_version", 1)
     state_dict = migrate_legacy_state_dict(state_dict, model, serialization_version)
 
@@ -964,7 +964,7 @@ def train_model_from_datasets(  # noqa: C901
         checkpoint_every_n_evals: If set, save checkpoints every N evaluations
             during training (in addition to cycle-end checkpoints).
         checkpoint_every_n_steps: If set, also save every N optimizer steps,
-            keeping only the newest two such saves (issue #1640).
+            keeping only the newest two such saves.
         no_log: Disable training logging (default: enabled).
         checkpoint: Path to checkpoint file to load weights from for fine-tuning.
 
@@ -1031,7 +1031,7 @@ def train_model_from_datasets(  # noqa: C901
             ``init_branch_lengths_from_input``. True skips cycle 0's
             branch-length cold start, so cycle 0 trains at the input's
             ``branch_length`` column, and re-optimizes after every cycle as
-            usual (issue #1503). Mutually exclusive with both freezes.
+            usual. Mutually exclusive with both freezes.
         save_training_state: If set, override the config's
             ``save_training_state``. True makes ``CheckpointSaveHook`` save
             full resumable checkpoints (optimizer, scheduler, RNG, step
@@ -1049,7 +1049,7 @@ def train_model_from_datasets(  # noqa: C901
             what actually applies (``resume_training()`` rebuilds the model
             from the checkpoint's config); passing an explicit value here
             that conflicts with the checkpoint's raises rather than being
-            silently ignored (issue #1076).
+            silently ignored.
         resume: Path to a resumable checkpoint (one saved with
             ``save_training_state=True``). Reconstructs the Trainer via
             ``resume_training()``, restoring optimizer/scheduler state, RNG,
@@ -1160,7 +1160,7 @@ def train_model_from_datasets(  # noqa: C901
             "config."
         )
 
-    # head_optimizer (issue #1220) used to have the same unsupported-with-
+    # head_optimizer used to have the same unsupported-with-
     # --resume gap as combine_gradient_hooks above, but resume_training()
     # now rebuilds it from the CHECKPOINT's own config the same way it
     # rebuilds the main optimizer — this run's own ``training_config.head_optimizer``
@@ -1483,7 +1483,7 @@ def train_model_from_datasets(  # noqa: C901
     # (validated-zero-unless-resuming) CLI value and the other two stay 0
     # (only the debug --checkpoint+--start_cycle combo skips whole cycles;
     # it has no notion of a mid-cycle task/step position).
-    # Top-level (not per-task) gradient-combination hooks (issue #1144),
+    # Top-level (not per-task) gradient-combination hooks,
     # e.g. PCGradHook — resolved once here rather than per-task, since
     # combining gradients is inherently cross-task. Empty by default, which
     # reproduces today's plain-sum combination exactly (Trainer's own
@@ -1719,7 +1719,7 @@ def _resolve_censor_table(
 
     Merges mat-pcp's global mask into every clade when one is configured -- either
     ``masked_nt_sites_file`` (mat-pcp#153, nucleotide-granular, preferred) or the
-    older ``codon_sites_to_mask_file`` (#1083), never both. Every mask file reaches
+    older ``codon_sites_to_mask_file``, never both. Every mask file reaches
     the loss through one table, because a clade-independent site mask is what
     ``CensorSpec.site_nt_indices`` already means; see
     :func:`~dasm2.sequence.masking.with_global_nt_sites`.
@@ -1820,7 +1820,7 @@ def _resolve_reference_bases(
     training_config: "TrainingConfig",
     _print: Callable[..., None],
 ) -> Optional["torch.Tensor"]:
-    """Load the configured reference sequence, or None when the rule is off (#1099).
+    """Load the configured reference sequence, or None when the rule is off.
 
     A sibling of :func:`_resolve_censor_table` and deliberately independent of
     it: the reversion rule is clade-independent, so this returns a reference
@@ -1903,11 +1903,11 @@ def _load_whichmut_head_data(
         cv_split: Optional cross-validation fold spec. Bypasses the
             ``in_train`` column and registry holdouts to compute the split
             on the fly.
-        censor_table: Optional UShER censor table (#1079), applied to both
+        censor_table: Optional UShER censor table, applied to both
             splits.
         censor_mode: Which half of censoring to apply.
         reference_base_idxs: Clade-founder bases for reversion censoring.
-        cache_budget: Parquet row-group cache RAM budget inputs (#1272).
+        cache_budget: Parquet row-group cache RAM budget inputs.
 
     Returns:
         Tuple of (train_item, val_item).
@@ -2040,7 +2040,7 @@ def train_model(  # noqa: C901
         checkpoint_every_n_evals: If set, save checkpoints every N evaluations
             during training (in addition to cycle-end checkpoints).
         checkpoint_every_n_steps: If set, also save every N optimizer steps,
-            keeping only the newest two such saves (issue #1640).
+            keeping only the newest two such saves.
         no_log: Disable training logging (default: enabled).
         checkpoint: Path to checkpoint file to load weights from for fine-tuning.
             See ``train_model_from_datasets`` for detailed behavior documentation
@@ -2086,7 +2086,7 @@ def train_model(  # noqa: C901
             uses the config value. Recorded in the checkpoint, so
             ``--resume`` continues with the same frozen/unfrozen encoder
             the interrupted run had; an explicit ``--freeze_encoder`` that
-            conflicts with the checkpoint's own value raises (issue #1076).
+            conflicts with the checkpoint's own value raises.
         freeze_branch_lengths_after_first_cycle: If set, override the config's
             ``freeze_branch_lengths_after_first_cycle``. True lets cycle-0
             ``pre_cycle`` set the branch lengths and then holds them fixed for
@@ -2103,7 +2103,7 @@ def train_model(  # noqa: C901
             ``init_branch_lengths_from_input``. True skips cycle 0's
             branch-length cold start, so cycle 0 trains at the input's
             ``branch_length`` column, and re-optimizes after every cycle as
-            usual (issue #1503). Mutually exclusive with both freezes.
+            usual. Mutually exclusive with both freezes.
         save_training_state: If set, override the config's
             ``save_training_state``. True makes checkpoints resumable
             (usable with ``--resume``) instead of weights-only. None uses

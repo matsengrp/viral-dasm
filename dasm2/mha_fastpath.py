@@ -19,7 +19,7 @@ def disable_mha_fastpath() -> None:
     ``B * nhead * L**2`` exceeds ``2**31 - 1`` the kernel reads out of bounds and
     the process dies with ``CUDA error: an illegal memory access was
     encountered``. The cutoff is exactly that, measured on an L40S at two
-    geometries (issue #1005): B=536/L=1000 and B=2047/L=500 pass, B=537/L=1000
+    geometries: B=536/L=1000 and B=2047/L=500 pass, B=537/L=1000
     and B=2148/L=500 fault.
 
     Disabling it routes attention through ``scaled_dot_product_attention``, which

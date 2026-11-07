@@ -22,7 +22,7 @@ def use_system_arrow_pool() -> None:
     pyarrow 25 bundles mimalloc v3, which marks its arenas ``MADV_HUGEPAGE``.
     On a host with transparent huge pages at ``madvise``, each page fault in
     those arenas then compacts memory synchronously, and a DataLoader worker's
-    multi-GB row-group cache stalls in the kernel (issue #1368). pyproject.toml
+    multi-GB row-group cache stalls in the kernel. pyproject.toml
     requires pyarrow>=25, so every install has that mimalloc. The pools' costs
     are measured in ``experiments/2026-10-03-pyarrow-thp-pool``.
 

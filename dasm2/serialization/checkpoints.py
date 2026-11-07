@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 
 # Patch script for checkpoints with an ambiguous sf_projection (see
 # _assert_unambiguous_sf_projection below). Also referenced by
-# scripts/detect_wiggle_regression.py's mirror check (#969) — single source
+# scripts/detect_wiggle_regression.py's mirror check — single source
 # of truth so a future rename only needs one edit.
 WIGGLE_PATCH_SCRIPT_PATH: Final = (
     "experiments/compara-training/patch_checkpoint_wiggle.py"
@@ -222,9 +222,9 @@ def migrate_legacy_state_dict(
     """Migrate legacy DASM2 checkpoint keys to current model layout.
 
     Two rename passes are applied per key when needed:
-      - TransformerBlock rename (#379, #444): self_attn → self_attention,
+      - TransformerBlock rename: self_attn → self_attention,
         linear1/2 → feed_forward.linear1/2, norm1/2 → post_attn_norm/post_ffn_norm.
-      - Shared SF projection rename (#513):
+      - Shared SF projection rename:
         prediction_heads.{Head}.prediction_layer.* → sf_projection.projection.*.
 
     .. deprecated::
@@ -603,7 +603,7 @@ def _assert_unambiguous_sf_projection(
     ``commit_sha`` and ``dirty`` status are incidental to running from an
     active experiment clone, not evidence of clone staleness relative to
     #895. In every case the true ``wiggle_beta`` is unknowable from the
-    metadata alone (#896) — reconstructing it anyway would silently apply
+    metadata alone — reconstructing it anyway would silently apply
     whatever wiggle default the *loading* commit happens to have, rather
     than what the checkpoint actually trained with. This mechanism is
     exactly what produced the incidents behind #896, #964's Phase 0, and
@@ -688,7 +688,7 @@ def load_checkpoint(
             of the ``model_path`` recorded in the checkpoint's
             ``training_config.neutral_model``. The recorded path is absolute
             under whichever host's artifact root wrote it, so it is often
-            missing elsewhere (#1473). The caller vouches that this is the
+            missing elsewhere. The caller vouches that this is the
             same neutral; nothing here can check it. Re-saving the returned
             Trainer records this path.
 
@@ -741,7 +741,7 @@ def load_checkpoint(
     # the fabricated SingleGPUBackend's 1/"no" — including the None case,
     # which must stay None rather than become a fact the source never stated.
     source_training_metadata = metadata.get("training_metadata", {})
-    # Where training's rates came from (issue #1299); None for checkpoints
+    # Where training's rates came from; None for checkpoints
     # that predate the field. Evaluation checks it against the eval file, and
     # a re-save carries it through, since this Trainer has no datasets.
     recorded_rates_source = metadata.get("neutral_rates_source")
@@ -825,11 +825,11 @@ def _build_inference_trainer(
     # even possible here — a ``Task`` bundles the dataset it trains on
     # (DESIGN D5) and a checkpoint carries no datasets. The parsed
     # ``TaskConfig`` list therefore rides along in ``source_task_configs``
-    # so a re-save doesn't drop the ``tasks: [...]`` block (issue #974); see
+    # so a re-save doesn't drop the ``tasks: [...]`` block; see
     # ``Trainer.__init__`` for why that fallback is needed.
     # ``source_launch_info`` rides along for the same reason: the backend
     # below is fabricated, so its world size of 1 and precision mode of "no"
-    # would overwrite the recorded launch facts on any re-save (issue #1027).
+    # would overwrite the recorded launch facts on any re-save.
     return Trainer(
         model=model,
         neutral_model=neutral_model,
@@ -1055,9 +1055,9 @@ def resume_training(
     size other than the one the checkpoint was trained at is *not* supported
     and is rejected upstream by ``_validate_resume_world_size_matches`` —
     the restored LR schedule was annealed for the original effective batch
-    size, and rescaling it is a separate design question (issue #1027).
+    size, and rescaling it is a separate design question.
 
-    Rebuilds ``head_optimizer`` (issue #1220) from the checkpoint's own
+    Rebuilds ``head_optimizer`` from the checkpoint's own
     ``training_config.head_optimizer``/``head_optimizer_head_type`` the same
     way it rebuilds the main optimizer — this run's own tasks/backend are
     the only inputs that come from the caller; every optimizer/scheduler
@@ -1066,7 +1066,7 @@ def resume_training(
     backend, mirroring ``create_trainer``'s own guard.
 
     The trainer's ``checkpoint_id`` stays ``None``, so the resume reads and
-    writes the same branch-length cache names as the run it resumes (#1876).
+    writes the same branch-length cache names as the run it resumes.
 
     Returns a :class:`ResumeResult` dataclass. Pass the fields to
     :meth:`Trainer.multi_cycle_train` (or ``multi_cycle_train_joint``) to
@@ -1171,7 +1171,7 @@ def resume_training(
     # requires_grad-filtered parameters below, and before the DDP wrap in
     # backend.prepare_model_and_optimizer — flipping requires_grad after
     # the wrap deadlocks DDP's reducer, which registers every
-    # requires-grad parameter at construction time (issue #1076).
+    # requires-grad parameter at construction time.
     if training_config.freeze_encoder:
         model.freeze_encoder()
 

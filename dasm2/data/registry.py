@@ -424,7 +424,7 @@ def drop_index_artifact_columns(df: pd.DataFrame) -> pd.DataFrame:
 
     PCP CSVs are written with their index, so every one read without
     ``index_col`` gains such a column, and a Parquet file built from that
-    frame keeps it. They are never meant as data (issue #1182).
+    frame keeps it. They are never meant as data.
     """
     artifacts = [
         column
@@ -613,7 +613,7 @@ def filter_naughty_clonal_families(
 ) -> pd.DataFrame:
     """Filter out known problematic (sample_id, family) pairs.
 
-    Public (issue #1125) because ``dasm2.data.mlm`` is now a second caller:
+    Public because ``dasm2.data.mlm`` is now a second caller:
     the MLM loader bypasses ``_load_component_dataframes`` (its
     ``detect_compatible_handler(cols, ("parent", "child"))`` requires
     parent columns MLM's child-only data lacks), but it still needs the
@@ -740,7 +740,7 @@ def preprocess_rows_for_split(
 ) -> pd.DataFrame:
     """Apply the *row-dropping* preprocessing that must precede any CV split.
 
-    This is the single parity seam (issue #1125) between the DASM/whichmut
+    This is the single parity seam between the DASM/whichmut
     load path (``_preprocess_component`` below) and the MLM load path
     (``dasm2.data.mlm.load_mlm_train_val``). ``group_kfold_in_train`` hands
     each group to the lightest fold so far, keyed on per-group *row counts*

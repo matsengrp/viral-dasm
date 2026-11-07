@@ -494,7 +494,7 @@ HeadConfig = Annotated[
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# LossConfig discriminated union (issue #621).
+# LossConfig discriminated union.
 # Each variant maps 1:1 to a `Loss(nn.Module)` class via `create_loss` in
 # `dasm2.losses.factory`. `loss_type` is the discriminator. Defaults are
 # unambiguous per loss family — the migration script populates these from
@@ -906,7 +906,7 @@ class ModelConfig(BaseModel):
     def _validate_site_masked_heads(self) -> None:
         """Check the heads, encoder and projection a site-masked DASM needs.
 
-        The masked head must be the model's only head (#1550), it feeds the
+        The masked head must be the model's only head, it feeds the
         mask token, index ``MLM_MASK_IDX = 22``, to a plain
         TransformerEncoder, and its F has no defined wiggle.
         """
@@ -1176,7 +1176,7 @@ class TrainingConfig(BaseModel):
         "iff head_optimizer is set; the named head must exist on the model.",
     )
 
-    # Training hyperparameters — step-based budget (issue #578).
+    # Training hyperparameters — step-based budget.
     # ``epochs`` was removed: legacy configs that still set it fail to parse
     # because of ``extra="forbid"`` below, forcing the author to rewrite the
     # budget deliberately (see also ReduceOnPlateauSchedulerConfig for the
@@ -1416,7 +1416,7 @@ class TrainingConfig(BaseModel):
         "precomputed regardless of this setting.",
     )
 
-    # UShER censoring (#1079). Two paths rather than one plus a derived sibling:
+    # UShER censoring. Two paths rather than one plus a derived sibling:
     # the roster is what makes a clade censoring nothing distinguishable from a
     # mistyped clade name, so a silently-absent sidecar would reintroduce exactly
     # the failure it exists to prevent.
@@ -1434,7 +1434,7 @@ class TrainingConfig(BaseModel):
         "mutations contributes no rows, so without the roster it is "
         "indistinguishable from a typo'd clade name.",
     )
-    # The other mask file (#1083). Named for `{gene}_codon_sites_to_mask.txt` and
+    # The other mask file. Named for `{gene}_codon_sites_to_mask.txt` and
     # for the manifest's `sites_to_mask` / `resolve_sites_to_mask()`, so the config
     # key, the manifest field and the filename stay one vocabulary.
     codon_sites_to_mask_file: Optional[Path] = Field(
@@ -1460,7 +1460,7 @@ class TrainingConfig(BaseModel):
         "codon_sites_to_mask_file. Requires the censored_mutations_file/"
         "censored_clades_file pair.",
     )
-    # The third source of censored candidates (#1099). Unlike the two above this
+    # The third source of censored candidates. Unlike the two above this
     # one stands alone -- see `_validate_censoring` for why that is the whole
     # point rather than an oversight.
     reference_sequence_file: Optional[Path] = Field(
@@ -1541,12 +1541,12 @@ class TrainingConfig(BaseModel):
         is silently never read -- the failure mode this whole change is about.
 
         The global mask -- ``masked_nt_sites_file`` (mat-pcp#153) or the older
-        ``codon_sites_to_mask_file`` (#1083), never both -- rides on top of that
+        ``codon_sites_to_mask_file``, never both -- rides on top of that
         pair rather than standing alone; see the comments at their checks for why
         global-only censoring is deliberately unrepresentable and why the two
         granularities exclude each other.
 
-        ``reference_sequence_file`` (#1099) is the opposite case and **must** be
+        ``reference_sequence_file`` is the opposite case and **must** be
         permitted to stand alone. Its rule is clade-independent by construction --
         "at every nucleotide where the parent differs from the reference" needs no
         clade -- so requiring the per-clade pair the way the global mask does

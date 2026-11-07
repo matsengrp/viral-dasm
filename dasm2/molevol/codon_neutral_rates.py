@@ -260,7 +260,7 @@ def censored_codon_entries(
     partition function, which masks on ``neutral_rates_gathered > 0``. This
     resolves *which* entries of the ``(L, 64)`` destination-indexed rate tensor a
     censored nucleotide corresponds to, reusing the ``(64, 9)`` candidate tables
-    the rate computation itself is built on (#1079).
+    the rate computation itself is built on.
 
     Args:
         codon_parents_idxs: Parent codon indices, shape ``(L,)``. Entries >= 64

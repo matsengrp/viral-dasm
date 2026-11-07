@@ -106,7 +106,7 @@ class AbstractNeutralModel(ABC):
 
     # Default: no multihit correction. Subclasses override as needed.
     multihit_model: Optional["HitClassModel"] = None
-    # Default: no tandem term (issue #1683). Set only on PerFamilyGTR, from
+    # Default: no tandem term. Set only on PerFamilyGTR, from
     # its config; every neutral-probability consumer reads it from here.
     tandem: Optional["TandemTerm"] = None
     # Set by from_catalog() for portable config round-tripping.

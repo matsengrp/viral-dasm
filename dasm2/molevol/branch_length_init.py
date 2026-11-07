@@ -25,7 +25,7 @@ Background (slope-based):
     - R² = 0.58 (origin-centered, no-intercept)
     - Lower R² reflects heterogeneous gene families spanning broad divergence
     - Recalibrated with mutable-site denominator after phyz 1043 gap-preserving
-      PCP rebuild (issue #512); gaps mapped to N and excluded from denominator
+      PCP rebuild; gaps mapped to N and excluded from denominator
     - Leaf edges (slope=1.60) vs internal edges (slope=0.80) differ 2x
 
     The slope of 1.76 reflects purifying selection: observed mutations are ~57% as
@@ -62,7 +62,7 @@ Three implementations of the same mutation frequency:
     fallback for in-memory and precomputed datasets. ``_mut_freqs_from_arrow``
     reduces whole blocks of rows straight off Parquet's Arrow string buffers
     and is the cold-start path for Parquet-backed datasets, where materializing
-    the NT columns as Python strings dominated the hook (issue #992).
+    the NT columns as Python strings dominated the hook.
     ``_compute_tensor_mut_freq`` (in the BL hook) works from codon index
     tensors during re-optimization. The first two agree bit for bit, pinned by
     exact-equality tests against a retained scalar oracle; the third differs
@@ -332,7 +332,7 @@ Not a Parquet column: the Parquet dataset factory fills it from
 
 
 class PerSourceStrategy(BranchLengthInitStrategy):
-    """Apply each row's own source file's strategy (issue #1289).
+    """Apply each row's own source file's strategy.
 
     A multiname Parquet spec joins files whose writers each fit their own
     strategy. This dispatches every edge to the strategy stamped on the file
@@ -482,7 +482,7 @@ def _mut_freq_from_segments(
 
     The body of :func:`compute_adjusted_mutation_frequency`, split out so that
     per-edge loops can hoist the ``split`` and ``get_rate_adjustments()`` calls
-    out of the loop (issue #992). The site mask is computed on raw ASCII bytes
+    out of the loop. The site mask is computed on raw ASCII bytes
     via ``np.frombuffer`` rather than by iterating characters, which is what
     makes full-corpus cold-start initialization tractable.
 
@@ -778,7 +778,7 @@ def _mutation_frequencies(dataset: "BranchLengthDatasetBundle") -> np.ndarray:
         return mutation_frequencies_from_parquet(backend, dataset.segment_handler)
 
     # get_rate_adjustments() allocates a fresh tensor on every call, which at
-    # multi-million-edge scale is pure overhead (#992); same for the split.
+    # multi-million-edge scale is pure overhead; same for the split.
     rate_adjustments = dataset.segment_handler.get_rate_adjustments().tolist()
     nt_parents, nt_children = dataset.nt_parents, dataset.nt_children
     return np.array(

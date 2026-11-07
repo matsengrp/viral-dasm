@@ -50,7 +50,7 @@ def _long_batch_log_codons() -> Optional[int]:
     the forward, a flushed line for any accumulation window whose padded
     sequence length reaches the threshold, with that rank's CUDA memory. This
     catches the heavy long-sequence batches that crash one rank's GPU under DDP
-    load imbalance (issue #724) — the line is flushed pre-compute, so it survives
+    load imbalance — the line is flushed pre-compute, so it survives
     even a SIGSEGV in the step it describes. Unset/non-positive ⇒ disabled.
     """
     raw = os.environ.get("DASM2_LOG_LONG_BATCH_CODONS")
@@ -64,7 +64,7 @@ def _long_batch_log_codons() -> Optional[int]:
 
 
 def _capture_window_detail_codons() -> Optional[int]:
-    """Valid-codon threshold for per-sequence window-detail forensics (issue #724).
+    """Valid-codon threshold for per-sequence window-detail forensics.
 
     Set ``DASM2_CAPTURE_WINDOW_DETAIL=<int>`` to dump, on EVERY rank and BEFORE
     the forward, one flushed ``[window-row]`` line per sequence whose true

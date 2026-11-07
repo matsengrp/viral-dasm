@@ -89,7 +89,7 @@ class TrainingState:
     """Complete mutable training state for checkpoint resume.
 
     Captures everything needed to resume training at the optimizer step where
-    it was saved, including mid-cycle, mid-task and mid-pass (issue #525).
+    it was saved, including mid-cycle, mid-task and mid-pass.
 
     The resumed run's weights match an uninterrupted run's when each train
     loader's batch order is reproduced by its epoch and the pass-start RNG
@@ -140,8 +140,8 @@ class TrainingState:
         head_optimizer_head_type -> trainer.head_optimizer_head_type.value (issue #1220, None if unset)
         learning_rate -> trainer.learning_rate (initial LR for the cycle-boundary reset)
         train_iter_draws -> trainer._train_iter_draws (issue #525, None on older checkpoints)
-        pass_start_rng_states -> trainer._pass_start_rng_states (issue #525)
-        rank_pass_positions -> every rank's loader_cycle / draws / resets under DDP (issue #525)
+        pass_start_rng_states -> trainer._pass_start_rng_states
+        rank_pass_positions -> every rank's loader_cycle / draws / resets under DDP
 
     Construct exclusively via :meth:`from_dict` when deserializing so legacy
     schemas get migrated. The dataclass constructor is reserved for code that
@@ -279,7 +279,7 @@ class TrainingState:
             # ``set_rng_state_all`` enumerates the list and writes device ``i``
             # per entry, so a longer list than this host has devices addresses
             # a nonexistent ordinal and dies with an opaque torch error.
-            # Name both counts instead (issue #1027).
+            # Name both counts instead.
             saved = list(rng_states["cuda"])
             visible = torch.cuda.device_count()
             if len(saved) != visible:

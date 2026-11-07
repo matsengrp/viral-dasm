@@ -294,7 +294,7 @@ def neutral_codon_probs_of_seq(
         multihit_model: Optional multihit model
         codon_pref_log: Optional log-space codon preference vector, shape (64,).
             Passed through to neutral_codon_probs().
-        tandem: Optional tandem term (issue #1683). Its τ comes from each
+        tandem: Optional tandem term. Its τ comes from each
             site's ``nt_rates`` and ``branch_length``. None, or a term with
             both rates zero, is a no-op.
 
@@ -398,7 +398,7 @@ def neutral_codon_probs_with_padding(
         codon_pref_log: Optional log-space codon preference vector, shape (64,).
             Passed through to neutral_codon_probs().
         tandem: Optional tandem term, passed through to
-            neutral_codon_probs_of_seq() (issue #1683).
+            neutral_codon_probs_of_seq().
 
     Returns:
         Neutral codon probabilities [target_length, 64] with padding applied if target_length specified,

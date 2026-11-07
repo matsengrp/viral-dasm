@@ -832,7 +832,7 @@ class FlashVarlenBatch(NamedTuple):
 
     Built once per forward by :func:`flash_varlen_batch` and passed to each
     layer, so the stack pays one host sync per forward instead of several per
-    layer (issue #1292).
+    layer.
 
     Attributes:
         cu_seqlens: int32 ``(B + 1,)`` cumulative sequence lengths.

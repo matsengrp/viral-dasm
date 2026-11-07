@@ -122,7 +122,7 @@ class SourceLaunchInfo(BaseModel):
     world-size-4 bf16 checkpoint's metadata to world size 1 and ``"no"`` on
     any load-mutate-save workflow — the round-trip defect class of issue #974
     through a different door. Such a Trainer carries the parsed values here
-    instead and ``export_metadata`` prefers them (issue #1027).
+    instead and ``export_metadata`` prefers them.
 
     Presence of this object is what marks a Trainer as carrying: ``None`` on
     the Trainer means "the backend is live, read the facts off it", while a
@@ -170,7 +170,7 @@ class BaseTrainingMetadata(BaseModel):
         1: Original format (nn.TransformerEncoderLayer key names)
         2: TransformerBlock key names (PR #379): self_attn → self_attention,
            linear1/2 → feed_forward.linear1/2
-        3: Position-aware norm names (#444): norm1 → post_attn_norm,
+        3: Position-aware norm names: norm1 → post_attn_norm,
            norm2 → post_ffn_norm. Note that v3 is layout-ambiguous:
            checkpoints stamped with v3 may carry *either* the old per-head
            ``prediction_heads.{Head}.prediction_layer.*`` keys (pre-#513)
@@ -180,7 +180,7 @@ class BaseTrainingMetadata(BaseModel):
            prediction_heads.{Head}.prediction_layer.* moved to
            sf_projection.projection.*. v4 is the first version that
            *guarantees* the post-#513 layout.
-        5: Task/loss separation (#621): per-task ``LossConfig`` is owned by
+        5: Task/loss separation: per-task ``LossConfig`` is owned by
            the new ``training_config.tasks: [...]`` block; head_configs are
            deduplicated; loss-owned parameters live under
            ``state_dict["task_losses.<key>.*"]`` (was ``prediction_heads.<head>.*``).

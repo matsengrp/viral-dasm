@@ -108,7 +108,7 @@ def per_segment_positions_of_layout(layout: torch.Tensor) -> torch.Tensor:
     concatenated sequence, each segment (chain) restarts its position count at
     0 right after the preceding separator. This makes a segment's positional
     encoding independent of the lengths of the segments that precede it — the
-    key property motivating per-segment positional encoding (see #334).
+    key property motivating per-segment positional encoding.
 
     The reset point for a position is the index immediately following the most
     recent separator (``layout == 0``) strictly before it, or 0 when there is

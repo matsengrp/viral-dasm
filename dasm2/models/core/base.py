@@ -64,7 +64,7 @@ class CoreModel(nn.Module):
         # ``ESM2EncoderConfig.freeze_parameters``, which defaults to
         # ``True``), so a bare ``all(not p.requires_grad ...)`` check can't
         # tell "this run asked for head-only fine-tuning" apart from "this
-        # encoder always freezes itself" (issue #1076).
+        # encoder always freezes itself".
         self._encoder_frozen_via_freeze_call = False
 
     def _validate_sf_projection(self) -> None:
@@ -269,7 +269,7 @@ class CoreModel(nn.Module):
                 )
             heads_dict[head_config.head_type] = head_config
 
-        # Function-local: dasm2.heads.factory imports dasm2.models (#1294).
+        # Function-local: dasm2.heads.factory imports dasm2.models.
         from dasm2.heads.factory import create_head
 
         # Construct heads from configs

@@ -95,7 +95,7 @@ class Task:
     the dataset, collator, and worker_init_fn so that the trainer and hooks
     can access them uniformly without knowing whether a bundle is present.
 
-    The Task owns the loss module and its config (issue #621): the head is a
+    The Task owns the loss module and its config: the head is a
     pure forward, and ``Loss(predictions, batch)`` is what the trainer
     invokes. ``loss_config`` is required so the trainer can build a
     state-dict key naming scheme and round-trip loss metadata to checkpoints.

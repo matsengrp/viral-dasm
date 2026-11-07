@@ -350,7 +350,7 @@ def scored_substitution_flags_from_arrow(
 
     Takes one Arrow string column per segment, as the Parquet files store
     them, and reads their byte buffers through
-    :func:`dasm2.data.arrow_strings.iter_segment_blocks` (issue #992), so it
+    :func:`dasm2.data.arrow_strings.iter_segment_blocks`, so it
     builds no Python strings. A null is an absent segment, as
     ``make_parquet_row_converter`` reads it.
     Every segment is a whole number of codons, so a ``^^^`` joined into one

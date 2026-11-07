@@ -122,7 +122,7 @@ def needs_masked_marginal_core_model(heads: List[HeadConfig]) -> bool:
 
 
 def needs_site_masked_core_model(heads: List[HeadConfig]) -> bool:
-    """Check if any head requires the SiteMaskedCoreModel (issue #1550).
+    """Check if any head requires the SiteMaskedCoreModel.
 
     Derives from HEAD_REGISTRY + requires_site_masked_core_model ClassVar,
     mirroring needs_masked_marginal_core_model.

@@ -86,12 +86,15 @@ def read_parquet_file_metadata(source: "pq.ParquetFile | Path") -> dict[str, str
 
 
 #: The default cache bound, in parquet ``total_byte_size`` bytes: as many row
-#: groups as fit 2 GiB by that measure (~24 row groups, ~14 GB decoded, on the
-#: v10 Compara corpus), capped at the working set. A RAM bound exists at all
-#: because an uncapped cache across 8 forked DataLoader workers reached ~68 GB
-#: of host RAM and OOM-killed a worker (issue #724). Sizing it from host RAM
-#: instead was measured and dropped in issue #1272: 8 workers at this bound
-#: ran within 1.2% of a 30-row-group cache, with no stall of 1 s or more.
+#: groups as fit 2 GiB by that measure, capped at the working set.
+#:
+#: A bound exists at all because the cache is per-worker: each forked
+#: DataLoader worker builds its own, so an uncapped cache multiplies by the
+#: worker count and can exhaust host RAM. Bounding row groups rather than
+#: sizing from host RAM is deliberate -- a row group's decoded size varies
+#: with the corpus, so a RAM-derived bound is not more predictable, only
+#: harder to reason about. Override per run with
+#: ``DASM2_PARQUET_CACHE_BUDGET_GB``.
 _CACHE_FLOOR_PARQUET_BYTES = 2 * 1024**3
 
 #: Environment override for the cache budget in GB (a positive float). Takes
@@ -117,7 +120,7 @@ SEQUENTIAL_SWEEP_CACHE_SIZE = 8
 
 @dataclass(frozen=True)
 class CacheBudgetSpec:
-    """Inputs for one backend's row-group cache budget (issue #1272).
+    """Inputs for one backend's row-group cache budget.
 
     Attributes:
         budget_gb: The ``parquet_cache_budget_gb`` config value; None keeps
@@ -163,7 +166,7 @@ def default_cache_row_groups(rg_parquet_bytes: Sequence[int]) -> int:
     The pre-#1272 rule, kept as the default: as many median-size row groups as
     fit ``_CACHE_FLOOR_PARQUET_BYTES`` of parquet ``total_byte_size``, and at
     most the number of row groups there are. The median keeps one short final
-    row group from inflating the count (issue #724).
+    row group from inflating the count.
 
     Args:
         rg_parquet_bytes: Parquet ``total_byte_size`` per row group.
@@ -184,7 +187,7 @@ def typical_decoded_row_group_bytes(
     measured in; see ``ParquetBackend._get_row`` for why arrow ``nbytes`` is
     the measure. Picked by parquet ``total_byte_size``, not row count: on the
     v10 corpus nearly every row group has 8192 rows but sizes range 37-230 MB,
-    while decoded / parquet bytes stays within 5.9-7.5 (issue #1272). Decodes
+    while decoded / parquet bytes stays within 5.9-7.5. Decodes
     that one row group.
 
     Args:
@@ -213,7 +216,7 @@ _EXPLICIT_BUDGET_WARN_FRACTION = 0.25
 
 @dataclass(frozen=True)
 class CachePlan:
-    """Bounds for one backend's row-group LRU cache (issue #1272).
+    """Bounds for one backend's row-group LRU cache.
 
     Attributes:
         max_entries: Row-group count bound.
@@ -413,7 +416,7 @@ def _working_set_row_groups(rg_sizes: list[int], buffer_size: int) -> int:
     already-streamed row groups live, so the working set runs well above
     buffer/median rows. Uses the MEDIAN row-group size, not the minimum: a
     single 16-row group among 1531-row groups would otherwise push the bound
-    to ~every row group (issue #724). Times a straggler margin.
+    to ~every row group. Times a straggler margin.
     """
     if not rg_sizes:
         return 1
@@ -626,7 +629,7 @@ class ParquetBackend:
         ``None`` only when no ``row_filter`` was given; an all-True filter
         still gets a digest. The artifact cache keys on it, so datasets built
         from the same files with different filters don't share cached
-        branch lengths or predictions (issue #1672). It covers the indices
+        branch lengths or predictions. It covers the indices
         only; which files they index is the nickname's job.
         """
         return self._row_filter_digest
@@ -724,7 +727,7 @@ class ParquetBackend:
             # The DataFrame's list cells are views into the arrow buffers, so
             # the table's nbytes is the decoded footprint: within ~12% of the
             # RSS delta on the v10 corpus, where memory_usage(deep=True) reads
-            # 22x low and total_byte_size 7.6x low (issue #1272).
+            # 22x low and total_byte_size 7.6x low.
             self._cache.put(cache_key, rg_df, rg_table.nbytes)
 
         # Fast row access via pandas iloc
@@ -853,7 +856,7 @@ class ParquetBackend:
         """``str(path)`` of the file each row came from, in row order.
 
         Filtered like ``read_column``. Backs the ``SOURCE_FILE_FEATURE`` edge
-        feature that ``PerSourceStrategy`` dispatches on (issue #1289).
+        feature that ``PerSourceStrategy`` dispatches on.
         """
         all_sources: list[str] = []
         for path, num_rows in zip(self._paths, self._file_num_rows):

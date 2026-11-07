@@ -419,7 +419,7 @@ class ComputeNeutralCodonProbs:
         multihit_model: Optional multihit correction model. Deep-copied and
             prepared at factory time; pickle-safe for multiprocessing.
         codon_pref_log: Optional log-space codon preference vector, shape
-            (64,) (issue #747). Fallback default used only if the sample
+            (64,). Fallback default used only if the sample
             dict has no ``"codon_pref_log"`` key. In production,
             ``TransformDataset`` injects the live value from its
             shared-memory ``_codon_pref_log`` tensor into the sample dict
@@ -442,7 +442,7 @@ class ComputeNeutralCodonProbs:
     tandem: Optional[TandemTerm] = None
 
     def __post_init__(self) -> None:
-        # Fail at construction, not inside a DataLoader worker (issue #1753).
+        # Fail at construction, not inside a DataLoader worker.
         check_tandem_multihit_compatible(self.multihit_model, self.tandem)
 
     def __call__(self, sample: Dict[str, Any]) -> Dict[str, Any]:
@@ -684,7 +684,7 @@ def _apply_censored_entries(
 # RuntimeError out of the `bool()`.
 @dataclass(frozen=True, eq=False)
 class CensorMaskedMutations:
-    """Censor UShER-masked mutations, per clade, in both halves of the loss (#1079).
+    """Censor UShER-masked mutations, per clade, in both halves of the loss.
 
     UShER masking *deletes* mutations from the MAT rather than marking sites
     ambiguous, so the child inherits the ancestral state: a masked site is
@@ -880,7 +880,7 @@ class CensorMaskedMutations:
 # wants anyway.
 @dataclass(frozen=True, eq=False)
 class CensorReferenceReversions:
-    """Censor parent -> reference reversions in both halves of the loss (#1099).
+    """Censor parent -> reference reversions in both halves of the loss.
 
     Reference bias inflates the observed rate of **every** reversion to the
     reference, not only the ones the UShER team curated: read mapping, gap

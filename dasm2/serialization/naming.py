@@ -238,7 +238,7 @@ def build_checkpoint_filename(
     provided. The run token identifies the training run that wrote the file,
     so two attempts sharing an output directory stay distinguishable; it sits
     ahead of the hash so that lexicographic sorting within a naming group is
-    chronological rather than hash-ordered (issue #1011). The date (YYYYMMDD
+    chronological rather than hash-ordered. The date (YYYYMMDD
     format) is appended after the hash for easy identification of when the
     checkpoint was created.
 

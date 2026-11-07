@@ -88,7 +88,7 @@ def reconstruct_optimizer_config(
 ) -> OptimizerConfig:
     """Reconstruct an ``OptimizerConfig`` from a live optimizer + its stored initial LR.
 
-    Shared by ``Trainer``'s main-optimizer and head_optimizer (issue #1220)
+    Shared by ``Trainer``'s main-optimizer and head_optimizer
     config reconstruction — both need identical unwrap/extract logic,
     differing only in which (possibly backend-wrapped) optimizer and which
     stored initial-LR value they read.

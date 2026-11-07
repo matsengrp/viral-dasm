@@ -415,7 +415,7 @@ class AccelerateBackend(ComputeBackend):
         # so the broadcast is redundant. Models with mutable buffers (e.g.,
         # BatchNorm running stats) should use SyncBatchNorm or restore the flag.
         #
-        # find_unused_parameters=True was tried here (issue #1096) to let
+        # find_unused_parameters=True was tried here to let
         # OverfitGuardHook freeze a co-trained task's parameters
         # (requires_grad=False) mid-training under DDP without DDP raising
         # "parameters were not used in producing loss" on the next backward.
@@ -446,7 +446,7 @@ class AccelerateBackend(ComputeBackend):
         #     the cycle's work (observed on the 4ds QDASM-v4 run, 2026-05-08).
         #   * A legitimately slow micro-batch on one rank — e.g. a heavy padded
         #     forward in the long-sequence band — must not be aborted mid-step
-        #     by a collective timeout (issue #724).
+        #     by a collective timeout.
         # 8h comfortably covers the longest BL-opt pass and subsumes the
         # per-step case. Diagnostics still surface a true stall via the per-step
         # faulthandler watchdog (DASM2_STEP_WATCHDOG_SECONDS).

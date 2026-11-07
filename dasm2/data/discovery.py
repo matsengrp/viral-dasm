@@ -55,7 +55,7 @@ _C = TypeVar("_C", bound=BaseModel)
 
 # Hard wall-clock bound for scanning a single ScanPath (see
 # ManifestIndex._scan_one_path). registry_paths can point at a slow or
-# unresponsive network mount. Calibrated empirically (#1008): a real,
+# unresponsive network mount. Calibrated empirically: a real,
 # eventually-successful recursive scan of the sshfs-mounted /fh/fast
 # registry_paths entry took 162s under ordinary pax load (9% CPU, almost
 # entirely I/O wait) — a much shorter bound would misfire on legitimate

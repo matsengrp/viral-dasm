@@ -11,7 +11,7 @@ substitutions. The between-AA levels are unidentifiable from sequence data
 (Proposition 1(ii)) and are kept as metadata for optional post-hoc
 attribution only.
 
-Two measured-optimality axes are supported (issue #747):
+Two measured-optimality axes are supported:
 
 - **CSC** (codon stability coefficient) via :func:`load_csc_table`.
 - **tAI** (tRNA adaptation index) via :func:`load_tai_table`.
@@ -44,7 +44,7 @@ from dasm2.codon_table import (
 from dasm2.sequence.constants import CODON_TO_IDX
 
 #: The two ways a codon preference vector is injected into the neutral codon
-#: distribution (issue #930). See :func:`apply_codon_pref_log`.
+#: distribution. See :func:`apply_codon_pref_log`.
 CodonPrefForm = Literal["divide_z", "ratio"]
 
 
@@ -364,7 +364,7 @@ def design_conditioning(tables: list[CodonPreferenceTable]) -> DesignConditionin
     restricted to single-nt-reachable synonymous codons (the subset that
     actually pins the strengths). Collinearity between CSC and tAI does not
     block the aggregate fit, but it destabilizes the per-axis split, so it is
-    surfaced explicitly rather than hidden (issue #747).
+    surfaced explicitly rather than hidden.
 
     Args:
         tables: Codon-optimality axes (in strength-vector column order).
@@ -409,7 +409,7 @@ def apply_codon_pref_log(
 ) -> Tensor:
     """Apply codon preference to log neutral codon probabilities.
 
-    Two forms (issue #930):
+    Two forms:
 
     - ``"divide_z"`` (default, the #749/#767 merged form): add the log
       preference, then renormalize with a softmax over all 64 codons

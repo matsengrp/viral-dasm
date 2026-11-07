@@ -174,7 +174,7 @@ def warn_if_parquet_dataset_mode_mismatch(dataset_mode: str) -> None:
 
     Lives here rather than in ``train_command`` because the eval path
     (``dasm_evaluation.load_trainer_and_dataset``) takes the same knob and
-    has the same Parquet blind spot (issue #988); importing it from
+    has the same Parquet blind spot; importing it from
     ``train_command`` would be circular.
 
     Args:
@@ -307,7 +307,7 @@ def _validate_codon_mutations_exist(
     """Validate every sequence pair has at least one scored codon substitution.
 
     Uses :func:`dasm2.data.validation.has_scored_substitution`, the definition
-    the Parquet converter filters on (issue #1243): a codon position where
+    the Parquet converter filters on: a codon position where
     the parent is a sense codon over ``ACGT``, the child is over ``ACGT``, and
     they differ. Such a pair's branch length fits to zero, so it has no
     evolutionary signal.
@@ -347,14 +347,14 @@ def _validate_parquet_scored_substitutions(
 
     Streams the parent/child segment columns one row group at a time through
     :func:`dasm2.data.validation.scored_substitution_flags_from_arrow`,
-    without materializing the NT strings (#992). Checks only the rows the
+    without materializing the NT strings. Checks only the rows the
     backend's ``row_filter`` selects. A segment whose columns the files lack
     (a heavy-only file under an antibody handler) is absent, as in
     ``make_parquet_row_converter``.
 
     Raises:
         ValueError: If any selected row has no scored substitution. The
-            converter drops these rows (issue #1243), so the file was built
+            converter drops these rows, so the file was built
             without it.
     """
     absent = segment_handler.validate_segment_columns(
@@ -387,7 +387,7 @@ def _reject_context_model_on_csv(neutral_model: "RatesCSPNeutralModel") -> None:
     """Refuse a neutral model that needs per-row context on the CSV path.
 
     Only the Parquet loader carries a model's ``required_context`` columns
-    into each sample (issue #1299). Without this check, a CSV streaming
+    into each sample. Without this check, a CSV streaming
     bundle would fail inside a DataLoader worker's first ``__getitem__``.
 
     Raises:
@@ -545,7 +545,7 @@ class TransformDataset(torch.utils.data.Dataset):
             (issue #747). Shared-memory, same live-update pattern as
             ``branch_lengths``: streaming/Parquet ``__getitem__`` injects it
             into the sample dict for ``ComputeNeutralCodonProbs`` to read;
-            ``CodonStrengthOptimizer`` refits it in-place (issue #1039).
+            ``CodonStrengthOptimizer`` refits it in-place.
         parquet_backend: For Parquet streaming mode — reads rows from disk with
             row-group LRU cache. When present, replaces raw_parents/raw_children
             and extra_tensor_fields for per-sample data access.
@@ -593,7 +593,7 @@ class TransformDataset(torch.utils.data.Dataset):
         # ``BranchLengthOptimizer(init_from_input=True)`` refuses a dataset
         # without it.
         self.branch_lengths_from_input = False
-        # Codon-optimality log-preference vector (issue #747), shared-memory
+        # Codon-optimality log-preference vector, shared-memory
         # so a between-cycle refit (CodonStrengthOptimizer) can update it
         # in-place and have streaming/Parquet workers see the change on their
         # next __getitem__ call — the same live-dataset-state pattern as
@@ -905,7 +905,7 @@ class TransformDataset(torch.utils.data.Dataset):
         in-place update here reaches DataLoader workers on their next fetch —
         the same shared-memory live-dataset-state pattern
         ``update_branch_lengths``/``recompute_neutral_probs`` use for branch
-        lengths (DESIGN.md D6). Verified by probe (issue #1039): a between-
+        lengths (DESIGN.md D6). Verified by probe: a between-
         cycle mutation is immediately and exactly visible starting with the
         next cycle's DataLoader iterator (the actual usage pattern for
         ``CodonStrengthOptimizer.post_cycle``); only an in-flight mutation
@@ -964,7 +964,7 @@ class TransformDataset(torch.utils.data.Dataset):
         ``_codon_pref_log`` on every call, so there is nothing for this
         branch-length-triggered recompute to change. Use
         ``set_codon_pref_log`` to update the streaming/Parquet table
-        in place (issue #1039). ``multihit_model`` below is ignored for
+        in place. ``multihit_model`` below is ignored for
         streaming/Parquet for the same reason: the transform holds the very
         object the bundle exposes as ``multihit_model``, and its
         ``log_hit_class_factors`` are shared memory, so a refit mutates it in
@@ -978,7 +978,7 @@ class TransformDataset(torch.utils.data.Dataset):
             multihit_model: Optional multihit correction model. Only applied
                 in precomputed mode; ignored in streaming mode (see above).
             codon_pref_log: Optional log-space codon preference vector (64,)
-                for codon-optimality adjustment (issue #747). Only applied in
+                for codon-optimality adjustment. Only applied in
                 precomputed mode; ignored in streaming mode (see above).
 
         Raises:
@@ -1235,7 +1235,7 @@ class BranchLengthDatasetBundle(DatasetBundle):
 
         False means reading either one triggers a full column read from
         Parquet. Cold-start branch length initialization uses this to decide
-        between its columnar Arrow path and the per-edge string path (#992):
+        between its columnar Arrow path and the per-edge string path:
         when the strings are already in hand there is nothing to gain by
         re-reading the columns.
         """
@@ -1364,7 +1364,7 @@ class BranchLengthDatasetBundle(DatasetBundle):
 
     @property
     def codon_pref_log(self) -> Optional[torch.Tensor]:
-        """Codon preference log-vector (issue #747), or None if not configured.
+        """Codon preference log-vector, or None if not configured.
 
         Read-through to ``self.dataset.codon_pref_log`` — structurally the
         same single-source-of-truth relationship as ``branch_lengths`` above,
@@ -1372,7 +1372,7 @@ class BranchLengthDatasetBundle(DatasetBundle):
         ``getattr(bundle, "codon_pref_log", None)`` lookup
         (``branch_lengths.py``) and the loss's per-sample transform always
         see the same tensor, not two independently-writable copies that could
-        drift (issue #1039).
+        drift.
         """
         return self.dataset.codon_pref_log
 
@@ -1388,13 +1388,13 @@ class BranchLengthDatasetBundle(DatasetBundle):
            ``create_bl_optimization_dataloader``. That chain is the training
            forward pass's: it reads the file's columns when it has them, and
            runs ``ComputeNtRatesAndCsps`` with the configured model on a
-           rate-free file (issue #1299). Preferred over recomputing here,
+           rate-free file. Preferred over recomputing here,
            because stored columns need not match any configured model —
            Compara's v10 columns hold per-family GTR rates that no single
            model reproduces — so recomputing would fit branch lengths and
            hit-class factors against rates the model was never trained on.
            Streaming columns is also what lets a ``PrecomputedRates`` carrier
-           (multihit correction only, no rate model) work here (issue #1041).
+           (multihit correction only, no rate model) work here.
         3. **The neutral model**, recomputed from raw parents. The in-memory
            (CSV) path, where there are no stored rates and no Parquet columns.
 
@@ -1509,7 +1509,7 @@ class BranchLengthDatasetBundle(DatasetBundle):
         cache.  With ``num_workers > 0`` the rows are read and transformed in
         forked workers, each through its own
         ``ParquetBackend.sequential_sweep_copy``: the serial read was the cap
-        on post-cycle BL throughput (issue #1276), and a sweep needs only a
+        on post-cycle BL throughput, and a sweep needs only a
         few row groups per worker.  Batches still arrive in index order, but
         with numpy arrays in place of tensors; pass each through
         :func:`bl_batch_to_torch`.
@@ -1544,13 +1544,13 @@ class BranchLengthDatasetBundle(DatasetBundle):
         # ComputeNeutralCodonProbs: the BL objective recomputes neutral probs
         # from nt_rates/nt_csps at each trial length, and nothing reads
         # log_neutral_codon_probs from these batches, yet it cost ~36% of the
-        # serial loader's time on v10 (issue #1276). Keep this an exclusion of
+        # serial loader's time on v10. Keep this an exclusion of
         # that one type, not an allow-list: every other transform, including a
-        # ComputeNtRatesAndCsps for rate-free files (#1266), must stay in the
+        # ComputeNtRatesAndCsps for rate-free files, must stay in the
         # BL chain, since the BL objective needs nt_rates/nt_csps.
         # If the training dataset includes "distance", carry it through so the
         # model's head can access it during BL optimization forward passes
-        # (issue #199).
+        #.
         output_keys = BL_OPTIMIZATION_OUTPUT_KEYS
         has_distance = (
             self.dataset._output_keys is not None
@@ -1610,7 +1610,7 @@ class BranchLengthDatasetBundle(DatasetBundle):
         if num_workers > 0:
             bl_collator = _NumpyBatchCollator(bl_collator)
 
-        # One torch thread per worker beside the BL scipy pool (issue #1276).
+        # One torch thread per worker beside the BL scipy pool.
         return DataLoader(
             bl_dataset,
             batch_size=batch_size,
@@ -1629,7 +1629,7 @@ class _NumpyBatchCollator:
     carries two list-collated tensors per row (``nt_rates``, ``nt_csps``), so
     32-row batches in flight from a few workers exhausted a 1024-fd limit
     ("received 0 items of ancdata"), and the hand-offs capped the parent's
-    receive rate (issue #1276). Numpy arrays are pickled by value instead, as
+    receive rate. Numpy arrays are pickled by value instead, as
     ``PerSequenceBLInputs`` does for the spawn pool. The parent restores the
     batch with :func:`bl_batch_to_torch`.
     """
@@ -1700,7 +1700,7 @@ def _whichmut_transforms(
             transforms. See
             :class:`~dasm2.data.transforms.CensorMaskedMutations`.
         reference_base_idxs: Optional reference base indices enabling
-            parent -> reference reversion censoring (#1099). Appended after the
+            parent -> reference reversion censoring. Appended after the
             table's transform; order does not matter, since the two compose.
 
     Returns:
@@ -1815,7 +1815,7 @@ def create_whichmut_dataset(
             (#1079). Requires a ``clade`` column in ``sequences_df``.
         censor_mode: Which half of censoring to apply, for both sources.
         reference_base_idxs: Optional reference base indices enabling
-            parent -> reference reversion censoring (#1099). Needs **no**
+            parent -> reference reversion censoring. Needs **no**
             ``clade`` column: the rule is clade-independent, which is why it is
             usable on its own.
 
@@ -1988,7 +1988,7 @@ BL_OPTIMIZATION_OUTPUT_KEYS = frozenset(
 Extends ``EVOLUTIONARY_OUTPUT_KEYS`` with ``nt_rates`` and ``nt_csps`` so
 that the BL optimizer can stream these from Parquet instead of bulk-loading
 them into memory, and drops ``log_neutral_codon_probs``, which the BL
-objective recomputes at each trial branch length (issue #1276).
+objective recomputes at each trial branch length.
 """
 
 
@@ -2001,7 +2001,7 @@ def _bl_optimization_collator_specs(
     Extends evolutionary specs with ``nt_rates`` and ``nt_csps`` as
     ``"list"``-scale keys (variable-length tensors kept as ``List[Tensor]``,
     not padded/stacked), minus ``log_neutral_codon_probs``, which the BL
-    dataset does not compute (issue #1276).
+    dataset does not compute.
     """
     specs = dict(
         _evolutionary_collator_specs(
@@ -2126,7 +2126,7 @@ def _parquet_neutral_rate_plan(
     segment_handler: SegmentHandler,
     neutral_model: Optional["RatesCSPNeutralModel"],
 ) -> Tuple[List[Callable[[Dict[str, Any]], Dict[str, Any]]], Tuple[str, ...]]:
-    """Decide where a Parquet bundle's per-site rates come from (issue #1299).
+    """Decide where a Parquet bundle's per-site rates come from.
 
     The file's columns decide:
 
@@ -2231,7 +2231,7 @@ def create_whichmut_dataset_from_parquet(
     Per-site ``nt_rates``/``nt_csps`` come from the files' columns when they
     carry them. A rate-free file has them computed at load by
     ``neutral_model`` through ``ComputeNtRatesAndCsps``. See
-    ``_parquet_neutral_rate_plan`` for the full rule (issue #1299).
+    ``_parquet_neutral_rate_plan`` for the full rule.
 
     A ``ShuffleBufferSampler`` is included in the bundle to provide
     shuffle-buffer semantics while keeping the map-style Dataset interface.
@@ -2251,13 +2251,13 @@ def create_whichmut_dataset_from_parquet(
             (#1079). Requires a ``clade`` column in the Parquet.
         censor_mode: Which half of censoring to apply, for both sources.
         reference_base_idxs: Optional reference base indices enabling
-            parent -> reference reversion censoring (#1099). Needs no ``clade``
+            parent -> reference reversion censoring. Needs no ``clade``
             column, so it imposes no requirement on the Parquet's schema.
         shuffle: Whether the bundle's sampler shuffles. Pass False for
             validation and other single-pass sweeps: order cannot affect the
             result, and a sequential walk needs a handful of cached row groups
             where a shuffle buffer needs hundreds.
-        cache_budget: Row-group cache RAM budget inputs (issue #1272); see
+        cache_budget: Row-group cache RAM budget inputs; see
             ``dasm2.data.parquet_backend.plan_cache``.
 
     Returns:
@@ -2600,7 +2600,7 @@ def _build_precomputed_dataset(
        skipped if fused/batched)
     3. Batched codon mutation rate computation (if ComputeCodonMutationRates
        was in the transform chain)
-    4. Censoring, for each transform given (#1079, #1099)
+    4. Censoring, for each transform given
 
     Pass 4 exists because censoring cannot ride in the pass-2 chain: pass 2
     filters ``ComputeCodonMutationRates`` out and then strips each sample to
@@ -2686,7 +2686,7 @@ def _build_precomputed_dataset(
         )
         logger.info("Batched CMR: %.1fs", time.perf_counter() - t0)
 
-    # Pass 4: censoring (#1079, #1099). Runs here rather than in the pass-2 chain
+    # Pass 4: censoring. Runs here rather than in the pass-2 chain
     # because it needs codon_neutral_rates, which pass 3 has only just written.
     if censor_transforms and not has_codon_mutation_rates:
         raise ValueError(
@@ -2893,7 +2893,7 @@ def load_whichmut_train_val(
     Automatically detects Parquet vs CSV/DataFrame storage and dispatches
     accordingly.  CSV data requires ``neutral_model``. Parquet data requires
     it only when the files carry no ``nt_rates``/``nt_csps`` columns: the
-    model then computes rates at load (issue #1299).
+    model then computes rates at load.
 
     Args:
         data_spec: File path, registered nickname, or multiname.
@@ -2909,8 +2909,8 @@ def load_whichmut_train_val(
             (#1079), applied to both splits.
         censor_mode: Which half of censoring to apply, for both sources.
         reference_base_idxs: Optional reference bases for parent -> reference
-            reversion censoring (#1099), applied to both splits.
-        cache_budget: Row-group cache RAM budget inputs (issue #1272); see
+            reversion censoring, applied to both splits.
+        cache_budget: Row-group cache RAM budget inputs; see
             ``dasm2.data.parquet_backend.plan_cache``.
 
     Returns:
@@ -3112,7 +3112,7 @@ def _parquet_metadata(
 
     Leaves the handler's ``bl_init_strategy`` alone: it is set for the whole
     spec by ``_resolve_parquet_paths_and_schema``, and one component's stamp
-    would overwrite it (issue #1289).
+    would overwrite it.
 
     Uses ``pyarrow.parquet`` directly for lightweight metadata + column reads,
     avoiding construction of a full ``ParquetBackend`` (which is created
@@ -3229,7 +3229,7 @@ def _reject_raw_pcp_parquet(
     (naughty clonal families) are still in it. An unstamped file that does
     carry rates was written by a pre-#1131 writer and only warns (see
     :func:`verify_parquet_seam_stamp`). A stamped rate-free file is fine: the
-    configured neutral model computes its rates at load (issue #1182).
+    configured neutral model computes its rates at load.
 
     Raises:
         ValueError: If any file lacks both.
@@ -3270,7 +3270,7 @@ def _resolve_parquet_paths_and_schema(
     for files that lack an ``in_train`` column.
 
     Also verifies each component's row-preprocessing seam stamp against the
-    current registry (issue #1131). This is the load-time counterpart of the
+    current registry. This is the load-time counterpart of the
     stamp the Parquet writers emit; it lives here rather than in
     ``train_command`` so every caller that reaches Parquet data -- eval,
     o/e plots, bootstraps, one-off experiment scripts -- is covered.
@@ -3302,7 +3302,7 @@ def _resolve_parquet_paths_and_schema(
 
     Sets the returned handler's ``bl_init_strategy``: the components' shared
     strategy, or a ``PerSourceStrategy`` giving each file's rows its own
-    component's strategy when they differ (issue #1289).
+    component's strategy when they differ.
 
     Raises:
         ValueError: If segment handlers differ across multiname components,
@@ -3430,7 +3430,7 @@ def _resolve_parquet_train_val(
       partition each component's groups into its own folds rather than
       the combined dataset's groups.
 
-    A ``cv_split`` also makes the seam-stamp check strict (issue #1131):
+    A ``cv_split`` also makes the seam-stamp check strict:
     ``GroupKFold`` packs groups by row count, so a Parquet file holding a
     different row set than the CSV/MLM paths would silently realize a
     different fold map. On the ``in_train``/holdout path row counts do not
@@ -3532,11 +3532,11 @@ def _load_whichmut_train_val_parquet(
         censor_mode=censor_mode,
         reference_base_idxs=reference_base_idxs,
         cache_budget=cache_budget,
-        # Validation sweeps every row once and reduces to scalars, so its order
-        # is not observable -- but shuffling it is, in wall-clock. See
-        # ``ShuffleBufferSampler``: on the v11 S corpus the shuffled val loader
-        # ran 20x slower than the sequential one, which made evaluation 97% of
-        # training wall-clock at ``eval_every_steps: 2000``.
+        # Validation sweeps every row once and reduces to scalars, so its
+        # order is not observable -- but shuffling it is, in wall-clock. A
+        # shuffled val loader draws rows across row groups and defeats the
+        # Parquet cache (see ``ShuffleBufferSampler``), which at this corpus
+        # size is enough to make evaluation dominate training wall-clock.
         shuffle=False,
     )
 
@@ -3598,7 +3598,7 @@ class _DMSDatasetAdapter(torch.utils.data.Dataset):
     """
 
     row_filter_digest: Optional[str] = None
-    """Never row-filtered; part of the ``CacheableDataset`` protocol (#1672)."""
+    """Never row-filtered; part of the ``CacheableDataset`` protocol."""
 
     def __init__(
         self,

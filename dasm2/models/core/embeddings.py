@@ -23,7 +23,7 @@ Both also support resetting positional encoding at segment boundaries (see
 :func:`dasm2.sequence.layout.per_segment_positions_of_layout`), gated by
 ``EncoderConfig.per_segment_positions``.
 
-Distance encoding (issue #199) is off by default
+Distance encoding is off by default
 (``distance_encoding_mode="none"``), in which case both pipelines behave
 exactly as they did before it was added. When enabled, ordering differs by
 pipeline: in ``StandardEmbeddingPipeline`` distance is applied **before**
@@ -62,7 +62,7 @@ def _distance_content_mask(
     True positions. Naming follows the existing mask convention in the
     codebase (e.g. ``token_inclusive_mask``, ``loss_mask``) — this is the unconditional, distance-specific variant.
 
-    Behavior across input shapes (issue #199):
+    Behavior across input shapes:
 
     - Heavy-only input: no separator → mask is True on all heavy tokens,
       False on trailing padding. Distance is added to every heavy

@@ -4,7 +4,7 @@ Fixed-size batching pads every micro-batch to its longest member, so a batch
 that happens to cluster many long sequences becomes a very heavy padded
 forward/backward. Under DDP the ``DistributedSampler`` can hand one rank such a
 cluster while the others get light batches — the load imbalance behind the
-Compara v8 cycle-1 rank-SIGSEGV (issue #724): the real crash window held a
+Compara v8 cycle-1 rank-SIGSEGV: the real crash window held a
 64-row batch padded to ~2475 codons on one rank with the others idle at the
 gradient all-reduce.
 
@@ -15,7 +15,7 @@ proportionally fewer rows and no batch's padded forward blows up. Under
 Accelerate's ``BatchSamplerShard`` (round-robin of whole batches across ranks)
 uniform-budget batches also give natural per-rank token balance. The variable
 micro-batch sizes are absorbed by the trainer's per-task label-count loss
-normalization (issue #688), which divides by the window-total label count rather
+normalization, which divides by the window-total label count rather
 than a fixed sample count, so the effective batch becomes token/label-defined.
 
 The feature is opt-in via ``TrainingConfig.max_tokens_per_batch``; unset → the
@@ -201,7 +201,7 @@ class TokenBudgetBatchSampler(Sampler[List[int]]):
         cache stays warm. The only change from the legacy fixed-size path is the
         token-budget cap: when a long sequence appears in the stream, the
         current batch closes early so its padded forward stays bounded — the
-        anti-blowup property (issue #724) — without globally reordering and
+        anti-blowup property — without globally reordering and
         thrashing the cache. We do NOT length-group or shuffle batch order, as
         either would scatter a batch's rows across many row groups.
         """
