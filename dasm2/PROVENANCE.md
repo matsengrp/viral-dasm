@@ -49,7 +49,8 @@ dataset, loss and encoder so their factories populate, so most of it was
 reachable without being executed. That cut removed a further 111 files and
 left **107 files and 46,088 lines**; a second cut inside
 `data/evolutionary_dataset.py`, recorded below, brought the tree to
-**107 files and 43,543 lines**. It came *after* Gate 1 deliberately:
+**107 files and 43,543 lines**; a third, recorded below, brought it to
+**100 files and 40,637 lines**. It came *after* Gate 1 deliberately:
 once the reference checkpoint scores to seven significant figures, each
 deletion is checked rather than argued.
 
@@ -148,12 +149,7 @@ Three things on it are real and are deliberately not in this cut:
 * **`models/core/attention.py`** (1,356 lines) is the flash-attention
   decision, which belongs with the training-run scheduling in #1 rather than
   here.
-* **`training/checkpoint_selection.py`** (567 lines) and
-  `data/{manifests,registry_schema}.py` (956), each reached only from a live
-  module's import line. Each is roughly five hundred lines entered through a
-  single name, which is the shape of a module that wants replacing by the one
-  constant its caller uses rather than deleting whole. That wants reading,
-  not grepping.
+Both have since been cut; see "The third cut" below.
 
 ## The second cut: the dataset factories (#4)
 
@@ -184,3 +180,59 @@ Two things recorded here because they were predicted wrongly first:
   pattern missed. Re-tracing after the cut leaves
   `data/prune/delete_candidates.txt` byte-identical, which is the same fact
   measured a second way.
+
+## The third cut: single-entry modules and the manifest registry (#4)
+
+Three modules were reached from a live module's import line and nothing else,
+which is the shape of a file that wants replacing by the one name its caller
+uses rather than deleting whole.
+
+* **`training/checkpoint_selection.py`** (567 lines) exported thirteen public
+  names, of which exactly one was consumed anywhere: the string `"periodic"`.
+  Upstream it shared that marker between the hook that writes step-cadence
+  checkpoints and the readers that later pick a final checkpoint out of a
+  finished run's directory. This fork has no such reader -- it names the
+  checkpoint it wants -- so `CheckpointSaveHook.PERIODIC_TAG` owns the marker.
+* **`losses/q_scale_defaults.py`** (21 lines) held six scalars and no code,
+  imported by nothing. They are fitted values from BCR somatic-hypermutation
+  work: a triple "calibrated by held-out LL maximisation under fixed
+  pre-trained Thrifty rates" and an "S5F-HH fit on the pooled 30k Tang+SHMOOF
+  out-of-frame subset". Dead and leaking, so deleted rather than edited.
+* **`losses/dms_matrix.py`** (283 lines) was reachable only so
+  `training/metric_providers.py` could name `DMSMatrixCalibrationLoss` in an
+  `excluded_loss_classes` tuple. No factory branch builds that loss here, so
+  the exclusion could never fire.
+
+**The manifest registry** -- `data/{yaml_registry,discovery,manifests,
+registry_schema}.py` and the parts of `data/registry.py` that consulted them,
+about 2,040 lines -- was live but vacuous. `registered_nickname_or_none` sits
+on the Parquet load path and feeds the seam check, and returned `None` on every
+call, because this repository names every input by path.
+
+It was not inert, though. With a developer's `~/.config/dasm2/config.yaml`
+present it scanned that clone's manifests and found 185 entries, so what the
+code did depended on a file outside the repository. That is a reproducibility
+defect in its own right, and `README.md` promised the opposite.
+
+The seam stamp is what makes removing it provably safe, and it was captured
+before any edit rather than asserted after:
+
+| | before | after |
+|---|---|---|
+| nickname | `path_b2c98048` | `path_b2c98048` |
+| `row_preprocessing_inputs` | `4f53cda1...b945` | `4f53cda1...b945` |
+| `row_preprocessing_version` | `1` | `1` |
+
+That hash is sha256 over an empty naughty list, and `seam_identity`'s own
+docstring already named `None` as the right answer for "the viral PCP corpora,
+whose naughty list is vacuously empty". The cut makes it the only answer rather
+than one the code reaches by querying a registry that happens to be empty.
+Every Parquet file stamped before the cut still verifies.
+
+Naughty clonal families are a BCR concept with no viral counterpart, so
+`preprocess_rows_for_split` and `filter_naughty_clonal_families` went with the
+registry that fed them. One behaviour changed deliberately: a corpus arriving
+without an `in_train` column is now an error, where upstream derived the split
+from a registry's `holdout_samples`. A split that lives outside the corpus does
+not travel with it to a reader bringing their own GISAID access.
+

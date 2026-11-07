@@ -10,6 +10,12 @@ Everything the pipeline reads is named in [`config.yaml`](config.yaml): no
 manifest lookup, no registry, no artifact-root default. A reader with their own
 GISAID access edits that one file to point at their own mat-pcp run.
 
+That is enforced, not just intended. The vendored tree carried a manifest
+registry that resolved dataset nicknames by scanning directories named in
+`~/.config/dasm2/config.yaml` -- a file outside this repository, whose presence
+changed what the code did. It is not vendored. Nothing here consults anything
+outside the checkout and the paths `config.yaml` names.
+
 **Status: milestone 1 of 7.** The training code is vendored and its gates are
 green; the corpora, the remaining training runs, the scoring tables, the four
 analyses, the figure composition and the release are issues
