@@ -47,7 +47,9 @@ lines.
 The closure is inflated by eager registry imports that load every head,
 dataset, loss and encoder so their factories populate, so most of it was
 reachable without being executed. That cut removed a further 111 files and
-left **107 files and 46,088 lines**. It came *after* Gate 1 deliberately:
+left **107 files and 46,088 lines**; a second cut inside
+`data/evolutionary_dataset.py`, recorded below, brought the tree to
+**107 files and 43,543 lines**. It came *after* Gate 1 deliberately:
 once the reference checkpoint scores to seven significant figures, each
 deletion is checked rather than argued.
 
@@ -146,13 +148,39 @@ Three things on it are real and are deliberately not in this cut:
 * **`models/core/attention.py`** (1,356 lines) is the flash-attention
   decision, which belongs with the training-run scheduling in #1 rather than
   here.
-* **The DASM and AAO transform chains** inside `data/evolutionary_dataset.py`.
-  A trace of the file's own top-level definitions puts **3,529 of its 6,224
-  lines** in functions nothing enters: `_evolutionary_transforms`,
-  `create_evolutionary_dataset`, the three AAO builders, and the DMS,
-  structural, HERMES and MPNN dataset factories. Cutting them is what would
-  free `molevol/{neutral_evolution,codon_preference,aao_neutral_rates,tandem}.py`
-  and `neutral/codon_boundary.py`.
 * **`training/checkpoint_selection.py`** (567 lines) and
   `data/{manifests,registry_schema}.py` (956), each reached only from a live
-  module's import line.
+  module's import line. Each is roughly five hundred lines entered through a
+  single name, which is the shape of a module that wants replacing by the one
+  constant its caller uses rather than deleting whole. That wants reading,
+  not grepping.
+
+## The second cut: the dataset factories (#4)
+
+`data/evolutionary_dataset.py` went from 6,224 lines to 3,687 — 41 top-level
+definitions, the DASM and AAO loss families and the DMS, HERMES, MPNN and
+structural factories. viral-DASM builds a whichmut dataset from a Parquet
+corpus and nothing else.
+
+The cut set is a reachability closure, not the trace's word. The trace seeds
+it; a static walk of the call graph adds anything a live definition names,
+and anything another module imports *executably*. That last qualifier is why
+the round was safe: both `BranchLengthDatasetBundle` importers sit under
+`if TYPE_CHECKING:`, and every apparent `create_evolutionary_dataset` importer
+was a `>>>` line in a docstring. Neither executes, so neither keeps a
+definition alive.
+
+Two things recorded here because they were predicted wrongly first:
+
+* The closure found **2,522 lines**, where a trace-only count of the same file
+  had said 3,529. The closure is the stricter instrument — it keeps whatever a
+  live definition so much as names, string annotations included — and the
+  smaller number is the one to trust.
+* The cut **frees no module**. It was expected to orphan
+  `molevol/{neutral_evolution,codon_preference,aao_neutral_rates,tandem}.py`
+  and `neutral/codon_boundary.py`; all of them are still imported by
+  `data/transforms.py` and `neutral/base.py`, which are live, and
+  `mutation_matrices.py` is reached by a relative import an earlier grep
+  pattern missed. Re-tracing after the cut leaves
+  `data/prune/delete_candidates.txt` byte-identical, which is the same fact
+  measured a second way.
