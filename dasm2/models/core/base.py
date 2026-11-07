@@ -19,7 +19,6 @@ from dasm2.models.core.sf_projection import (
 from dasm2.sequence.constants import AA_AMBIG_IDX, AA_SEPARATOR_IDX
 from dasm2.sequence.layout import layout_of_aa_idxs
 from dasm2.sequence.masking import split_predictions_by_sequences
-from dasm2.sequence.tdi_constants import TDI_PAD_IDX, tdi_str_to_idxs
 from dasm2.tokenizers import AA_TOKENIZER
 from dasm2.utils.tensor import zap_predictions_along_diagonal
 
@@ -108,8 +107,6 @@ class CoreModel(nn.Module):
         }
         if "layout" in batch:
             encoder_input["layout"] = batch["layout"]
-        if "tdi_token_ids" in batch:
-            encoder_input["tdi_token_ids"] = batch["tdi_token_ids"]
         if "distance" in batch:
             encoder_input["distance"] = batch["distance"]
         return encoder_input
@@ -465,26 +462,19 @@ class CoreModel(nn.Module):
     def _build_inference_batch(
         self,
         aa_sequence: str,
-        tdi_tokens: Optional[str] = None,
     ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
         """Build a batch dict for single-sequence inference.
 
         Tokenizes the input, constructs the mask, and adds layout tensors
-        when the encoder uses segment embeddings. Optionally tokenizes and
-        pads 3Di structural tokens when ``tdi_tokens`` is provided.
+        when the encoder uses segment embeddings.
 
         Args:
             aa_sequence: Unified sequence string ("SEQ1^SEQ2" or single).
-            tdi_tokens: Optional 3Di structural token string. Must have the
-                same length as ``aa_sequence`` (including ``^`` separators).
 
         Returns:
             (batch, tokens_1d) where ``batch`` is ready for ``forward()``
             and ``tokens_1d`` is the [seq_len] token tensor used for
             post-processing (splitting by segments).
-
-        Raises:
-            ValueError: If ``tdi_tokens`` length doesn't match ``aa_sequence``.
         """
         tokens = AA_TOKENIZER.tokenize([aa_sequence]).to(self.device)  # [1, seq_len]
         tokens_1d = tokens.squeeze(0)  # [seq_len]
@@ -516,27 +506,6 @@ class CoreModel(nn.Module):
                         f"configuration."
                     )
             batch["layout"] = layout_of_aa_idxs(tokens, num_segments).to(self.device)
-
-        # Optional 3Di structural tokens
-        if tdi_tokens is not None:
-            if len(tdi_tokens) != len(aa_sequence):
-                raise ValueError(
-                    f"3Di token length ({len(tdi_tokens)}) != "
-                    f"AA sequence length ({len(aa_sequence)})"
-                )
-            tdi_idxs = tdi_str_to_idxs(tdi_tokens)
-            padded_len = tokens.shape[1]
-            if len(tdi_idxs) > padded_len:
-                raise ValueError(
-                    f"3Di token length ({len(tdi_idxs)}) exceeds padded sequence "
-                    f"length ({padded_len}). Tokenizer should only pad, never truncate."
-                )
-            if len(tdi_idxs) < padded_len:
-                padding = torch.full(
-                    (padded_len - len(tdi_idxs),), TDI_PAD_IDX, dtype=torch.long
-                )
-                tdi_idxs = torch.cat([tdi_idxs, padding])
-            batch["tdi_token_ids"] = tdi_idxs.unsqueeze(0).to(self.device)
 
         return batch, tokens_1d
 
@@ -576,7 +545,6 @@ class CoreModel(nn.Module):
         self,
         aa_sequence: str,
         head_type: HeadType = HeadType.SELECTION_FACTOR_HEAD,
-        tdi_tokens: Optional[str] = None,
         distance: Optional[float] = None,
         raw: bool = False,
     ) -> List[torch.Tensor]:
@@ -588,8 +556,6 @@ class CoreModel(nn.Module):
         Args:
             aa_sequence: Unified sequence string ("SEQ1^SEQ2" or single sequence)
             head_type: HeadType enum for head to use (default: HeadType.SELECTION_FACTOR_HEAD)
-            tdi_tokens: Optional 3Di structural token string. Required when the
-                encoder is configured with ``num_tdi_tokens``.
             distance: Maturation distance (sum of IQ-TREE branch lengths from
                 naive ancestor to parent). Required when the encoder has
                 distance_encoding_mode != "none"; ``None`` raises ``ValueError``
@@ -605,13 +571,10 @@ class CoreModel(nn.Module):
             Each tensor has shape [seq_len, 20] with separator positions excluded.
 
         Raises:
-            ValueError: If model doesn't have the specified head, or if the
-                encoder requires tdi_tokens but none were provided.
+            ValueError: If model doesn't have the specified head.
         """
         self.require_head(head_type)
-        batch, tokens_1d = self._build_inference_batch(
-            aa_sequence, tdi_tokens=tdi_tokens
-        )
+        batch, tokens_1d = self._build_inference_batch(aa_sequence)
 
         self._add_inference_distance(batch, distance)
         return self._run_inference(batch, tokens_1d, head_type, raw=raw)

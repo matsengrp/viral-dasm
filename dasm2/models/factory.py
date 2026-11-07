@@ -30,7 +30,7 @@ def create_model_from_config(
 
     Uses ESM2CoreModel when encoder is ESM2EncoderConfig,
     MPNNCoreModel when encoder is MPNNLightAttentionEncoderConfig,
-    otherwise uses CoreModel (handles standard, concat-pos, and tdi encoders).
+    otherwise uses CoreModel (handles standard and concat-pos encoders).
 
     Args:
         model_config: Model configuration with encoder and heads

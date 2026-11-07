@@ -8,7 +8,6 @@ import torch.nn as nn
 
 from dasm2.config import EncoderConfig, HeadConfig
 from dasm2.positional_encoding import PositionalEncoding
-from dasm2.sequence.tdi_constants import TDI_PAD_IDX
 
 from .attention import (
     EntmaxMultiheadAttention,
@@ -122,15 +121,6 @@ class TransformerEncoder(nn.Module):
             config.num_segment_types, self.d_model
         )
 
-        # Optional 3Di structural embedding
-        if config.num_tdi_tokens is not None:
-            # Tdi embedding width matches AA embedding (d_aa for concat-pos, d_model for standard)
-            self.tdi_embedding: Optional[nn.Embedding] = nn.Embedding(
-                config.num_tdi_tokens, self.d_aa, padding_idx=TDI_PAD_IDX
-            )
-        else:
-            self.tdi_embedding = None
-
         # Distance encoding for maturation stage conditioning.
         # Created before the pipeline so modules can be passed as references.
         self.distance_encoding_mode = config.distance_encoding_mode
@@ -185,7 +175,6 @@ class TransformerEncoder(nn.Module):
                 positional_embedding=self.positional_embedding,
                 sinusoidal_pe=self.sinusoidal_pe,
                 segment_embedding=self.segment_embedding,
-                tdi_embedding=self.tdi_embedding,
                 per_segment_positions=config.per_segment_positions,
                 **_distance_kwargs,
             )
@@ -195,7 +184,6 @@ class TransformerEncoder(nn.Module):
                 d_model=self.d_model,
                 pos_encoder=self.pos_encoder,
                 segment_embedding=self.segment_embedding,
-                tdi_embedding=self.tdi_embedding,
                 per_segment_positions=config.per_segment_positions,
                 **_distance_kwargs,
             )
@@ -345,7 +333,7 @@ class TransformerEncoder(nn.Module):
 
         Args:
             batch: Input batch containing ``token_ids``, ``masks``, and
-                optionally ``tdi_token_ids``, ``layout``, and ``distance``.
+                optionally ``layout`` and ``distance``.
 
         Returns:
             Transformer representations of shape ``[batch_size, seq_len, d_model]``.
@@ -374,12 +362,6 @@ class TransformerEncoder(nn.Module):
         num_layers = len(self.transformer_encoder.layers)
         vocab_size = self.amino_acid_embedding.num_embeddings
         num_segment_types = get_num_segment_types(self.segment_embedding)
-        num_tdi_tokens = (
-            self.tdi_embedding.num_embeddings
-            if self.tdi_embedding is not None
-            else None
-        )
-
         # Distance encoding config — read from runtime state
         mode = self.distance_encoding_mode
         distance_noise_std = 0.0
@@ -413,7 +395,6 @@ class TransformerEncoder(nn.Module):
             entmax_alpha=self._config.entmax_alpha,
             flash_attention=self._config.flash_attention,
             flash_deterministic=self._config.flash_deterministic,
-            num_tdi_tokens=num_tdi_tokens,
             distance_encoding_mode=mode,
             distance_noise_std=distance_noise_std,
             num_distance_bins=num_distance_bins,

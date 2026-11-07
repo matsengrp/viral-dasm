@@ -4132,7 +4132,6 @@ class Trainer:
         self,
         command: Optional[List[str]] = None,
         notes: Optional[str] = None,
-        tdi_tokens_dir: Optional[Path] = None,
     ) -> BaseTrainingMetadata:
         """Export complete metadata for caching and checkpointing.
 
@@ -4154,9 +4153,7 @@ class Trainer:
         Args:
             command: Command line arguments (defaults to sys.argv)
             notes: Optional notes about this training run
-            tdi_tokens_dir: Optional 3Di tokens directory to include in the
                 reconstructed TrainingConfig. Only needed for checkpoint metadata
-                when using a TDI encoder.
 
         Returns:
             BaseTrainingMetadata with:
@@ -4284,7 +4281,6 @@ class Trainer:
             dataloader_pin_memory=self.dataloader_pin_memory,
             pre_hooks=all_pre_hooks,
             post_hooks=all_post_hooks,
-            tdi_tokens_dir=tdi_tokens_dir,
             tasks=task_configs,
         )
 
@@ -4307,7 +4303,6 @@ class Trainer:
         notes: Optional[str] = None,
         suffix: Optional[str] = None,
         filename_override: Optional[str] = None,
-        tdi_tokens_dir: Optional[Path] = None,
     ) -> Optional[Path]:
         """Save model checkpoint with rich descriptive filename.
 
@@ -4326,8 +4321,6 @@ class Trainer:
                 on-eval one
             filename_override: Optional explicit filename (escape hatch for
                 backward compatibility or special cases)
-            tdi_tokens_dir: Optional 3Di tokens directory to include in checkpoint
-                metadata. Only needed when using a TDI encoder.
 
         Returns:
             Path to saved checkpoint file, or None on non-main processes
@@ -4348,7 +4341,7 @@ class Trainer:
         if not self.is_main_process:
             return None
 
-        metadata = self.export_metadata(notes=notes, tdi_tokens_dir=tdi_tokens_dir)
+        metadata = self.export_metadata(notes=notes)
         output_path = self._resolve_checkpoint_path(
             output_dir, metadata, suffix, filename_override
         )
@@ -4593,7 +4586,6 @@ class Trainer:
         notes: Optional[str] = None,
         suffix: Optional[str] = None,
         filename_override: Optional[str] = None,
-        tdi_tokens_dir: Optional[Path] = None,
     ) -> Optional[Path]:
         """Save resumable checkpoint with full training state.
 
@@ -4610,7 +4602,6 @@ class Trainer:
             suffix: Optional suffix marking which save this is (e.g.,
                 "cycle0_best")
             filename_override: Optional explicit filename
-            tdi_tokens_dir: Optional 3Di tokens directory for metadata
 
         Returns:
             Path to saved checkpoint file, or None on non-main processes
@@ -4621,7 +4612,7 @@ class Trainer:
         if not self.is_main_process:
             return None
 
-        metadata = self.export_metadata(notes=notes, tdi_tokens_dir=tdi_tokens_dir)
+        metadata = self.export_metadata(notes=notes)
         training_state = self.get_training_state(rank_pass_positions)
         output_path = self._resolve_checkpoint_path(
             output_dir, metadata, suffix, filename_override

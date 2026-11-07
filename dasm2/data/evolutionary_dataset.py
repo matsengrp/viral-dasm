@@ -1181,7 +1181,7 @@ class TransformDataset(torch.utils.data.Dataset):
 def neutral_rates_source_of(dataset: Dataset) -> Optional[NeutralRatesSource]:
     """The rate source of a training dataset, looking through wrappers.
 
-    Wrappers such as ``ESM2DatasetWrapper`` and ``TdiWhichmutDataset`` hold
+    Wrappers such as ``ESM2DatasetWrapper`` hold
     the ``TransformDataset`` they wrap as ``base_dataset``.
 
     Returns:
@@ -2161,90 +2161,6 @@ def create_mpnn_whichmut_dataset(
         collator=collator,
         worker_init_fn=base_bundle.worker_init_fn,
     )
-
-
-# ---------------------------------------------------------------------------
-# Factory: TDI Whichmut (wrapper + combined collator)
-# ---------------------------------------------------------------------------
-
-
-def create_tdi_whichmut_dataset(
-    sequences_df: pd.DataFrame,
-    neutral_model: "RatesCSPNeutralModel",
-    tdi_tokens_dir: str,
-    structure_id_list: List[str],
-    segment_handler: Optional[SegmentHandler] = None,
-    mode: Mode = "precomputed",
-    nickname: str = "unnamed_tdi_whichmut",
-    *,
-    pad_shorter_tokens: bool = False,
-    censor_table: Optional[Dict[str, CensorSpec]] = None,
-    censor_mode: CensorMode = "both",
-    reference_base_idxs: Optional[torch.Tensor] = None,
-) -> DatasetBundle:
-    """Create Whichmut dataset wrapped with 3Di structural tokens.
-
-    Builds a whichmut base dataset, wraps it with ``TdiWhichmutDataset``,
-    and returns a ``DatasetBundle`` with combined collator specs covering
-    both whichmut and TDI tensor keys.
-
-    Args:
-        sequences_df: DataFrame with parent/child NT sequence columns.
-        neutral_model: Neutral mutation model.
-        tdi_tokens_dir: Directory containing {structure_id}_3di.txt files.
-        structure_id_list: List of structure IDs (one per sequence).
-        segment_handler: Handler for multi-segment sequences. Auto-detected if None.
-        mode: ``"precomputed"`` or ``"streaming"``.
-        nickname: Human-readable identifier.
-        censor_table: Optional censor table, forwarded to the base factory.
-        censor_mode: Which half of censoring to apply.
-        reference_base_idxs: Optional reference bases for reversion censoring
-            (#1099), forwarded to the base factory. Forwarded explicitly because
-            this wrapper calls that factory **positionally**: a new keyword left
-            out here trains uncensored without a word.
-
-    Returns:
-        DatasetBundle with wrapped dataset, combined collator, and worker_init_fn.
-    """
-    base_bundle = create_whichmut_dataset(
-        sequences_df,
-        neutral_model,
-        segment_handler,
-        mode,
-        nickname,
-        censor_table=censor_table,
-        censor_mode=censor_mode,
-        reference_base_idxs=reference_base_idxs,
-    )
-
-    wrapped = TdiWhichmutDataset(
-        base_bundle.dataset,
-        Path(tdi_tokens_dir),
-        structure_id_list=structure_id_list,
-        pad_shorter_tokens=pad_shorter_tokens,
-    )
-
-    # Combined collator: base whichmut specs + TDI addition.
-    # Extract specs from base collator (avoids re-running handler detection).
-    base_specs = base_bundle.collator.tensor_specs
-    combined_specs = {
-        **base_specs,
-        "tdi_token_ids": (0, "codon"),
-    }
-    collator = TransformCollator(tensor_specs=combined_specs)
-
-    return DatasetBundle(
-        dataset=wrapped,
-        collator=collator,
-        worker_init_fn=base_bundle.worker_init_fn,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Factory: Evolutionary (DASM)
-# ---------------------------------------------------------------------------
-
-
 def _prepare_transform_multihit(
     multihit_model: Optional["HitClassModel"],
 ) -> Optional["HitClassModel"]:

@@ -24,7 +24,6 @@ class CheckpointSaveHook(TrainingHook):
         output_dir: str,
         notes: Optional[str] = None,
         checkpoint_every_n_evals: Optional[int] = None,
-        tdi_tokens_dir: Optional[Path] = None,
         save_training_state: bool = False,
         checkpoint_every_n_steps: Optional[int] = None,
     ) -> None:
@@ -37,8 +36,6 @@ class CheckpointSaveHook(TrainingHook):
                 evaluations via on_eval(). None disables intra-cycle
                 checkpointing (the post_cycle save still fires once per
                 cycle on the restored best model).
-            tdi_tokens_dir: Optional 3Di tokens directory to include in checkpoint
-                metadata. Only needed when using a TDI encoder.
             save_training_state: If True, save resumable checkpoints that include
                 optimizer, scheduler, counters, and RNG state for training resume.
             checkpoint_every_n_steps: If set, also save every N optimizer steps
@@ -54,7 +51,6 @@ class CheckpointSaveHook(TrainingHook):
         self.output_dir = Path(output_dir)
         self.notes = notes
         self.checkpoint_every_n_evals = checkpoint_every_n_evals
-        self.tdi_tokens_dir = tdi_tokens_dir
         self.save_training_state = save_training_state
         self.checkpoint_every_n_steps = checkpoint_every_n_steps
         # Periodic saves on disk, oldest first; read from disk at the first.
@@ -162,13 +158,11 @@ class CheckpointSaveHook(TrainingHook):
                 str(self.output_dir),
                 suffix=suffix,
                 notes=self.notes,
-                tdi_tokens_dir=self.tdi_tokens_dir,
             )
         return trainer.save_checkpoint(
             str(self.output_dir),
             suffix=suffix,
             notes=self.notes,
-            tdi_tokens_dir=self.tdi_tokens_dir,
         )
 
     def to_config(self) -> HookConfig:

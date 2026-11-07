@@ -45,16 +45,6 @@ from dasm2.config import (
 )
 from dasm2.data.evolutionary_dataset import (
     DatasetBundle,
-    TransformCollator,
-    _load_and_split,
-    create_dms_dataset,
-    create_mpnn_whichmut_dataset,
-    create_tdi_whichmut_dataset,
-    load_aah_datasets,
-    load_aaowhichmut_train_val,
-    load_evolutionary_train_val,
-    load_evolutionary_train_val_precomputed,
-    load_structural_train_val,
     load_whichmut_train_val,
     warn_if_parquet_dataset_mode_mismatch,
 )
@@ -1389,7 +1379,6 @@ def train_model_from_datasets(  # noqa: C901
         checkpoint_every_n_evals=checkpoint_every_n_evals,
         checkpoint_every_n_steps=checkpoint_every_n_steps,
         is_main_process=backend.is_main_process,
-        tdi_tokens_dir=training_config.tdi_tokens_dir,
         task_configs=training_config.tasks,
         save_training_state=training_config.save_training_state,
     )
@@ -1889,147 +1878,66 @@ def _resolve_reference_bases(
 def _load_whichmut_head_data(
     data_path: str,
     loss_type: LossType,
-    neutral_model: None,
     dataset_mode: Literal["precomputed", "streaming"],
-    use_tdi: bool,
-    tdi_tokens_dir: Optional[Path],
-    tdi_pad_shorter_tokens: bool = False,
     cv_split: Optional[CvSplitConfig] = None,
     censor_table: Optional[Dict[str, "CensorSpec"]] = None,
     censor_mode: CensorMode = "both",
     reference_base_idxs: Optional[torch.Tensor] = None,
     cache_budget: CacheBudgetSpec = CacheBudgetSpec(),
 ) -> Tuple[Any, Any]:
-    """Load train/val data for a whichmut-loss-keyed task.
+    """Load train/val data for the whichmut task from a Parquet corpus.
 
-    Dispatches to the appropriate loader based on data format (parquet,
-    pickle, CSV) and TDI configuration.
+    Parquet is the only format this fork reads. The CSV and pickle arms
+    went with the neutral models they needed: every one of them built its
+    rates from a ``RatesCSPNeutralModel``, and viral-DASM takes neutral
+    rates from the mat-pcp censor tables instead, so ``neutral_model`` is
+    ``None`` on every path and those arms could only have raised. The 3Di
+    wrapping arm went with ``data/tdi_whichmut.py`` in the same cut.
 
     Args:
-        data_path: Data specification string.
-        loss_type: The whichmut loss variant; must be ``WHICHMUT`` or
-            ``AAO_WHICHMUT``.
-        neutral_model: The neutral model instance (None for precomputed-only).
+        data_path: Data specification string; must name a Parquet corpus.
+        loss_type: The whichmut loss variant. ``WHICHMUT`` is the only one
+            ``LOSS_REGISTRY`` can build, so this is checked, not dispatched
+            on.
         dataset_mode: "precomputed" or "streaming".
-        use_tdi: Whether TDI wrapping is enabled.
-        tdi_tokens_dir: Path to TDI tokens directory.
         cv_split: Optional cross-validation fold spec. Bypasses the
-            ``in_train`` column and registry holdouts to compute the
-            split on the fly. Not yet supported with TDI wrapping or
-            with whichmut-head variants other than the standard
-            ``WhichmutHead`` family on CSV.
+            ``in_train`` column and registry holdouts to compute the split
+            on the fly.
         censor_table: Optional UShER censor table (#1079), applied to both
             splits.
         censor_mode: Which half of censoring to apply.
-        cache_budget: Parquet row-group cache RAM budget inputs (issue #1272).
+        reference_base_idxs: Clade-founder bases for reversion censoring.
+        cache_budget: Parquet row-group cache RAM budget inputs (#1272).
 
     Returns:
         Tuple of (train_item, val_item).
     """
-    is_parquet = is_parquet_data_spec(data_path)
-    if is_parquet:
-        if use_tdi:
-            raise NotImplementedError(
-                "TDI wrapping is not yet supported for Parquet data."
-            )
-        warn_if_parquet_dataset_mode_mismatch(dataset_mode)
-        return load_whichmut_train_val(
-            data_path,
-            neutral_model=None,
-            cv_split=cv_split,
-            censor_table=censor_table,
-            censor_mode=censor_mode,
-            reference_base_idxs=reference_base_idxs,
-            cache_budget=cache_budget,
-        )
-
-    if is_pickle_data_spec(data_path):
-        raise NotImplementedError(
-            "Pickle data with precomputed Whichmut rates not yet supported. "
-            "Use CSV format with a neutral model."
-        )
-
-    if neutral_model is None:
+    if loss_type is not LossType.WHICHMUT:
         raise ValueError(
-            "Whichmut head with CSV data requires a neutral model, "
-            "but neutral_model is None. Add neutral_model to the config."
+            f"loss_type={loss_type.value!r} is not something this repository "
+            f"can train: LOSS_REGISTRY holds {LossType.WHICHMUT.value!r} "
+            f"alone. The other whichmut variant, "
+            f"{LossType.AAO_WHICHMUT.value!r}, needs the AAO transform chain "
+            f"and a neutral model, neither of which this fork carries."
         )
-
-    # TDI and MPNN paths (CSV only — not applicable to Parquet)
-    if use_tdi:
-        if cv_split is not None:
-            raise NotImplementedError(
-                "cv_split is not yet supported with TDI wrapping."
-            )
-        assert tdi_tokens_dir is not None
-        train_df, val_df, nickname = _load_and_split(data_path)
-        structure_ids_train = train_df["structure_id"].tolist()
-        structure_ids_val = val_df["structure_id"].tolist()
-        train_item = create_tdi_whichmut_dataset(
-            train_df,
-            neutral_model,
-            str(tdi_tokens_dir),
-            structure_ids_train,
-            mode=dataset_mode,
-            nickname=f"{nickname}_train",
-            pad_shorter_tokens=tdi_pad_shorter_tokens,
-            censor_table=censor_table,
-            censor_mode=censor_mode,
-            reference_base_idxs=reference_base_idxs,
+    if not is_parquet_data_spec(data_path):
+        raise ValueError(
+            f"{data_path!r} is not a Parquet data spec. The CSV and pickle "
+            f"loaders needed a RatesCSPNeutralModel to build whichmut rates; "
+            f"viral-DASM reads them from the mat-pcp censor tables, so those "
+            f"loaders went with the neutral models and Parquet is the only "
+            f"format left."
         )
-        val_item = create_tdi_whichmut_dataset(
-            val_df,
-            neutral_model,
-            str(tdi_tokens_dir),
-            structure_ids_val,
-            mode=dataset_mode,
-            nickname=f"{nickname}_val",
-            pad_shorter_tokens=tdi_pad_shorter_tokens,
-            censor_table=censor_table,
-            censor_mode=censor_mode,
-            reference_base_idxs=reference_base_idxs,
-        )
-        return train_item, val_item
-
-    # CSV only at this point — Parquet returned upstream. Explicit branch
-    # per loss type (rather than dict-of-callables + identity check) so the
-    # cv_split capability per variant stays visible at the call site.
-    if loss_type == LossType.WHICHMUT:
-        return load_whichmut_train_val(  # type: ignore[no-any-return]
-            data_path,
-            neutral_model,
-            mode=dataset_mode,
-            cv_split=cv_split,
-            censor_table=censor_table,
-            censor_mode=censor_mode,
-            reference_base_idxs=reference_base_idxs,
-        )
-    if loss_type == LossType.AAO_WHICHMUT:
-        if cv_split is not None:
-            raise NotImplementedError(
-                f"cv_split is not yet supported for loss_type={loss_type!r} on CSV."
-            )
-        if censor_table is not None or reference_base_idxs is not None:
-            # The AAO chain builds codon_neutral_rates before
-            # MarginalizeCodonsToAAO and is censorable at the same point, but
-            # doing it here would make this change two variables. Raising rather
-            # than ignoring: a configured censoring source that silently does
-            # nothing is the exact failure #1079 exists to remove. #1099's
-            # reversion rule is excluded here for the same reason and so belongs
-            # in the same guard -- omitting it would let a reversion-only AAO
-            # config train uncensored while the config validator, which does
-            # cover it, is bypassed on a directly-constructed call.
-            raise NotImplementedError(
-                "Censoring is not yet implemented for the AAO whichmut path "
-                "(#1079 scoped it out deliberately, and #1099 kept it out for "
-                "the same one-variable reason). Remove "
-                "censored_mutations_file / reference_sequence_file, or use the "
-                "standard whichmut head."
-            )
-        return load_aaowhichmut_train_val(  # type: ignore[no-any-return]
-            data_path, neutral_model, mode=dataset_mode
-        )
-    raise ValueError(f"Unhandled whichmut loss type: {loss_type!r}")
+    warn_if_parquet_dataset_mode_mismatch(dataset_mode)
+    return load_whichmut_train_val(
+        data_path,
+        neutral_model=None,
+        cv_split=cv_split,
+        censor_table=censor_table,
+        censor_mode=censor_mode,
+        reference_base_idxs=reference_base_idxs,
+        cache_budget=cache_budget,
+    )
 
 
 def train_model(  # noqa: C901
@@ -2407,10 +2315,6 @@ def train_model(  # noqa: C901
     # Parse head data config (validates types and formats)
     parsed_data = _parse_head_data_config(data)
 
-    # TDI (3Di structural token) wrapping went with ``data/tdi_whichmut.py``
-    # and the structural datasets it served (#4).
-    use_tdi, tdi_tokens_dir = False, None
-
     # Dataset pipeline mode: "precomputed" (default) or "streaming"
     dataset_mode = training_config.dataset_mode
     if dataset_mode == "streaming":
@@ -2456,11 +2360,7 @@ def train_model(  # noqa: C901
             train_item, val_item = _load_whichmut_head_data(
                 data_path,
                 head_loss_type,
-                neutral_model,
                 dataset_mode,
-                use_tdi,
-                tdi_tokens_dir,
-                tdi_pad_shorter_tokens=training_config.tdi_pad_shorter_tokens,
                 cv_split=training_config.cv_split,
                 censor_table=_resolve_censor_table(training_config, _print),
                 censor_mode=training_config.censor_mode,
@@ -2545,7 +2445,6 @@ def _create_tasks_from_config(
     checkpoint_every_n_steps: Optional[int] = None,
     *,
     is_main_process: bool = True,
-    tdi_tokens_dir: Optional[Path] = None,
     save_training_state: bool = False,
 ) -> List[Task]:
     """Create training tasks from head configurations with per-head datasets.
@@ -2581,7 +2480,6 @@ def _create_tasks_from_config(
             via ``CheckpointSaveHook.on_eval``.
         checkpoint_every_n_steps: If set, save every N optimizer steps via
             ``CheckpointSaveHook.on_step``.
-        tdi_tokens_dir: Optional 3Di tokens directory to include in checkpoint metadata.
         bl_optimization_num_workers: Worker count for the post-cycle
             ``BranchLengthOptimizer`` (None = auto). From
             ``TrainingConfig.bl_optimization_num_workers``.
@@ -2626,7 +2524,6 @@ def _create_tasks_from_config(
         output_dir=str(output_path),
         notes=notes,
         checkpoint_every_n_evals=checkpoint_every_n_evals,
-        tdi_tokens_dir=tdi_tokens_dir,
         save_training_state=save_training_state,
         checkpoint_every_n_steps=checkpoint_every_n_steps,
     )

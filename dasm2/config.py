@@ -366,23 +366,10 @@ class EncoderConfig(BaseModel):
         "(only for 'context_token' mode).",
     )
 
-    # Optional 3Di structural embedding
-    num_tdi_tokens: Optional[int] = Field(
-        default=None,
-        ge=20,
-        description="3Di vocabulary size for structural embedding. "
-        "None=no structural embedding, 22=standard (20 states + mask + padding).",
-    )
-
     @property
     def d_model(self) -> int:
         """Total model dimension calculated as nhead × d_model_per_head."""
         return self.nhead * self.d_model_per_head
-
-    @property
-    def supports_tdi(self) -> bool:
-        """Whether this encoder is configured with 3Di structural tokens."""
-        return self.num_tdi_tokens is not None
 
     @property
     def uses_distance(self) -> bool:
@@ -1429,19 +1416,6 @@ class TrainingConfig(BaseModel):
         "precomputed regardless of this setting.",
     )
 
-    # 3Di structural tokens
-    tdi_tokens_dir: Optional[Path] = Field(
-        default=None,
-        description="Directory with {structure_id}_3di.txt files for 3Di structural tokens. "
-        "When set, datasets are wrapped with TdiWhichmutDataset.",
-    )
-    tdi_pad_shorter_tokens: bool = Field(
-        default=False,
-        description="Right-pad 3Di tokens shorter than max_aa_seq_len with the padding index. "
-        "Required for multi-structure datasets with varying protein lengths "
-        "(e.g., flu HA subtypes: H3=566 AA, H5=568 AA).",
-    )
-
     # UShER censoring (#1079). Two paths rather than one plus a derived sibling:
     # the roster is what makes a clade censoring nothing distinguishable from a
     # mistyped clade name, so a silently-absent sidecar would reintroduce exactly
@@ -1555,29 +1529,6 @@ class TrainingConfig(BaseModel):
             "aao_whichmut) sharing the same ``head_type`` pointer."
         ),
     )
-
-    @property
-    def has_tdi_encoder(self) -> bool:
-        """Whether the encoder is configured with 3Di structural tokens."""
-        return self.model.encoder.supports_tdi
-
-    @model_validator(mode="after")
-    def validate_tdi_consistency(self) -> "TrainingConfig":
-        """Reject a 3Di tokens directory the encoder cannot consume.
-
-        The reverse check (num_tdi_tokens without tdi_tokens_dir) is
-        intentionally omitted so configs can be loaded as templates before
-        tdi_tokens_dir is set.
-
-        Raises:
-            ValueError: If tdi_tokens_dir is set with a non-TDI encoder.
-        """
-        if self.tdi_tokens_dir is not None and not self.has_tdi_encoder:
-            raise ValueError(
-                "tdi_tokens_dir is set but encoder has no num_tdi_tokens configured. "
-                "Set num_tdi_tokens on the encoder or remove tdi_tokens_dir."
-            )
-        return self
 
     @model_validator(mode="after")
     def _validate_censoring(self) -> "TrainingConfig":
