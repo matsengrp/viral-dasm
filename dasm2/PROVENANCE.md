@@ -9,7 +9,7 @@ This directory is a **fork** of the `dasm2` package, taken once from
 | source commit | `68e41df5c2b66198fb0d992181ede39788fa160e` |
 | commit date | 2026-10-30 |
 | taken on | 2026-11-06 |
-| what was taken | the 207 modules `import dasm2.train_command` loads, plus `model_catalog.yaml` |
+| what was taken | the 207 modules `import dasm2.train_command` loads |
 | size at import | 207 files, 79,490 lines |
 
 ## Why a fork and not a dependency

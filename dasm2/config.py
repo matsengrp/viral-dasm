@@ -1430,11 +1430,6 @@ class TrainingConfig(BaseModel):
     )
 
     # 3Di structural tokens
-    tdi_tokens_name: Optional[str] = Field(
-        default=None,
-        description="Catalog name for 3Di tokens directory (resolved via model_catalog.yaml). "
-        "Mutually exclusive with tdi_tokens_dir.",
-    )
     tdi_tokens_dir: Optional[Path] = Field(
         default=None,
         description="Directory with {structure_id}_3di.txt files for 3Di structural tokens. "
@@ -1568,28 +1563,16 @@ class TrainingConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_tdi_consistency(self) -> "TrainingConfig":
-        """Validate TDI token configuration consistency.
-
-        Checks:
-        1. At most one of tdi_tokens_name or tdi_tokens_dir may be set.
-        2. tdi_tokens_dir is not set on a non-TDI encoder.
+        """Reject a 3Di tokens directory the encoder cannot consume.
 
         The reverse check (num_tdi_tokens without tdi_tokens_dir) is
         intentionally omitted so configs can be loaded as templates before
-        tdi_tokens_dir is resolved at training time.
+        tdi_tokens_dir is set.
 
         Raises:
-            ValueError: If both tdi_tokens_name and tdi_tokens_dir are set,
-                or if tdi_tokens_dir is set with a non-TDI encoder.
+            ValueError: If tdi_tokens_dir is set with a non-TDI encoder.
         """
-        has_tdi_name = self.tdi_tokens_name is not None
-        has_tdi_dir = self.tdi_tokens_dir is not None
-        if has_tdi_name and has_tdi_dir:
-            raise ValueError(
-                "At most one of 'tdi_tokens_name' or 'tdi_tokens_dir' may be set, "
-                "got both"
-            )
-        if has_tdi_dir and not self.has_tdi_encoder:
+        if self.tdi_tokens_dir is not None and not self.has_tdi_encoder:
             raise ValueError(
                 "tdi_tokens_dir is set but encoder has no num_tdi_tokens configured. "
                 "Set num_tdi_tokens on the encoder or remove tdi_tokens_dir."

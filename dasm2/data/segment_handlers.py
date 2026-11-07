@@ -29,7 +29,6 @@ from dasm2.molevol.branch_length_init import (
     BranchLengthInitStrategy,
     ProportionalStrategy,
 )
-from dasm2.neutral.base import RatesCSPNeutralModel
 from dasm2.sequence.constants import NT_SEPARATOR
 from dasm2.utils.tensor import stack_heterogeneous
 
@@ -924,90 +923,6 @@ STANDARD_SEGMENT_HANDLERS = [
     AntibodySegmentHandler(),  # Checks for _heavy/_light suffixes
     SegmentHandler(),  # Generic single-segment (empty suffix)
 ]
-
-
-def add_neutral_model_outputs_to_pcp_df(
-    pcp_df: pd.DataFrame,
-    neutral_model: RatesCSPNeutralModel,
-    segment_handler: SegmentHandler,
-    base_column_name: str = "parent",
-) -> pd.DataFrame:
-    """Add neutral model rate and CSP columns to a parent-child pair DataFrame.
-
-    This is a data preparation function that computes neutral model outputs
-    and adds them as columns to the DataFrame. The resulting DataFrame can
-    then be used to create an EvolutionaryDataset.
-
-    Column naming follows the pattern nt_rates{suffix} and nt_csps{suffix}, where
-    suffix values come from segment_handler.segment_suffixes. Only adds columns
-    for segments that exist in the input DataFrame.
-
-    Follows the netam pattern of `add_shm_model_outputs_to_pcp_df`.
-
-    Note:
-        This function requires a RatesCSPNeutralModel (not a general AbstractNeutralModel)
-        because it calls compute_rates_and_csps(). GTRCodonNeutralModel inherits from
-        RatesCSPNeutralModel and implements this method, so it is fully supported here.
-
-    Args:
-        pcp_df: DataFrame with segment-specific sequence columns
-               (e.g., parent_heavy, parent_light for antibodies)
-        neutral_model: Model with compute_rates_and_csps method (ThriftySHM, TabularRates, etc.)
-        segment_handler: Handler defining segment suffixes and rate adjustments
-        base_column_name: Base column name containing sequences (default: "parent")
-
-    Returns:
-        DataFrame with added nt_rates{suffix} and nt_csps{suffix} columns
-        for each segment in segment_handler.segment_suffixes that exists in the input
-
-    Example:
-        >>> from dasm2.data.segment_handlers import (
-        ...     AntibodySegmentHandler, add_neutral_model_outputs_to_pcp_df
-        ... )
-        >>> from dasm2.model_catalog import resolve_model
-        >>> from dasm2.neutral.thrifty import ThriftySHMModel
-        >>>
-        >>> handler = AntibodySegmentHandler()
-        >>> neutral_model = ThriftySHMModel.from_catalog(
-        ...     "ThriftyHumV0.2-59", resolve_model("ThriftyHumV0.2-59")
-        ... )
-        >>> df_with_neutral_outputs = add_neutral_model_outputs_to_pcp_df(
-        ...     pcp_df, neutral_model, handler
-        ... )
-        >>> # df_with_neutral_outputs now has nt_rates_heavy, nt_csps_heavy,
-        >>> # nt_rates_light, nt_csps_light columns (if light chain exists)
-    """
-    df = pcp_df.copy()
-
-    # Get rate adjustments for each segment
-    rate_adjustments = segment_handler.get_rate_adjustments()
-
-    # Compute and add columns only for segments that exist in the DataFrame
-    for seg_idx, suffix in enumerate(segment_handler.segment_suffixes):
-        col_name = f"{base_column_name}{suffix}"
-
-        # Skip segments that don't exist in the input DataFrame
-        if col_name not in df.columns:
-            continue
-
-        rates_col = f"nt_rates{suffix}"
-        csps_col = f"nt_csps{suffix}"
-
-        # Get sequences for this segment, filling NaN with empty string
-        # This handles combined datasets where some rows lack certain segments
-        sequences = df[col_name].fillna("").tolist()
-
-        # Compute rates and CSPs
-        rates_list, csps_list = neutral_model.compute_rates_and_csps(sequences)
-
-        # Apply rate adjustment for this segment
-        adjusted_rates = [r * rate_adjustments[seg_idx] for r in rates_list]
-
-        # Add columns to DataFrame (cast to Any to satisfy mypy with list[Tensor])
-        df[rates_col] = adjusted_rates  # type: ignore[assignment]
-        df[csps_col] = csps_list  # type: ignore[assignment]
-
-    return df
 
 
 def detect_compatible_handler(
