@@ -1720,90 +1720,6 @@ def _parse_head_data_config(
 
 
 
-def load_evolutionary_head_data(
-    data_path: str,
-    neutral_model: None,
-    dataset_mode: Literal["precomputed", "streaming"],
-    use_distance: bool = False,
-    needs_parent_nt_windows: bool = False,
-    cv_split: Optional[CvSplitConfig] = None,
-    codon_pref_log: Optional[torch.Tensor] = None,
-    cache_budget: CacheBudgetSpec = CacheBudgetSpec(),
-) -> Tuple[Any, Any]:
-    """Load train/val data for an evolutionary head type.
-
-    Dispatches to the appropriate loader based on data format (parquet,
-    pickle, or CSV).
-
-    Args:
-        data_path: Data specification string.
-        neutral_model: The neutral model instance (None for precomputed-only).
-        dataset_mode: "precomputed" or "streaming".
-        use_distance: If True, include 'distance' column for maturation stage
-            conditioning.
-        needs_parent_nt_windows: True iff any head consuming this data uses
-            a global-kmer Q variant (``global_13mer`` or QDASM's
-            ``global_5mer``). Plain DASM training skips the per-sample 15-nt
-            window allocation.
-        cv_split: Optional cross-validation fold spec. Bypasses the
-            ``in_train`` column and registry holdouts to compute the
-            split on the fly. Pickle (precomputed) inputs are not
-            supported in CV mode.
-        codon_pref_log: Optional log-space codon preference vector (64,)
-            (issue #747). Forwarded to every dispatch arm (pickle, Parquet,
-            CSV) so the loss and the branch-length objective agree on the
-            table regardless of data format (issue #1039).
-        cache_budget: Parquet row-group cache RAM budget inputs (issue #1272).
-
-    Returns:
-        Tuple of (train_item, val_item).
-    """
-    if is_pickle_data_spec(data_path):
-        if cv_split is not None:
-            raise NotImplementedError(
-                "cv_split is not supported for pickle (precomputed) inputs. "
-                "Use Parquet or CSV data."
-            )
-        return load_evolutionary_train_val_precomputed(
-            data_path,
-            neutral_model=None,
-            include_parent_nt_windows=needs_parent_nt_windows,
-            codon_pref_log=codon_pref_log,
-        )
-
-    if is_parquet_data_spec(data_path):
-        warn_if_parquet_dataset_mode_mismatch(dataset_mode)
-        # ``neutral_model`` is always None in this fork, so there is no
-        # rates/CSP model and no multihit correction to carry (#4).
-        rcs_model = None
-        multihit = None
-        return load_evolutionary_train_val(
-            data_path,
-            neutral_model=rcs_model,
-            multihit_model=multihit,
-            use_distance=use_distance,
-            include_parent_nt_windows=needs_parent_nt_windows,
-            cv_split=cv_split,
-            codon_pref_log=codon_pref_log,
-            cache_budget=cache_budget,
-        )
-
-    # CSV path — neutral model is required
-    if neutral_model is None:
-        raise ValueError(
-            "Evolutionary head with CSV data requires a neutral model, "
-            "but neutral_model is None. Add neutral_model to the config."
-        )
-    return load_evolutionary_train_val(
-        data_path,
-        neutral_model=neutral_model,
-        multihit_model=neutral_model.multihit_model,
-        mode=dataset_mode,
-        use_distance=use_distance,
-        include_parent_nt_windows=needs_parent_nt_windows,
-        cv_split=cv_split,
-        codon_pref_log=codon_pref_log,
-    )
 
 
 def _resolve_censor_table(
@@ -2535,37 +2451,8 @@ def train_model(  # noqa: C901
         # went with the datasets they loaded (#4).
         head_loss_configs = task_loss_configs_by_head[head_type]
         head_loss_type = head_loss_configs[0].loss_type
-        is_evolutionary = head_loss_type in EVOLUTIONARY_LOSS_TYPES
         is_whichmut = head_loss_type in WHICHMUT_LOSS_TYPES
-        if is_evolutionary:
-            # Issue #199: condition the dataset on maturation distance when the
-            # encoder is distance-aware.
-            encoder_uses_distance = (
-                getattr(
-                    training_config.model.encoder,
-                    "distance_encoding_mode",
-                    "none",
-                )
-                != "none"
-            )
-            # The 15-nt parent window transform is only used by global-kmer
-            # QDASM/Hybrid losses. The decision lives on
-            # ``LossConfig.needs_parent_nt_windows`` so the magic string is
-            # not duplicated here.
-            needs_parent_nt_windows = any(
-                lc.needs_parent_nt_windows for lc in head_loss_configs
-            )
-            train_item, val_item = load_evolutionary_head_data(
-                data_path,
-                neutral_model,
-                dataset_mode,
-                use_distance=encoder_uses_distance,
-                needs_parent_nt_windows=needs_parent_nt_windows,
-                cv_split=training_config.cv_split,
-                codon_pref_log=codon_pref_log,
-                cache_budget=cache_budget,
-            )
-        elif is_whichmut:
+        if is_whichmut:
             train_item, val_item = _load_whichmut_head_data(
                 data_path,
                 head_loss_type,

@@ -9,7 +9,9 @@ in the dependency list may drag a different one in.
 
 from __future__ import annotations
 
+import subprocess
 import sys
+import tempfile
 import tomllib
 from pathlib import Path
 
@@ -130,3 +132,38 @@ def test_training_path_imports(module):
     """
     __import__(module)
     assert module in sys.modules
+
+
+def test_a_script_run_resolves_dasm2_inside_this_repository():
+    """`python scripts/<x>.py` must import the fork, not an installed copy.
+
+    `test_dasm2_resolves_inside_this_repository` above passes under pytest
+    because pytest puts the rootdir on `sys.path`. A script run does not: it
+    puts the *script's* directory there, so the repository root is absent and
+    `_EditableFinder` -- which sits after `PathFinder` in `sys.meta_path` --
+    resolves `dasm2` to whatever checkout the venv's editable install points
+    at. When this repository is a `git worktree` of that checkout, the gates
+    then exercise the other tree's code and pass against it.
+
+    `scripts/lib.py` puts the repository root on `sys.path` to prevent that.
+    This is the test that would have caught it: it reproduces a script run
+    exactly, from a working directory that is not the repository.
+    """
+    probe = (
+        "import sys;"
+        f" sys.path.insert(0, {str(REPO_ROOT / 'scripts')!r});"
+        " import lib;"
+        " import dasm2;"
+        " print(dasm2.__file__)"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=tempfile.gettempdir(),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    resolved = Path(result.stdout.strip()).resolve()
+    assert resolved.is_relative_to(REPO_ROOT), (
+        f"a script run resolved `dasm2` to {resolved}, outside {REPO_ROOT}"
+    )

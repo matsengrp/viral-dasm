@@ -39,13 +39,15 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from lib import CONFIG, mat_pcp_path
+from lib import CONFIG, assert_dasm2_is_this_repo, mat_pcp_path
 
 from dasm2.config import (
     ReduceOnPlateauSchedulerConfig,
     load_config_from_yaml,
 )
 from dasm2.training.trainer import Trainer
+
+assert_dasm2_is_this_repo()
 
 #: The three undeclared values that decide where the run stops, and the LR
 #: path they imply from the configured 1e-3.

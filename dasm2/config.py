@@ -521,21 +521,6 @@ class BaseLossConfig(BaseModel):
     loss_type: LossType = Field(description="Loss type discriminator")
     model_config = ConfigDict(extra="forbid")
 
-    @property
-    def needs_parent_nt_windows(self) -> bool:
-        """Whether this loss requires the 15-nt parent-window batch fields.
-
-        Default: False. Overridden by :class:`QDASMLossConfig` and
-        :class:`HybridLossConfig` when their ``q_variant`` is a global k-mer
-        lookup — ``"global_13mer"`` for either, or ``"global_5mer"``, which
-        only :class:`QDASMLossConfig` offers. Those variants build Q by
-        looking the neutral model up at each site's nt context, which is what
-        the per-sample 15-nt window allocation in the dataset supplies; no
-        other configuration needs it. Driving the decision through this
-        property keeps the variant magic-strings and the ``hasattr`` on
-        ``q_variant`` out of ``dasm2/train_command.py``.
-        """
-        return False
 
 
 
@@ -633,45 +618,6 @@ class TaskConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    @model_validator(mode="after")
-    def _single_value_head_has_no_gradient_under_sense_conditional(
-        self,
-    ) -> "TaskConfig":
-        """Reject ``SingleValueHead`` + ``DASMLoss(normalization='sense_conditional')``.
-
-        The conditional kernel normalizes over the sense-restricted weight
-        row, which makes it exactly invariant to adding a constant to all 20
-        log selection factors. ``SingleValueHead`` emits nothing *but* such a
-        constant (one scalar broadcast to every site and AA, with no diagonal
-        zap by design), so its single parameter lies entirely in the kernel's
-        flat direction and its gradient is float32 noise — measured at
-        -5.4e-07 under ``sense_conditional`` against -5.0 under
-        ``parent_absorbing`` (issue #1238 §2.1). The head's own docstring
-        says the scalar trains *because* of the parent-absorb
-        parameterization; that reasoning does not survive this kernel.
-
-        Adding a diagonal zap would not rescue it — a zapped constant is
-        identically zero, leaving the head equally dead and less obviously
-        so. Heads that do zap (``M0Head``, ``SingleMatrixHead``) keep
-        nonzero gradients and are unaffected by this rejection.
-        """
-        if (
-            self.head_type is HeadType.SINGLE_VALUE_HEAD
-            and isinstance(self.loss_config, DASMLossConfig)
-            and self.loss_config.normalization == "sense_conditional"
-        ):
-            raise ValueError(
-                "TaskConfig: head_type=single_value_head cannot be paired with "
-                "DASMLossConfig(normalization='sense_conditional') (issue #1238). "
-                "The sense-conditional kernel is invariant to a global shift of "
-                "all 20 log selection factors, and SingleValueHead emits nothing "
-                "but a global shift, so the head's one parameter has no gradient "
-                "under this kernel. Use normalization='parent_absorbing' for this "
-                "floor baseline, or pick a head with at least one identifiable "
-                "direction (e.g. m0_head or single_matrix_head, both of which "
-                "zap the parent-AA diagonal)."
-            )
-        return self
 
 
 class HookConfig(BaseModel):
@@ -935,21 +881,6 @@ class ModelConfig(BaseModel):
                     f"Head '{head_config.head_type.value}' input_dim ({head_config.input_dim}) != "
                     f"encoder output dimension ({encoder_dim})"
                 )
-
-        # StructuralGuidanceHead is an identity forward into a HERMES-aligned
-        # cosine loss; the encoder's d_model must match HERMES_EMBED_DIM (256).
-        # Without this fail-fast a config with the wrong d_model would build
-        # cleanly and only crash inside StructuralGuidanceLoss on the first step.
-        from dasm2.losses.structural_guidance import HERMES_EMBED_DIM
-
-        if (
-            any(hc.head_type == HeadType.STRUCTURAL_GUIDANCE_HEAD for hc in self.heads)
-            and encoder_dim != HERMES_EMBED_DIM
-        ):
-            raise ValueError(
-                f"StructuralGuidanceHead requires encoder d_model={HERMES_EMBED_DIM} "
-                f"(HERMES embedding dimension); got encoder d_model={encoder_dim}."
-            )
 
         # Auto-set max_aa_seq_len for heads that declare they need it via
         # the requires_max_aa_seq_len ClassVar.  Looking it up on the head
@@ -1838,27 +1769,6 @@ class TrainingConfig(BaseModel):
         return self
 
 
-    @model_validator(mode="after")
-    def _validate_q_scales_match_neutral_model(self) -> "TrainingConfig":
-        """Refuse a Q-family task that inherits Thrifty's (γ, δ, ψ) under a
-        non-Thrifty neutral model.
-
-        Separate from ``_validate_q_table_matches_neutral_model`` because it is
-        a different binding: that one ties the *table* to the neutral model,
-        this one ties the *calibration* to it. Both are silent mismatches that
-        train a mutation process the config does not name; see
-        :func:`_resolve_q_scales`. Runs second so a table/model
-        identity error — the more fundamental misconfiguration — surfaces
-        first. Constitution IV: fail before training starts.
-        """
-        neutral_model_type = (
-            self.neutral_model.type if self.neutral_model is not None else None
-        )
-        for task in self.tasks or []:
-            loss_config = task.loss_config
-            if isinstance(loss_config, (QDASMLossConfig, HybridLossConfig)):
-                _resolve_q_scales(loss_config, neutral_model_type)
-        return self
 
     model_config = ConfigDict(extra="forbid")
 
@@ -1877,52 +1787,6 @@ def _get_configs_dir() -> Path:
     return Path(str(files("dasm2").joinpath("configs")))
 
 
-def _resolve_relative_model_paths(config: "TrainingConfig", config_dir: Path) -> None:
-    """Resolve relative model_path fields in neutral model configs.
-
-    When a relative ``model_path`` exists relative to the YAML file's
-    directory, it is resolved to an absolute path.  This makes experiment
-    configs work regardless of CWD.  If the path doesn't exist relative to
-    the config directory, it is left as-is (preserving the existing
-    CWD-relative behaviour for built-in package configs).
-
-    Skips resolution when ``model_name`` is set (catalog-based resolution
-    handles paths internally).
-
-    Args:
-        config: Parsed training config (modified in place).
-        config_dir: Directory containing the YAML file.
-    """
-    catalog_types = (
-        TabularRatesNeutralModelConfig,
-        GTRCodonNeutralModelConfig,
-        S5FNeutralModelConfig,
-    )
-    for neutral_cfg in (config.neutral_model, config.context_free_neutral_model):
-        if neutral_cfg is None:
-            continue
-        # Skip catalog-based configs where model_name handles resolution
-        if (
-            isinstance(neutral_cfg, catalog_types)
-            and neutral_cfg.model_name is not None
-        ):
-            continue
-        model_path = getattr(neutral_cfg, "model_path", None)
-        if model_path is not None and not model_path.is_absolute():
-            candidate = (config_dir / model_path).resolve()
-            if candidate.exists():
-                object.__setattr__(neutral_cfg, "model_path", candidate)
-
-    # Resolve relative codon-optimality table paths the same way (issue #747),
-    # so experiment configs that point at the checked-in TSVs work from any CWD.
-    for field in ("codon_pref_table", "codon_pref_tai_table"):
-        table_path = getattr(config, field, None)
-        if table_path is not None and not table_path.is_absolute():
-            candidate = (config_dir / table_path).resolve()
-            if candidate.exists():
-                # Plain setattr: TrainingConfig is mutable. (So are the neutral
-                # sub-configs; the object.__setattr__ above is not needed.)
-                setattr(config, field, candidate)
 
 
 def load_config_from_yaml(yaml_path: Path) -> TrainingConfig:
@@ -1955,7 +1819,6 @@ def load_config_from_yaml(yaml_path: Path) -> TrainingConfig:
     except Exception as e:
         raise ValueError(f"Invalid config in {yaml_path}: {e}") from e
 
-    _resolve_relative_model_paths(config, yaml_path.resolve().parent)
     return config
 
 

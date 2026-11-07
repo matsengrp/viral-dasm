@@ -33,9 +33,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from lib import reference_run
+from lib import assert_dasm2_is_this_repo, reference_run
 
 from dasm2.training.log_reader import get_run_eval_losses
+
+assert_dasm2_is_this_repo()
 
 #: What the reference's stop reason has to say. The schedule reaching its
 #: floor is the designed ending; anything else means the run ended for a

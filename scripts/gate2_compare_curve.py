@@ -59,9 +59,11 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from lib import CANARY_STEPS, EVAL_EVERY_STEPS
+from lib import assert_dasm2_is_this_repo, CANARY_STEPS, EVAL_EVERY_STEPS
 
 from dasm2.training.log_reader import get_run_eval_losses
+
+assert_dasm2_is_this_repo()
 
 #: Columns compared numerically.
 NUMERIC_COLUMNS = ("avg_train_loss", "val_loss", "val_aa_acc_mutated")

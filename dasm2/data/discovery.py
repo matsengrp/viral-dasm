@@ -618,14 +618,15 @@ class TypedManifestView(Generic[_C]):
 def _build_descriptors() -> Dict[str, DataTypeDescriptor]:
     """Build the descriptor registry.
 
-    Uses late imports to avoid circular dependencies between this module
-    and the per-type config modules.
+    One descriptor. viral-DASM resolves nothing from a manifest -- every path
+    it reads is written out in ``config.yaml`` -- so the viral-PCP, fitness,
+    functional and structural-embedding registries went with the datasets
+    they described (#4). What remains is the evolutionary PCP schema, which
+    the Parquet loader still consults to name a run.
+
+    Uses a late import to avoid a circular dependency with the config module.
     """
-    from dasm2.data.functional_registry import FunctionalDatasetConfig
     from dasm2.data.registry_schema import DatasetConfig, ResolvedDatasetConfig
-    from dasm2.data.size_utils import read_file_size
-    from dasm2.data.structural_embedding_registry import StructuralEmbeddingConfig
-    from dasm2.data.viral_fitness_registry import ViralFitnessConfig, ViralPCPConfig
 
     def _resolve_dataset_config(
         raw: DatasetConfig, name: str, yaml_path: Path
@@ -646,31 +647,6 @@ def _build_descriptors() -> Dict[str, DataTypeDescriptor]:
             config_class=DatasetConfig,
             post_load=_resolve_dataset_config,
             data_path_resolver=_evol_data_path,
-        ),
-        "dasm2_viral_pcp_data_schema": DataTypeDescriptor(
-            discriminator="dasm2_viral_pcp_data_schema",
-            display_name="Viral PCP",
-            config_class=ViralPCPConfig,
-            data_path_resolver=_generic_data_path,
-        ),
-        "dasm2_fitness_data_schema": DataTypeDescriptor(
-            discriminator="dasm2_fitness_data_schema",
-            display_name="Viral Fitness",
-            config_class=ViralFitnessConfig,
-            data_path_resolver=_generic_data_path,
-        ),
-        "dasm2_functional_data_schema": DataTypeDescriptor(
-            discriminator="dasm2_functional_data_schema",
-            display_name="Functional",
-            config_class=FunctionalDatasetConfig,
-            data_path_resolver=_generic_data_path,
-        ),
-        "dasm2_structural_embedding_data_schema": DataTypeDescriptor(
-            discriminator="dasm2_structural_embedding_data_schema",
-            display_name="Structural Embedding",
-            config_class=StructuralEmbeddingConfig,
-            data_path_resolver=_generic_data_path,
-            size_reader=read_file_size,
         ),
     }
 

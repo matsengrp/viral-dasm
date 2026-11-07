@@ -35,9 +35,12 @@ from lib import (
     CV_SEED,
     NUM_CYCLES,
     TRAIN_SEED,
+    assert_dasm2_is_this_repo,
 )
 
 from dasm2.train_command import train_model
+
+assert_dasm2_is_this_repo()
 
 #: The head every model in this pipeline trains. Named once; a run that
 #: trained a different one would not be comparable to any reference.
