@@ -115,7 +115,6 @@ def test_arrow_pool_side_effect_precedes_pyarrow():
         "dasm2.losses.whichmut_losses",
         "dasm2.losses.factory",
         "dasm2.training.log_reader",
-        "dasm2.training.train_argv",
     ],
 )
 def test_training_path_imports(module):
@@ -123,6 +122,11 @@ def test_training_path_imports(module):
 
     A prune that removes one of these fails here rather than several minutes
     into a training run.
+
+    ``dasm2.training.train_argv`` was on this list and is not any more. It
+    built argv for ``dasm2/cli.py``, which this repository never vendored, so
+    #2's own scope table recorded it as carried-but-unused. The prune (#4)
+    removed it, which is what that note anticipated.
     """
     __import__(module)
     assert module in sys.modules

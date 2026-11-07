@@ -6,32 +6,20 @@ import torch
 
 from dasm2.config import (
     EncoderConfig,
-    ESM2EncoderConfig,
     HeadConfig,
-    IdentityEncoderConfig,
     ModelConfig,
-    MPNNLightAttentionEncoderConfig,
     SelectionFactorProjectionConfig,
 )
 from dasm2.heads.factory import HEAD_REGISTRY
 from dasm2.heads.types import HeadType
 from dasm2.models.core.base import CoreModel
-from dasm2.models.core.esm2 import ESM2Encoder
-from dasm2.models.core.esm2_core_model import ESM2CoreModel
-from dasm2.models.core.identity import IdentityEncoder
-from dasm2.models.core.mlm_core_model import MLMCoreModel
-from dasm2.models.core.mpnn_core_model import MPNNCoreModel
-from dasm2.models.core.mpnn_light_attention import MPNNLightAttentionEncoder
 from dasm2.models.core.sf_projection import SelectionFactorProjection
-from dasm2.models.core.site_masked_core_model import SiteMaskedCoreModel
 from dasm2.models.core.transformer import TransformerEncoder
 
-# Registry pattern for encoder types
+#: One encoder. ESM2, MPNN light-attention and the identity passthrough went
+#: with their core models (#4); the paper trains the codon transformer.
 ENCODER_REGISTRY: Dict[str, Type[torch.nn.Module]] = {
     "TransformerEncoder": TransformerEncoder,
-    "ESM2Encoder": ESM2Encoder,
-    "MPNNLightAttentionEncoder": MPNNLightAttentionEncoder,
-    "IdentityEncoder": IdentityEncoder,
 }
 
 
@@ -54,117 +42,21 @@ def create_model_from_config(
     Raises:
         ValueError: If configuration is invalid or heads cannot be created
     """
-    # Validate head/encoder compatibility before building anything expensive
-    # (ESM2/MPNN encoder construction can download pretrained weights).
-    # MLMCoreModel reuses CoreModel.forward()/_build_encoder_input verbatim
-    # (see its module docstring) and has no ESM2/MPNN-specific input
-    # handling, so it only makes sense paired with a plain TransformerEncoder
-    # (EncoderConfig) — reject any other encoder type explicitly rather than
-    # silently building an MLMCoreModel that would feed MLM-vocabulary token
-    # ids into an encoder built for a different vocabulary/input shape.
-    is_mlm = needs_masked_marginal_core_model(model_config.heads)
-    if is_mlm and not isinstance(model_config.encoder, EncoderConfig):
-        raise ValueError(
-            f"MLMHead (masked-marginal scoring) requires a plain "
-            f"TransformerEncoder, got {type(model_config.encoder).__name__}. "
-            f"MLMCoreModel has no ESM2/MPNN-specific encoder handling."
-        )
-
-    # Create encoder based on configuration
     encoder = _create_encoder_from_config(model_config.encoder, device)
 
     # Create SF projection if configured or if SF-consuming heads are present
     sf_projection = _create_sf_projection(model_config.sf_projection, model_config)
 
-    # Select CoreModel class. Head-type dispatch takes priority over
-    # encoder-type dispatch: MLM and site-masked configs use a plain
-    # TransformerEncoder (the same encoder-config type any DASM config
-    # uses), so encoder type alone can't tell their checkpoints from a DASM
-    # one; only the head's requires_site_masked_core_model or
-    # requires_masked_marginal_scoring flag can.
-    if needs_site_masked_core_model(model_config.heads):
-        # ModelConfig.validate_heads has already required this to be the only
-        # head, on a TransformerEncoder with the mask token in its vocabulary.
-        model: CoreModel = SiteMaskedCoreModel(
-            encoder=encoder,
-            prediction_heads=model_config.heads,
-            sf_projection=sf_projection,
-        )
-    elif is_mlm:
-        model = MLMCoreModel(
-            encoder=encoder,
-            prediction_heads=model_config.heads,
-            sf_projection=sf_projection,
-        )
-    elif isinstance(model_config.encoder, ESM2EncoderConfig):
-        model = ESM2CoreModel(
-            encoder=encoder,
-            prediction_heads=model_config.heads,
-            sf_projection=sf_projection,
-        )
-    elif isinstance(model_config.encoder, MPNNLightAttentionEncoderConfig):
-        model = MPNNCoreModel(
-            encoder=encoder,
-            prediction_heads=model_config.heads,
-            sf_projection=sf_projection,
-        )
-    else:
-        model = CoreModel(
-            encoder=encoder,
-            prediction_heads=model_config.heads,
-            sf_projection=sf_projection,
-        )
-
-    # Apply ThermoMPNN warm-start if configured
-    if (
-        isinstance(model_config.encoder, MPNNLightAttentionEncoderConfig)
-        and model_config.encoder.thermompnn_weights_path is not None
-    ):
-        _apply_thermompnn_warmstart(model, model_config)
+    # One core model. The site-masked, MLM, ESM2 and MPNN variants went with
+    # the heads and encoders that selected them (#4).
+    model = CoreModel(
+        encoder=encoder,
+        prediction_heads=model_config.heads,
+        sf_projection=sf_projection,
+    )
 
     model.to(device)
     return model
-
-
-def _apply_thermompnn_warmstart(model: CoreModel, model_config: ModelConfig) -> None:
-    """Apply ThermoMPNN warm-start to encoder and WhichmutResidualHead(s).
-
-    Args:
-        model: Model with MPNNLightAttentionEncoder.
-        model_config: Config with thermompnn_weights_path set.
-    """
-    from dasm2.config import WhichmutResidualHeadConfig
-    from dasm2.heads.types import HeadType
-    from dasm2.heads.whichmut_residual import WhichmutResidualHead
-    from dasm2.models.core.mpnn_light_attention import MPNNLightAttentionEncoder
-
-    encoder_config = model_config.encoder
-    assert isinstance(encoder_config, MPNNLightAttentionEncoderConfig)
-    assert encoder_config.thermompnn_weights_path is not None
-
-    # Load encoder weights, get head output weights back
-    assert isinstance(model.encoder, MPNNLightAttentionEncoder)
-    head_weight, head_bias = model.encoder.load_thermompnn_weights(
-        encoder_config.thermompnn_weights_path
-    )
-
-    # Apply to WhichmutResidualHead prediction layers
-    for head_config in model_config.heads:
-        if head_config.head_type != HeadType.WHICHMUT_RESIDUAL_HEAD:
-            continue
-        assert isinstance(head_config, WhichmutResidualHeadConfig)
-
-        head = model.require_head(HeadType.WHICHMUT_RESIDUAL_HEAD)
-        assert isinstance(head, WhichmutResidualHead)
-
-        if head_config.use_residual:
-            # Residual mode: delta=0 at init (already zero-init from constructor).
-            pass
-        else:
-            # Non-residual: warm-start from ThermoMPNN output layer.
-            head.prediction_layer.weight.data.copy_(head_weight[:20, :])
-            assert head.prediction_layer.bias is not None
-            head.prediction_layer.bias.data.copy_(head_bias[:20])
 
 
 def head_types_need_sf_projection(head_types: Iterable[str]) -> bool:
@@ -280,12 +172,7 @@ def _create_sf_projection(
 
 
 def _create_encoder_from_config(
-    encoder_config: Union[
-        EncoderConfig,
-        ESM2EncoderConfig,
-        MPNNLightAttentionEncoderConfig,
-        IdentityEncoderConfig,
-    ],
+    encoder_config: EncoderConfig,
     device: str,
 ) -> torch.nn.Module:
     """Create encoder from configuration using registry pattern.

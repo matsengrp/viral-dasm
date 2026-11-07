@@ -7,7 +7,6 @@ import torch
 import torch.nn as nn
 
 from dasm2.config import EncoderConfig, HeadConfig
-from dasm2.models.netam_loader import load_netam_data, map_netam_state_dict
 from dasm2.positional_encoding import PositionalEncoding
 from dasm2.sequence.tdi_constants import TDI_PAD_IDX
 
@@ -458,42 +457,3 @@ class TransformerCoreModel(CoreModel):
             sf_projection=sf_projection,
         )
 
-    @classmethod
-    def of_crepe_path(cls, crepe_path: str) -> "TransformerCoreModel":
-        """Create DASM2 TransformerCoreModel by loading netam crepe weights.
-
-        Args:
-            crepe_path: Path to netam crepe model directory
-
-        Returns:
-            TransformerCoreModel with loaded netam weights and compatible architecture
-        """
-        # Load netam data without creating model (breaks circular dependency)
-        model_config, netam_checkpoint_dict = load_netam_data(crepe_path)
-
-        assert isinstance(model_config.encoder, EncoderConfig), (
-            "netam models must use EncoderConfig"
-        )
-
-        # Build SF projection from config (preserves wiggle_beta from netam
-        # model class, e.g. TransformerBinarySelectionModelWiggleAct → 0.3).
-        sf_proj = None
-        if model_config.sf_projection is not None:
-            sf_proj = SelectionFactorProjection(
-                input_dim=model_config.encoder.d_model,
-                wiggle_beta=model_config.sf_projection.wiggle_beta,
-                link=model_config.sf_projection.link,
-            )
-
-        # Create DASM2 model
-        model = cls(model_config.encoder, model_config.heads, sf_projection=sf_proj)
-
-        # Map and load netam state dict (netam checkpoints contain weights directly)
-        mapped_state_dict = map_netam_state_dict(
-            netam_checkpoint_dict, model_config.encoder
-        )
-        model.load_state_dict(
-            mapped_state_dict, strict=False
-        )  # Allow missing prediction head weights
-
-        return model

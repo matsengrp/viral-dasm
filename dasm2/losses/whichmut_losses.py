@@ -1,7 +1,8 @@
-"""Whichmut and AAO Whichmut losses — first-class ``nn.Module`` Loss classes.
+"""The whichmut loss — a first-class ``nn.Module`` Loss class.
 
-These wrap the pure-function math kernels in
-``dasm2.losses.{whichmut_loss,aao_whichmut_loss}``. The pre-#621
+Wraps the pure-function math kernels in ``dasm2.losses.whichmut_loss``. The
+AA-level AAO variant went with ``AAHWhichmutHead``, the only head that paired
+with it (#4). The pre-#621
 plain-Python wrapper classes (used only by ``AAHWhichmutHead``) are
 promoted to ``nn.Module`` subclasses so loss-owned parameters (none today,
 reserved for future) participate cleanly in the optimizer's parameter
@@ -14,7 +15,6 @@ from typing import Dict
 
 from torch import Tensor, nn
 
-from dasm2.losses.aao_whichmut_loss import compute_aao_whichmut_loss_batch
 from dasm2.losses.whichmut_loss import (
     compute_whichmut_loss_batch,
     predict_whichmut_child_codons,
@@ -73,19 +73,4 @@ class WhichmutLoss(nn.Module):
             selection_factors=predictions,
             neutral_rates=batch["codon_neutral_rates"],
             codon_parents_idxs=batch["codon_parents_idxs"],
-        )
-
-
-class AAOWhichmutLoss(nn.Module):
-    """AAO Whichmut AA-level loss (no gauge anchoring; pair with WhichmutLoss)."""
-
-    _REQUIRED = ("aao_neutral_rates", "aa_children_idxs", "loss_mask")
-
-    def forward(self, predictions: Tensor, batch: Dict[str, Tensor]) -> Tensor:
-        _require(batch, self._REQUIRED, "AAOWhichmutLoss")
-        return compute_aao_whichmut_loss_batch(
-            selection_factors=predictions,
-            aao_neutral_rates=batch["aao_neutral_rates"],
-            aa_children_idxs=batch["aa_children_idxs"],
-            mask=batch["loss_mask"],
         )

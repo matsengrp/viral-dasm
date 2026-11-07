@@ -1,23 +1,18 @@
-"""Training hooks for DASM2."""
+"""Training hooks.
 
-from .alpha_optimizer import DASMFitAlphaOptimizer
-from .base import TrainingHook
-from .branch_lengths import BranchLengthOptimizer
+``CheckpointSaveHook`` is the only hook this fork registers. The branch-length,
+alpha, multihit, codon-strength, overfit-guard and PCGrad hooks went with the
+losses and heads that drove them (#4).
+"""
+
+from .base import GradientCombineHook, TrainingHook
 from .checkpoints import CheckpointSaveHook
-from .codon_strength import CodonStrengthOptimizer
-from .factory import HOOK_REGISTRY, create_hook, register_hook
-from .multihit_optimizer import MultihitOptimizer
-from .overfit_guard import OverfitGuardHook
+from .factory import HOOK_REGISTRY, create_hook
 
 __all__ = [
-    "TrainingHook",
-    "BranchLengthOptimizer",
     "CheckpointSaveHook",
-    "CodonStrengthOptimizer",
-    "DASMFitAlphaOptimizer",
-    "MultihitOptimizer",
-    "OverfitGuardHook",
-    "create_hook",
-    "register_hook",
+    "GradientCombineHook",
+    "TrainingHook",
     "HOOK_REGISTRY",
+    "create_hook",
 ]

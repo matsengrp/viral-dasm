@@ -28,40 +28,21 @@ from typing import (
     Union,
 )
 
-if TYPE_CHECKING:
-    from dasm2.molevol.codon_preference import CodonPreferenceTable
-    from dasm2.training.hooks.codon_strength import CodonStrengthOptimizer
-    from dasm2.training.hooks.multihit_optimizer import MultihitOptimizer
-
 import pandas as pd
 import torch
 import yaml
 from torch.utils.data import ConcatDataset, Dataset, Subset
 
 from dasm2.config import (
-    BindingClassificationLossConfig,
-    ContrastiveBindingLossConfig,
     CvSplitConfig,
-    DMSMatrixCalibrationLossConfig,
-    ESM2EncoderConfig,
     HeadConfig,
     HookConfig,
     LossConfig,
-    MLMLossConfig,
     TaskConfig,
     TrainingConfig,
     WarmupPolynomialSchedulerConfig,
-    create_neutral_model_from_config,
     get_config,
 )
-from dasm2.data.binding_corruption import BindingCorruptionConfig
-from dasm2.data.contrastive_binding import (
-    load_contrastive_binding_train_val,
-    require_group_aware_contrastive_cv_split,
-)
-from dasm2.data.delta_affinity import load_delta_affinity_train_val
-from dasm2.data.dms_matrix_dataset import load_dms_matrix_train_val
-from dasm2.data.esm2_wrapper import ESM2DatasetWrapper
 from dasm2.data.evolutionary_dataset import (
     DatasetBundle,
     TransformCollator,
@@ -78,10 +59,6 @@ from dasm2.data.evolutionary_dataset import (
     warn_if_parquet_dataset_mode_mismatch,
 )
 from dasm2.data.local import compute_md5
-from dasm2.data.masking import MaskingConfig
-from dasm2.data.mlm import load_mlm_train_val, require_group_aware_cv_split
-from dasm2.data.mpnn_dms import MPNNDMSDataset
-from dasm2.data.pairwise_binding import load_pairwise_binding_train_val
 from dasm2.data.parquet_backend import CacheBudgetSpec
 from dasm2.data.registry import (
     BINDING_CLASSIFICATION_HEAD_TYPES,
@@ -103,14 +80,12 @@ from dasm2.losses.types import (
     LossType,
 )
 from dasm2.metadata import SourceCheckpointInfo, create_training_metadata_info
-from dasm2.model_catalog import resolve_model
 from dasm2.models.core.attention import (
     EntmaxMultiheadAttention,
     FlashMultiheadAttention,
     RotaryMultiheadAttention,
 )
 from dasm2.models.factory import create_model_from_config
-from dasm2.neutral.base import AbstractNeutralModel, RatesCSPNeutralModel
 from dasm2.sequence.masking import (
     CensorMode,
     CensorSpec,
@@ -135,11 +110,10 @@ from dasm2.training.compute_backend import (
     SingleGPUBackend,
     compute_effective_batch_size,
 )
+from dasm2.training import Trainer  # noqa: F401  (freeze_task_head annotation)
 from dasm2.training.hooks import CheckpointSaveHook
 from dasm2.training.hooks.base import GradientCombineHook, TrainingHook
-from dasm2.training.hooks.branch_lengths import BranchLengthOptimizer
-from dasm2.training.hooks.factory import create_gradient_combine_hook, create_hook
-from dasm2.training.hooks.overfit_guard import freeze_task_head
+from dasm2.training.hooks.factory import create_hook
 from dasm2.training.logging import TrainingLogger
 from dasm2.training.types import StepBudget
 from dasm2.utils.device import pick_device
@@ -888,80 +862,35 @@ def _apply_cli_overrides(
     return training_config
 
 
-def _resolve_tdi_config(
-    training_config: TrainingConfig,
-    _print: Callable[..., None],
-) -> Tuple[bool, Optional[Path]]:
-    """Check if TDI encoder is configured and validate tdi_tokens_dir.
 
-    Args:
-        training_config: Training config with model and tdi_tokens_dir fields.
-        _print: Print function (rank-guarded for multi-GPU).
+
+
+
+
+def freeze_task_head(trainer: "Trainer", task: "Task", tasks: List["Task"]) -> bool:
+    """Freeze ``task``'s head parameters, unless another task shares the head.
+
+    Inlined from the deleted ``dasm2/training/hooks/overfit_guard.py`` (#4),
+    whose ``OverfitGuardHook`` was the other caller. ``requires_grad`` is not
+    part of ``state_dict``, so a resumed run re-derives the freeze here for a
+    task whose ``loss_weight`` is already ``0.0``.
 
     Returns:
-        Tuple of (use_tdi, tdi_tokens_dir).
-
-    Raises:
-        ValueError: If TDI encoder is used without tdi_tokens_dir or tdi_tokens_name.
-        FileNotFoundError: If tdi_tokens_dir does not exist.
+        True if parameters were frozen, False if skipped due to head sharing.
     """
-    if not training_config.has_tdi_encoder:
-        return False, None
-    _print("3Di encoder detected - will use TDI-wrapped datasets")
-
-    # Resolve tdi_tokens_dir: catalog name takes priority, then explicit dir
-    tdi_tokens_dir: Optional[Path] = None
-    if training_config.tdi_tokens_name is not None:
-        tdi_tokens_dir = resolve_model(training_config.tdi_tokens_name)
-        _print(
-            f"  Resolved tdi_tokens_name '{training_config.tdi_tokens_name}' -> {tdi_tokens_dir}"
-        )
-    elif training_config.tdi_tokens_dir is not None:
-        tdi_tokens_dir = training_config.tdi_tokens_dir
-
-    if tdi_tokens_dir is None:
-        raise ValueError(
-            "Encoder has num_tdi_tokens configured but neither 'tdi_tokens_dir' "
-            "nor 'tdi_tokens_name' is set. "
-            "Set one in the config YAML or use generate_3di_config to resolve it."
-        )
-
-    if not tdi_tokens_dir.exists():
-        raise FileNotFoundError(f"tdi_tokens_dir not found: {tdi_tokens_dir}")
-    return True, tdi_tokens_dir
-
-
-def _load_codon_pref_tables(
-    training_config: TrainingConfig,
-) -> List["CodonPreferenceTable"]:
-    """Load the configured codon-optimality axes (CSC, optional tAI) (issue #747).
-
-    Returns the axes in strength-vector column order (CSC first, then tAI), or
-    an empty list when no codon-optimality table is configured. The tAI axis
-    overlays the CSC axis, so it cannot be set without CSC.
-    """
-    from dasm2.molevol.codon_preference import load_csc_table, load_tai_table
-
-    if training_config.codon_pref_table is None:
-        if training_config.codon_pref_tai_table is not None:
-            raise ValueError(
-                "codon_pref_tai_table is set but codon_pref_table (CSC) is not. "
-                "The tAI axis overlays the CSC axis; set both or neither."
-            )
-        return []
-
-    tables: List["CodonPreferenceTable"] = [
-        load_csc_table(training_config.codon_pref_table)
-    ]
-    if training_config.codon_pref_tai_table is not None:
-        tables.append(load_tai_table(training_config.codon_pref_tai_table))
-    return tables
+    sharing_tasks = [t for t in tasks if t.head_type == task.head_type]
+    if len(sharing_tasks) > 1:
+        return False
+    head = trainer.unwrapped_model.prediction_heads[task.head_type.value]
+    for parameter in head.parameters():
+        parameter.requires_grad = False
+    return True
 
 
 def train_model_from_datasets(  # noqa: C901
     config_name: str,
     head_datasets: Dict[str, Tuple[Any, Any]],
-    neutral_model: Optional[AbstractNeutralModel],
+    neutral_model: None,
     output_dir: str = "checkpoints",
     max_train_steps: Optional[int] = None,
     eval_every_steps: Optional[int] = None,
@@ -1436,27 +1365,6 @@ def train_model_from_datasets(  # noqa: C901
             f"Only head parameters will be trained."
         )
 
-    # Wrap datasets with ESM2DatasetWrapper if using ESM2Encoder.
-    # For bundles, with_wrapped_dataset() returns a new bundle preserving all state,
-    # and the collator's tensor_specs are augmented with ESM2-specific keys.
-    if isinstance(training_config.model.encoder, ESM2EncoderConfig):
-        esm2_model_name = training_config.model.encoder.model_name
-        _print("ESM2 encoder detected - wrapping datasets with ESM2DatasetWrapper")
-        wrapped_datasets: Dict[str, Tuple[Any, Any]] = {}
-        for head_type_str, (train_item, val_item) in head_datasets.items():
-            if isinstance(train_item, DatasetBundle):
-                train_item = train_item.with_wrapped_dataset(
-                    ESM2DatasetWrapper(train_item.dataset, model_name=esm2_model_name)
-                ).with_esm2_collator()
-                val_item = val_item.with_wrapped_dataset(
-                    ESM2DatasetWrapper(val_item.dataset, model_name=esm2_model_name)
-                ).with_esm2_collator()
-            else:
-                train_item = ESM2DatasetWrapper(train_item, model_name=esm2_model_name)
-                val_item = ESM2DatasetWrapper(val_item, model_name=esm2_model_name)
-            wrapped_datasets[head_type_str] = (train_item, val_item)
-        head_datasets = wrapped_datasets
-
     # Log dataset sizes
     for head_type_str, (train_item, val_item) in head_datasets.items():
         if isinstance(train_item, DatasetBundle):
@@ -1471,60 +1379,6 @@ def train_model_from_datasets(  # noqa: C901
             val_len = len(val_item)  # type: ignore[arg-type]
         _print(f"Dataset for {head_type_str}: Train={train_len}, Val={val_len}")
 
-    # Build the codon-strength optimizer hook when free-strength fitting is
-    # requested and a codon-optimality table is configured (issue #747).
-    codon_strength_optimizer: Optional["CodonStrengthOptimizer"] = None
-    if training_config.fit_codon_strengths:
-        codon_pref_tables = _load_codon_pref_tables(training_config)
-        if not codon_pref_tables:
-            raise ValueError(
-                "fit_codon_strengths is set but no codon-optimality table is "
-                "configured. Set codon_pref_table (and optionally "
-                "codon_pref_tai_table)."
-            )
-        # codon_pref_log is shared-memory dataset state on every loader/mode
-        # (DESIGN.md D6, issue #1039), so fit_codon_strengths' between-cycle
-        # refit (CodonStrengthOptimizer._rewrite_cache) reaches streaming and
-        # Parquet-backed bundles the same way BranchLengthOptimizer already
-        # reaches branch lengths — no construction-time mode restriction
-        # needed here.
-        from dasm2.training.hooks.codon_strength import CodonStrengthOptimizer
-
-        codon_strength_optimizer = CodonStrengthOptimizer(tables=codon_pref_tables)
-        _print(
-            "Codon strength fitting enabled: β_k fit between cycles "
-            f"({[t.name for t in codon_pref_tables]})."
-        )
-
-    # Build the multihit-factor optimizer hook when refitting is requested
-    # and a multihit-correction model is configured (issue #501). Warm-starts
-    # from whatever theta the neutral model was loaded with (the pretrained
-    # antibody triple, or a previously-fitted one from a resumed checkpoint).
-    # log_hit_class_factors is a shared-memory parameter on the bundle's
-    # multihit model (DESIGN.md D6, issue #1041), so the between-cycle refit
-    # reaches streaming and Parquet-backed bundles the same way
-    # BranchLengthOptimizer already reaches branch lengths — no dataset_mode
-    # restriction needed here.
-    multihit_optimizer: Optional["MultihitOptimizer"] = None
-    if training_config.fit_multihit_factors:
-        current_multihit = getattr(neutral_model, "multihit_model", None)
-        if current_multihit is None:
-            raise ValueError(
-                "fit_multihit_factors is set but no multihit-correction model "
-                "is configured. Set neutral_model.multihit_model_name. On a "
-                "corpus whose rates are precomputed in the data and that has "
-                "no neutral model of its own (Compara Parquet), use the "
-                "carrier: neutral_model: {type: PrecomputedRates, "
-                "multihit_model_name: ...} (issue #1041)."
-            )
-        from dasm2.training.hooks.multihit_optimizer import MultihitOptimizer
-
-        multihit_optimizer = MultihitOptimizer(init_theta=current_multihit.to_weights())
-        _print(
-            "Multihit factor fitting enabled: theta fit between cycles "
-            f"(warm start {multihit_optimizer.theta})."
-        )
-
     # Create tasks from head configs with per-head datasets
     tasks = _create_tasks_from_config(
         head_configs=head_configs,
@@ -1536,19 +1390,8 @@ def train_model_from_datasets(  # noqa: C901
         checkpoint_every_n_steps=checkpoint_every_n_steps,
         is_main_process=backend.is_main_process,
         tdi_tokens_dir=training_config.tdi_tokens_dir,
-        bl_optimization_parallel=bl_optimization_parallel,
         task_configs=training_config.tasks,
-        codon_strength_optimizer=codon_strength_optimizer,
-        multihit_optimizer=multihit_optimizer,
-        bl_optimization_num_workers=training_config.bl_optimization_num_workers,
-        bl_optimization_max_chunk_size=training_config.bl_optimization_max_chunk_size,
-        freeze_branch_lengths=training_config.freeze_branch_lengths,
-        freeze_branch_lengths_after_first_cycle=(
-            training_config.freeze_branch_lengths_after_first_cycle
-        ),
-        init_branch_lengths_from_input=training_config.init_branch_lengths_from_input,
         save_training_state=training_config.save_training_state,
-        recompute_branch_lengths_on_resume=recompute_branch_lengths_on_resume,
     )
 
     # On --resume, carry over a task's checkpoint-recorded loss_weight when
@@ -1656,10 +1499,17 @@ def train_model_from_datasets(  # noqa: C901
     # combining gradients is inherently cross-task. Empty by default, which
     # reproduces today's plain-sum combination exactly (Trainer's own
     # no-hook branch).
-    combine_gradient_hooks: List[GradientCombineHook] = [
-        create_gradient_combine_hook(hook_config)
-        for hook_config in training_config.combine_gradient_hooks
-    ]
+    # PCGradHook was the only ``GradientCombineHook``, and it went with the
+    # multi-task heads it combined gradients for (#4). An empty list is the
+    # plain-sum combination the Trainer's own no-hook branch already does; a
+    # config that asks for one fails here rather than being ignored.
+    if training_config.combine_gradient_hooks:
+        raise ValueError(
+            "combine_gradient_hooks is configured, but this fork registers "
+            "none. The gradient-combination hooks were removed with the "
+            "multi-task heads (#4)."
+        )
+    combine_gradient_hooks: List[GradientCombineHook] = []
 
     start_cycle_task_index = 0
     start_cycle_step = 0
@@ -1868,26 +1718,11 @@ def _parse_head_data_config(
     return result
 
 
-def _pooled_target_spec(head_type: HeadType) -> Tuple[str, torch.dtype]:
-    """Return the (batch_key, dtype) spec for a pooled/delta-affinity head.
-
-    Dispatches to the head class's ``target_key`` / ``target_dtype`` ClassVars
-    when defined (the three PooledPredictionHead subclasses). Falls back to
-    the delta-affinity defaults for legacy :class:`DeltaAffinityHead`, which
-    doesn't inherit from PooledPredictionHead.
-    """
-    from dasm2.data.delta_affinity import DELTA_AFFINITY_KEY
-    from dasm2.heads.factory import HEAD_REGISTRY
-
-    head_class = HEAD_REGISTRY.get(head_type)
-    target_key = getattr(head_class, "target_key", DELTA_AFFINITY_KEY)
-    target_dtype = getattr(head_class, "target_dtype", torch.float32)
-    return target_key, target_dtype
 
 
 def load_evolutionary_head_data(
     data_path: str,
-    neutral_model: Optional["AbstractNeutralModel"],
+    neutral_model: None,
     dataset_mode: Literal["precomputed", "streaming"],
     use_distance: bool = False,
     needs_parent_nt_windows: bool = False,
@@ -1931,21 +1766,17 @@ def load_evolutionary_head_data(
             )
         return load_evolutionary_train_val_precomputed(
             data_path,
-            neutral_model=(
-                neutral_model
-                if isinstance(neutral_model, RatesCSPNeutralModel)
-                else None
-            ),
+            neutral_model=None,
             include_parent_nt_windows=needs_parent_nt_windows,
             codon_pref_log=codon_pref_log,
         )
 
     if is_parquet_data_spec(data_path):
         warn_if_parquet_dataset_mode_mismatch(dataset_mode)
-        rcs_model = (
-            neutral_model if isinstance(neutral_model, RatesCSPNeutralModel) else None
-        )
-        multihit = rcs_model.multihit_model if rcs_model else None
+        # ``neutral_model`` is always None in this fork, so there is no
+        # rates/CSP model and no multihit correction to carry (#4).
+        rcs_model = None
+        multihit = None
         return load_evolutionary_train_val(
             data_path,
             neutral_model=rcs_model,
@@ -1962,11 +1793,6 @@ def load_evolutionary_head_data(
         raise ValueError(
             "Evolutionary head with CSV data requires a neutral model, "
             "but neutral_model is None. Add neutral_model to the config."
-        )
-    if not isinstance(neutral_model, RatesCSPNeutralModel):
-        raise ValueError(
-            f"Evolutionary head with CSV data requires a RatesCSPNeutralModel "
-            f"(e.g., ThriftySHM), but got {type(neutral_model).__name__}"
         )
     return load_evolutionary_train_val(
         data_path,
@@ -2147,7 +1973,7 @@ def _resolve_reference_bases(
 def _load_whichmut_head_data(
     data_path: str,
     loss_type: LossType,
-    neutral_model: Optional["AbstractNeutralModel"],
+    neutral_model: None,
     dataset_mode: Literal["precomputed", "streaming"],
     use_tdi: bool,
     tdi_tokens_dir: Optional[Path],
@@ -2193,11 +2019,7 @@ def _load_whichmut_head_data(
         warn_if_parquet_dataset_mode_mismatch(dataset_mode)
         return load_whichmut_train_val(
             data_path,
-            neutral_model=(
-                neutral_model
-                if isinstance(neutral_model, RatesCSPNeutralModel)
-                else None
-            ),
+            neutral_model=None,
             cv_split=cv_split,
             censor_table=censor_table,
             censor_mode=censor_mode,
@@ -2215,11 +2037,6 @@ def _load_whichmut_head_data(
         raise ValueError(
             "Whichmut head with CSV data requires a neutral model, "
             "but neutral_model is None. Add neutral_model to the config."
-        )
-    if not isinstance(neutral_model, RatesCSPNeutralModel):
-        raise ValueError(
-            f"Whichmut head requires a RatesCSPNeutralModel (e.g., ThriftySHM), "
-            f"but got {type(neutral_model).__name__}"
         )
 
     # TDI and MPNN paths (CSV only — not applicable to Parquet)
@@ -2656,14 +2473,6 @@ def train_model(  # noqa: C901
         # same validator dasm2.data.mlm.create_mlm_dataset/load_mlm_train_val
         # call) so the error surfaces before any data loads, not partway
         # through Phase 4.
-        mlm_task_present = any(
-            tc.head_type in MLM_HEAD_TYPES for tc in training_config.tasks
-        )
-        if mlm_task_present:
-            require_group_aware_cv_split(cv)
-        # The contrastive loader likewise needs whole antigen families per fold.
-        if contrastive_task_present:
-            require_group_aware_contrastive_cv_split(cv)
 
     # Validate head types before loading any data (fail fast)
     _reject_untrainable_heads(training_config)
@@ -2671,55 +2480,20 @@ def train_model(  # noqa: C901
     provided_heads = set(data.keys())
     _validate_head_datasets_match_config(config_name, config_heads, provided_heads)
 
-    # Create neutral model (purely config-driven; per-head loaders validate at load time)
-    neutral_model: Optional[AbstractNeutralModel] = None
-    if training_config.neutral_model is not None:
-        neutral_config = training_config.neutral_model
-        if hasattr(neutral_config, "model_name"):
-            _print(f"Loading neutral model: {neutral_config.model_name}")
-        elif hasattr(neutral_config, "model_path"):
-            _print(f"Loading neutral model from: {neutral_config.model_path}")
-        if hasattr(neutral_config, "multihit_model_name"):
-            multihit_name = neutral_config.multihit_model_name
-            if multihit_name:
-                _print(f"  with multihit correction: {multihit_name}")
-        neutral_model = create_neutral_model_from_config(neutral_config)
-    else:
-        _print(
-            "No neutral model configured — data must contain precomputed neutral outputs"
-        )
+    # ``TrainingConfig.neutral_model`` is typed to admit nothing but None in
+    # this fork, so there is no model to build: the data carries precomputed
+    # neutral outputs from the mat-pcp censor tables (#4).
+    neutral_model: None = None
+    _print("No neutral model — data carries precomputed neutral outputs")
 
-    # Load codon preference tables if configured (issue #747). CSC and/or tAI
-    # axes are combined as Σ_k β_k·ξ̃ᵏ; the strengths start at 1 and are fit
-    # between cycles by the CodonStrengthOptimizer hook when
-    # ``fit_codon_strengths`` is set.
     codon_pref_log: Optional[torch.Tensor] = None
-    codon_pref_tables = _load_codon_pref_tables(training_config)
-    if codon_pref_tables:
-        from dasm2.molevol.codon_preference import (
-            build_codon_pref_log,
-            design_conditioning,
-        )
-
-        for table in codon_pref_tables:
-            _print(f"Loaded codon preference table ({table.name}): {table.source}")
-
-        codon_pref_log = build_codon_pref_log(codon_pref_tables)
-
-        cond = design_conditioning(codon_pref_tables)
-        _print(
-            f"  Codon-optimality design: axes={cond.axis_names}, "
-            f"single-nt synonymous codons={cond.n_codons}, "
-            f"condition number={cond.condition_number:.3g}"
-        )
-        for (a, b), r in cond.correlations.items():
-            _print(f"  Collinearity {a}~{b}: r={r:.3f}")
 
     # Parse head data config (validates types and formats)
     parsed_data = _parse_head_data_config(data)
 
-    # Determine if TDI wrapping is needed (handled at loading time for unified pipeline)
-    use_tdi, tdi_tokens_dir = _resolve_tdi_config(training_config, _print)
+    # TDI (3Di structural token) wrapping went with ``data/tdi_whichmut.py``
+    # and the structural datasets it served (#4).
+    use_tdi, tdi_tokens_dir = False, None
 
     # Dataset pipeline mode: "precomputed" (default) or "streaming"
     dataset_mode = training_config.dataset_mode
@@ -2749,74 +2523,16 @@ def train_model(  # noqa: C901
     for head_type, data_paths in parsed_data.items():
         head_type_str = head_type.value
 
-        if head_type == HeadType.AAH_WHICHMUT_HEAD:
-            # AAH (Amino Acid Hybrid) requires two datasets (whichmut + aao)
-            whichmut_path, aao_path = data_paths[0], data_paths[1]
-            _print(f"Loading data for {head_type_str}:")
-            _print(f"  Whichmut: {whichmut_path}")
-            _print(f"  AAO: {aao_path}")
-            if not isinstance(neutral_model, RatesCSPNeutralModel):
-                raise ValueError(
-                    f"AAH head requires a RatesCSPNeutralModel (e.g., ThriftySHM), "
-                    f"but got {type(neutral_model).__name__}"
-                )
-            context_free_model: Optional[AbstractNeutralModel] = None
-            if training_config.context_free_neutral_model is not None:
-                _print("  Creating context-free neutral model for AA-only data")
-                _cf = create_neutral_model_from_config(
-                    training_config.context_free_neutral_model
-                )
-                if not hasattr(_cf, "neutral_aa_rates"):
-                    raise TypeError(
-                        f"context_free_neutral_model must expose neutral_aa_rates, "
-                        f"but {type(_cf).__name__} does not"
-                    )
-                context_free_model = _cf
-            datasets = load_aah_datasets(
-                whichmut_path,
-                aao_path,
-                neutral_model,
-                context_free_model=context_free_model,
-                mode=dataset_mode,
-            )
-            head_datasets[f"{head_type_str}:{_AAH_WHICHMUT_SUFFIX}"] = (
-                datasets.whichmut.train,
-                datasets.whichmut.val,
-            )
-            head_datasets[f"{head_type_str}:{_AAH_AAO_SUFFIX}"] = (
-                datasets.aao.train,
-                datasets.aao.val,
-            )
-            continue
-
         data_path = data_paths[0]
         _print(f"Loading data for {head_type_str}: {data_path}")
 
         train_item: Any
         val_item: Any
 
-        # Dataset dispatch is split across two axes (intentional — see
-        # below; the dense DMS-matrix task, ``DMS_MATRIX_CALIBRATION``, is
-        # loss-keyed too and has its own branch after the whichmut one):
-        #   * Loss-keyed for the L×20 evolutionary / whichmut families.
-        #     ``EVOLUTIONARY_LOSS_TYPES`` (DASM / QDASM / Hybrid) and
-        #     ``WHICHMUT_LOSS_TYPES`` (Whichmut / AAO Whichmut) each map
-        #     to a single dataset shape that does not depend on the head
-        #     emitting the predictions. Replaces the pre-#621 head-type
-        #     sets ``EVOLUTIONARY_HEAD_TYPES`` / ``get_whichmut_head_types``.
-        #   * Head-keyed for the architecture-determined families
-        #     (``MPNN_WHICHMUT_HEAD_TYPES``, ``DMS_HEAD_TYPES``,
-        #     ``STRUCTURAL_HEAD_TYPES``, ``DELTA_AFFINITY_HEAD_TYPES``,
-        #     ``CONTRASTIVE_BINDING_HEAD_TYPES``,
-        #     ``BINDING_CLASSIFICATION_HEAD_TYPES``, ``MLM_HEAD_TYPES``).
-        #     These heads each have one canonical loss, so a head-type
-        #     filter is equally precise and reads more naturally at the
-        #     call site.
-        # The hybrid axis is *not* a transitional artefact — heads in
-        # the second group will stay head-keyed because their dataset
-        # construction depends on architectural parameters (MPNN
-        # features dir, structural fixture, DMS config) that are not
-        # carried on ``LossConfig`` today.
+        # Dataset dispatch is loss-keyed. The head-keyed arms -- MPNN
+        # whichmut, DMS, structural, delta-affinity, contrastive and
+        # binding classification, MLM, and the two-dataset AAH head --
+        # went with the datasets they loaded (#4).
         head_loss_configs = task_loss_configs_by_head[head_type]
         head_loss_type = head_loss_configs[0].loss_type
         is_evolutionary = head_loss_type in EVOLUTIONARY_LOSS_TYPES
@@ -2863,148 +2579,6 @@ def train_model(  # noqa: C901
                 censor_mode=training_config.censor_mode,
                 reference_base_idxs=_resolve_reference_bases(training_config, _print),
                 cache_budget=cache_budget,
-            )
-        elif head_loss_type == LossType.DMS_MATRIX_CALIBRATION:
-            # The split comes from the data spec (a split file or a ``split`` column).
-            # ``cv_split`` / ``--cv_*`` is rejected for this loss type up front, where
-            # ``cv_supported_loss_types`` is checked.
-            if len(head_loss_configs) != 1 or not isinstance(
-                head_loss_configs[0], DMSMatrixCalibrationLossConfig
-            ):
-                raise ValueError(
-                    f"{head_type_str} with a dms_matrix_calibration loss takes exactly "
-                    f"one task, got {[c.loss_type.value for c in head_loss_configs]}."
-                )
-            dms_matrix_loss_config = head_loss_configs[0]
-            train_item, val_item = load_dms_matrix_train_val(
-                data_path, mask_rate=dms_matrix_loss_config.mask_rate
-            )
-        elif head_type in MPNN_WHICHMUT_HEAD_TYPES:
-            # MPNN Whichmut: data_path is "data_spec:mpnn_features_dir"
-            if ":" not in data_path:
-                raise ValueError(
-                    f"MPNN whichmut data must be 'data_spec:mpnn_features_dir' "
-                    f"(colon-separated), got: {data_path}"
-                )
-            evol_spec, mpnn_dir = data_path.rsplit(":", 1)
-            mpnn_features_path = Path(mpnn_dir)
-            if not mpnn_features_path.exists():
-                raise FileNotFoundError(
-                    f"MPNN features directory not found: {mpnn_features_path}"
-                )
-            if not isinstance(neutral_model, RatesCSPNeutralModel):
-                raise ValueError(
-                    f"MPNN whichmut head requires a RatesCSPNeutralModel, "
-                    f"but got {type(neutral_model).__name__}"
-                )
-            _print(f"  Evolutionary data: {evol_spec}")
-            _print(f"  MPNN features dir: {mpnn_dir}")
-            # Use unified factory: loads, splits, wraps with MPNN, builds collator
-            train_df, val_df, nickname = _load_and_split(evol_spec)
-            structure_ids_train = train_df["structure_id"].tolist()
-            structure_ids_val = val_df["structure_id"].tolist()
-            # Censoring reaches this branch too. `WhichmutResidualHead`'s loss is
-            # a plain `WhichmutLoss` (see losses/factory._build_whichmut_residual),
-            # so it consumes `codon_neutral_rates` and `loss_mask` identically --
-            # but `LossType.WHICHMUT_RESIDUAL` is not in `WHICHMUT_LOSS_TYPES`, so
-            # `is_whichmut` is False and dispatch never reaches
-            # `_load_whichmut_head_data`. Forwarding the table at the *factory*
-            # signature alone left this call site silently uncensored.
-            mpnn_censor_table = _resolve_censor_table(training_config, _print)
-            mpnn_reference = _resolve_reference_bases(training_config, _print)
-            train_item = create_mpnn_whichmut_dataset(
-                train_df,
-                neutral_model,
-                mpnn_dir,
-                structure_ids_train,
-                mode=dataset_mode,
-                nickname=f"{nickname}_train",
-                censor_table=mpnn_censor_table,
-                censor_mode=training_config.censor_mode,
-                reference_base_idxs=mpnn_reference,
-            )
-            val_item = create_mpnn_whichmut_dataset(
-                val_df,
-                neutral_model,
-                mpnn_dir,
-                structure_ids_val,
-                mode=dataset_mode,
-                nickname=f"{nickname}_val",
-                censor_table=mpnn_censor_table,
-                censor_mode=training_config.censor_mode,
-                reference_base_idxs=mpnn_reference,
-            )
-        elif head_type in DMS_HEAD_TYPES:
-            # DMS: data_path is "dms_config_yaml:mpnn_features_dir"
-            if ":" not in data_path:
-                raise ValueError(
-                    f"DMS data must be 'dms_config.yaml:mpnn_features_dir' "
-                    f"(colon-separated), got: {data_path}"
-                )
-            dms_config_path, mpnn_dir = data_path.rsplit(":", 1)
-            mpnn_features_path = Path(mpnn_dir)
-            if not mpnn_features_path.exists():
-                raise FileNotFoundError(
-                    f"MPNN features directory not found: {mpnn_features_path}"
-                )
-            _print(f"  DMS config: {dms_config_path}")
-            _print(f"  MPNN features dir: {mpnn_dir}")
-            train_item, val_item = _load_dms_with_mpnn(
-                dms_config_path,
-                mpnn_features_path,
-                is_main_process=_is_main_process(),
-            )
-        elif head_type in STRUCTURAL_HEAD_TYPES:
-            train_item, val_item = load_structural_train_val(data_path)
-        elif head_type in DELTA_AFFINITY_HEAD_TYPES:
-            target_key, target_dtype = _pooled_target_spec(head_type)
-            train_item, val_item = load_delta_affinity_train_val(
-                data_path,
-                seed,
-                target_key=target_key,
-                target_dtype=target_dtype,
-            )
-        elif head_type in CONTRASTIVE_BINDING_HEAD_TYPES:
-            contrastive_loss_config = head_loss_configs[0]
-            train_item, val_item = load_contrastive_binding_train_val(
-                data_path,
-                seed,
-                cv_split=training_config.cv_split,
-                positive_rule=(
-                    contrastive_loss_config.positive_rule
-                    if isinstance(contrastive_loss_config, ContrastiveBindingLossConfig)
-                    else "antigen_key"
-                ),
-            )
-        elif head_type in BINDING_CLASSIFICATION_HEAD_TYPES:
-            binding_loss_config = head_loss_configs[0]
-            binding_corruption_config = (
-                BindingCorruptionConfig(mask_rate=binding_loss_config.mask_rate)
-                if isinstance(binding_loss_config, BindingClassificationLossConfig)
-                else None
-            )
-            train_item, val_item = load_pairwise_binding_train_val(
-                data_path,
-                seed,
-                cv_split=training_config.cv_split,
-                corruption_config=binding_corruption_config,
-            )
-        elif head_type in MLM_HEAD_TYPES:
-            mlm_loss_config = head_loss_configs[0]
-            masking_config = (
-                MaskingConfig(
-                    mask_rate=mlm_loss_config.mask_rate,
-                    mask_token_prob=mlm_loss_config.mask_token_prob,
-                    random_token_prob=mlm_loss_config.random_token_prob,
-                )
-                if isinstance(mlm_loss_config, MLMLossConfig)
-                else None
-            )
-            train_item, val_item = load_mlm_train_val(
-                data_path,
-                seed,
-                masking_config=masking_config,
-                cv_split=training_config.cv_split,
             )
         else:
             raise ValueError(
@@ -3071,136 +2645,6 @@ def train_model(  # noqa: C901
     )
 
 
-def _load_dms_with_mpnn(
-    dms_config_path: str,
-    mpnn_features_dir: Path,
-    *,
-    is_main_process: bool = True,
-) -> Tuple[DatasetBundle, DatasetBundle]:
-    """Load DMS dataset(s) wrapped with MPNN features.
-
-    The DMS config is a YAML file specifying one or more DMS domains.
-    Each domain has a WT sequence, CSV path, and structure_id for MPNN
-    feature lookup.
-
-    YAML format (single domain):
-        wt_sequence: "MKRMAL..."
-        csv_path: "path/to/measurements.csv"
-        structure_id: "1A14"
-        nickname: "megascale_domain_1"
-
-    YAML format (multiple domains):
-        domains:
-          - wt_sequence: "MKRMAL..."
-            csv_path: "path/to/domain1.csv"
-            structure_id: "1A14"
-            nickname: "domain_1"
-          - wt_sequence: "EVQLVES..."
-            csv_path: "path/to/domain2.csv"
-            structure_id: "2B3C"
-            nickname: "domain_2"
-
-    For multiple domains, datasets are combined via ConcatDataset.
-    Train/val split uses a fixed 80/20 random split.
-
-    Args:
-        dms_config_path: Path to DMS config YAML file.
-        mpnn_features_dir: Directory containing {structure_id}.npz files.
-
-    Returns:
-        Tuple of (train_bundle, val_bundle) as ``DatasetBundle`` with
-        combined DMS + MPNN collator specs.
-
-    Raises:
-        FileNotFoundError: If config file or CSV files not found.
-        ValueError: If config format is invalid.
-    """
-    config_path = Path(dms_config_path)
-    if not config_path.exists():
-        raise FileNotFoundError(f"DMS config file not found: {config_path}")
-
-    with open(config_path) as f:
-        config = yaml.safe_load(f)
-
-    # Normalize to list of domain configs
-    if "domains" in config:
-        domains = config["domains"]
-    else:
-        # Single domain config at top level
-        domains = [config]
-
-    all_train_datasets: List[Dataset] = []
-    all_val_datasets: List[Dataset] = []
-    # Track the collator from the first domain (all DMS domains share the same spec)
-    dms_collator = None
-    dms_worker_init_fn = None
-
-    for domain in domains:
-        wt_sequence = domain["wt_sequence"]
-        csv_path = Path(domain["csv_path"])
-        structure_id = domain["structure_id"]
-        nickname = domain.get("nickname", "unnamed_dms")
-
-        if not csv_path.is_absolute():
-            # Resolve relative to config file directory
-            csv_path = config_path.parent / csv_path
-
-        if is_main_process:
-            print(f"  Loading DMS domain: {nickname} (structure_id={structure_id})")
-
-        # Create base DMS dataset via unified pipeline
-        dms_df = pd.read_csv(csv_path)
-        dms_bundle = create_dms_dataset(
-            wt_aa_sequence=wt_sequence,
-            dms_df=dms_df,
-            nickname=nickname,
-        )
-        if dms_collator is None:
-            dms_collator = dms_bundle.collator
-            dms_worker_init_fn = dms_bundle.worker_init_fn
-
-        # Wrap with MPNN features
-        wrapped_dataset = MPNNDMSDataset(
-            base_dataset=dms_bundle.dataset,
-            mpnn_features_dir=mpnn_features_dir,
-            structure_id=structure_id,
-        )
-
-        # Split into train/val random split
-        num_samples = len(wrapped_dataset)
-        num_train = int(num_samples * DEFAULT_TRAIN_FRACTION)
-        generator = torch.Generator().manual_seed(42)
-        indices = torch.randperm(num_samples, generator=generator).tolist()
-
-        train_subset = Subset(wrapped_dataset, indices[:num_train])
-        val_subset = Subset(wrapped_dataset, indices[num_train:])
-
-        all_train_datasets.append(train_subset)
-        all_val_datasets.append(val_subset)
-
-    # Combine multiple domains
-    if len(all_train_datasets) == 1:
-        train_ds, val_ds = all_train_datasets[0], all_val_datasets[0]
-    else:
-        train_ds, val_ds = (
-            ConcatDataset(all_train_datasets),
-            ConcatDataset(all_val_datasets),
-        )
-
-    # Build combined collator with MPNN specs added to DMS base specs
-    assert dms_collator is not None
-    assert dms_worker_init_fn is not None
-    combined_specs = {
-        **dms_collator.tensor_specs,
-        "mpnn_features": (0.0, "codon"),
-        "structural_logits": (0.0, "codon"),
-    }
-    combined_collator = TransformCollator(tensor_specs=combined_specs)
-
-    return (
-        DatasetBundle(train_ds, combined_collator, dms_worker_init_fn),
-        DatasetBundle(val_ds, combined_collator, dms_worker_init_fn),
-    )
 
 
 def _create_tasks_from_config(
@@ -3215,16 +2659,7 @@ def _create_tasks_from_config(
     *,
     is_main_process: bool = True,
     tdi_tokens_dir: Optional[Path] = None,
-    codon_strength_optimizer: Optional["CodonStrengthOptimizer"] = None,
-    multihit_optimizer: Optional["MultihitOptimizer"] = None,
-    bl_optimization_num_workers: Optional[int] = None,
-    bl_optimization_max_chunk_size: int = 1000,
-    freeze_branch_lengths: bool = False,
     save_training_state: bool = False,
-    recompute_branch_lengths_on_resume: bool = False,
-    bl_optimization_parallel: bool = True,
-    freeze_branch_lengths_after_first_cycle: bool = False,
-    init_branch_lengths_from_input: bool = False,
 ) -> List[Task]:
     """Create training tasks from head configurations with per-head datasets.
 
@@ -3300,20 +2735,6 @@ def _create_tasks_from_config(
 
     tasks: List[Task] = []
 
-    # Create shared hooks. Branch-length-optimization RAM knobs come from the
-    # TrainingConfig (defaults preserve historical behavior: auto workers,
-    # 1000-seq chunks). A large per-cycle corpus that OOM-kills a worker at the
-    # cycle boundary (v8 joint 1M, issue #724) lowers them per run in its YAML
-    # rather than changing the global defaults that every experiment shares.
-    bl_optimizer = BranchLengthOptimizer(
-        num_workers=bl_optimization_num_workers,
-        max_chunk_size=bl_optimization_max_chunk_size,
-        freeze=freeze_branch_lengths,
-        freeze_after_first_cycle=freeze_branch_lengths_after_first_cycle,
-        init_from_input=init_branch_lengths_from_input,
-        recompute_on_resume=recompute_branch_lengths_on_resume,
-        parallel=bl_optimization_parallel,
-    )
     checkpoint_hook = CheckpointSaveHook(
         output_dir=str(output_path),
         notes=notes,
@@ -3428,35 +2849,14 @@ def _create_tasks_from_config(
         is_last_task = task_idx == total_tasks - 1
         train_item, val_item = head_datasets[dataset_key]
 
-        # BL hook attachment is loss-keyed (replaces the pre-#621
-        # ``EVOLUTIONARY_HEAD_TYPES`` head-type set). AAH expansion
-        # gives one Task per loss_type; the AAO branch correctly does
-        # not get BL hooks because ``aao_whichmut`` is not in
-        # ``EVOLUTIONARY_LOSS_TYPES``.
-        needs_branch_lengths = loss_config.loss_type in EVOLUTIONARY_LOSS_TYPES
-
-        # Build hooks for this task
-        pre_hooks: List[TrainingHook] = [bl_optimizer] if needs_branch_lengths else []
+        # No pre-cycle hook survives the fork. Branch-length optimization
+        # attached on ``loss_config.loss_type in EVOLUTIONARY_LOSS_TYPES``,
+        # which is ``{DASM, QDASM, HYBRID}`` -- whichmut is not in it, so the
+        # hook was built and never registered. It went with those losses (#4).
+        pre_hooks: List[TrainingHook] = []
         post_hooks: List[TrainingHook] = []
-        # Fit multihit factors BEFORE codon strengths: CodonStrengthOptimizer's
-        # own collect_fit_inputs call doesn't override multihit_model, so it
-        # bakes in whatever is live on the bundle -- for that fit to see this
-        # cycle's fresh theta, this hook must run first (issue #501).
-        if needs_branch_lengths and multihit_optimizer is not None:
-            post_hooks.append(multihit_optimizer)
-        # Fit codon strengths BEFORE checkpointing and BL re-optimization, so
-        # the saved metadata carries the fresh β and BL re-opt sees the updated
-        # codon-preference table (issue #747).
-        if needs_branch_lengths and codon_strength_optimizer is not None:
-            post_hooks.append(codon_strength_optimizer)
-        # Checkpoint BEFORE BL re-optimization so weights are saved even
-        # if BL optimization fails or takes extremely long (see #511).
         if is_last_task:
             post_hooks.append(checkpoint_hook)
-        # The hook itself no-ops post_cycle under freeze / freeze_after_first_cycle
-        # (issue #821 / #199), so it is always registered here.
-        if needs_branch_lengths:
-            post_hooks.append(bl_optimizer)
 
         # Per-evaluation hooks: checkpointing on the last task, plus whatever
         # this task's own TaskConfig.eval_hooks configures (e.g.
@@ -3492,8 +2892,6 @@ def _create_tasks_from_config(
             suffix = f" ({dataset_key.split(':')[1]})"
         if is_main_process:
             print(f"  Task {task_idx + 1}: {head_type_str}{suffix}")
-            if needs_branch_lengths:
-                print("    → Branch length optimization enabled")
             if checkpoint_every_n_evals is not None and is_last_task:
                 print(
                     f"    → Eval checkpointing every {checkpoint_every_n_evals} evals"

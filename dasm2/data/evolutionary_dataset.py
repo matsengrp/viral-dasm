@@ -73,20 +73,8 @@ from torch.utils.data import DataLoader, Dataset, Sampler, Subset
 
 from dasm2.codon_table import NUM_AA
 from dasm2.constants import SMALL_PROBABILITY
-from dasm2.data._neutral_matrix_exp import (
-    check_codon_pref_compatible,
-    check_multihit_compatible,
-    compute_neutral_codon_probs_matrix_exp_per_pcp,
-    finalize_matrix_exp_log_probs,
-    is_matrix_exp_mode_enabled,
-    parent_sense_idxs_of_codon64_idxs,
-)
 from dasm2.data.arrow_strings import iter_selected_row_group_values
 from dasm2.data.collators import ESM2_COLLATOR_SPECS, TensorScale, TransformCollator
-from dasm2.data.dataset_utils import group_kfold_in_train
-from dasm2.data.esm2_wrapper import ESM2DatasetWrapper
-from dasm2.data.hermes_dataset import HERMESDataset
-from dasm2.data.mpnn_whichmut import MPNNWhichmutDataset
 from dasm2.data.neutral_rates_source import (
     NeutralRatesSource,
     parquet_carries_neutral_columns,
@@ -120,7 +108,6 @@ from dasm2.data.segment_handlers import (
     parent_sequences_from_frame,
     validate_parent_columns,
 )
-from dasm2.data.tdi_whichmut import TdiWhichmutDataset
 from dasm2.data.transforms import (
     NT_SEPARATOR_LEN,
     SEPARATOR_NT_CSP_FILL,
@@ -156,11 +143,6 @@ from dasm2.molevol.codon_neutral_rates import (
     NUM_CODON_INDICES,
     compute_codon_mutation_rates,
 )
-from dasm2.molevol.neutral_evolution import (
-    neutral_codon_probs,
-    neutral_codon_probs_with_padding,
-)
-from dasm2.neutral.boundary_table import validate_boundary_coverage
 from dasm2.sequence.constants import (
     AA_AMBIG_IDX,
     AA_PADDING_TOKEN,
@@ -175,19 +157,12 @@ from dasm2.sequence.conversion import (
 )
 from dasm2.sequence.layout import layout_of_aa_idxs, padding_sentinel_for
 from dasm2.sequence.masking import CensorMode, CensorSpec
-from dasm2.tensors_of_seqs import (
-    tokenize_aa_sequences as _tokenize_aa_sequences,
-)
-from dasm2.tensors_of_seqs import (
-    tokenize_single_aa_sequence,
-)
 from dasm2.tokenizers import ESM2Tokenizer
 from dasm2.utils.tensor import clamp_probability, numpy_to_tensors, tensors_to_numpy
 from dasm2.utils.torch_utils import pin_single_thread
 
 if TYPE_CHECKING:
     from dasm2.config import CvSplitConfig
-    from dasm2.neutral.base import AbstractNeutralModel, RatesCSPNeutralModel
     from dasm2.neutral.hit_class import HitClassModel
 
 logger = logging.getLogger(__name__)
@@ -758,12 +733,6 @@ class TransformDataset(torch.utils.data.Dataset):
         # in-place and have streaming/Parquet workers see the change on their
         # next __getitem__ call — the same live-dataset-state pattern as
         # ``branch_lengths`` (DESIGN.md D6; verified by probe, issue #1039).
-        # Checked here (construction time, every mode) rather than only
-        # inside ComputeNeutralCodonProbs.__call__, so a matrix-exp +
-        # configured-table combination fails with a clean traceback instead
-        # of surfacing from inside a DataLoader worker's first __getitem__.
-        if is_matrix_exp_mode_enabled():
-            check_codon_pref_compatible(codon_pref_log)
         self._codon_pref_log = (
             codon_pref_log.clone().share_memory_()
             if codon_pref_log is not None
@@ -1615,7 +1584,6 @@ class BranchLengthDatasetBundle(DatasetBundle):
                 be obtained (not Parquet-backed, and no neutral model or raw
                 sequences for on-the-fly computation).
         """
-        from dasm2.training.hooks.branch_lengths import PerSequenceBLInputs
 
         nt_rates_list, nt_csps_list = self._resolve_nt_rates_and_csps()
 
@@ -2315,13 +2283,9 @@ def _prepare_transform_multihit(
     Returns:
         A frozen, shared-memory deep copy, or None if none was given.
 
-    Raises:
-        ValueError: If a multihit model is given while matrix-exp mode is on.
     """
     if multihit_model is None:
         return None
-    if is_matrix_exp_mode_enabled():
-        check_multihit_compatible(multihit_model)
     prepared = copy.deepcopy(multihit_model)
     prepared.eval()
     prepared.values.requires_grad_(False)
@@ -3859,67 +3823,6 @@ def _build_precomputed_dataset(
     )
 
 
-def _batched_compute_neutral_codon_probs_matrix_exp(
-    samples: List[Dict[str, Any]],
-    nt_rates_list: List[torch.Tensor],
-    nt_csps_list: List[torch.Tensor],
-    branch_lengths: torch.Tensor,
-) -> None:
-    """Per-PCP GY94 matrix-exp neutral codon probability path (pilot only).
-
-    Mirrors the per-sample bookkeeping (truncation, padding, masking,
-    nan_to_num, log) of ``_batched_compute_neutral_codon_probs`` but
-    routes through ``exp(Q_codon · branch_length)`` per PCP instead of
-    the product-of-three Poisson. Gated by env var
-    ``DASM2_NEUTRAL_MODE=matrix_exp``; see ``_neutral_matrix_exp`` for
-    the math.
-    """
-    n_samples = len(samples)
-    for i in range(n_samples):
-        codon_idxs = samples[i]["codon_parents_idxs"]
-        nt_rates = nt_rates_list[i]
-        nt_csps = nt_csps_list[i]
-        bl = float(branch_lengths[i].item())
-        mask = samples[i]["loss_mask"]
-
-        target_len = codon_idxs.shape[0]
-        aa_length = nt_rates.shape[0] // 3
-
-        if aa_length == 0:
-            samples[i]["log_neutral_codon_probs"] = torch.full(
-                (target_len, 64), math.log(SMALL_PROBABILITY)
-            )
-            continue
-
-        truncated_codon_idxs = codon_idxs[:aa_length]
-        truncated_mask = mask[:aa_length]
-        clamped = torch.clamp(truncated_codon_idxs, 0, 63)
-        parent_nt_idxs = unflatten_codon_idxs(clamped)  # [num_codons, 3]
-        parent_flat = parent_nt_idxs.reshape(-1)
-
-        sense_idxs = parent_sense_idxs_of_codon64_idxs(clamped)
-        # Zero out masked positions so they don't drive Q_nt recovery if
-        # the mask happens to disagree with stop-codon detection.
-        sense_idxs = torch.where(
-            truncated_mask, sense_idxs, torch.full_like(sense_idxs, -1)
-        )
-
-        probs = compute_neutral_codon_probs_matrix_exp_per_pcp(
-            parent_nt_idxs_flat=parent_flat,
-            parent_sense_idxs_per_codon=sense_idxs,
-            nt_rates=nt_rates,
-            nt_csps=nt_csps,
-            branch_length=bl,
-        )  # (aa_length, 64)
-
-        samples[i]["log_neutral_codon_probs"] = finalize_matrix_exp_log_probs(
-            probs,
-            truncated_mask,
-            target_len,
-            error_context=f"Sample {i}: ",
-        )
-
-
 def _batched_compute_neutral_codon_probs(
     samples: List[Dict[str, Any]],
     nt_rates_list: List[torch.Tensor],
@@ -3953,20 +3856,6 @@ def _batched_compute_neutral_codon_probs(
             Passed through to neutral_codon_probs() for codon-optimality
             adjustment (issue #747).
     """
-    # Pilot-only escape hatch for issue #654: route through a per-PCP
-    # GY94 matrix-exp neutral instead of the product-of-three Poisson
-    # path. See ``dasm2.data._neutral_matrix_exp`` for the rationale.
-    if is_matrix_exp_mode_enabled():
-        check_multihit_compatible(multihit_model)
-        check_codon_pref_compatible(codon_pref_log)
-        _batched_compute_neutral_codon_probs_matrix_exp(
-            samples=samples,
-            nt_rates_list=nt_rates_list,
-            nt_csps_list=nt_csps_list,
-            branch_lengths=branch_lengths,
-        )
-        return
-
     n_samples = len(samples)
 
     # --- Collect per-sample codon data ---
@@ -6310,9 +6199,6 @@ def load_structural_train_val(
         FileNotFoundError: If HERMES model/directory not found.
         ValueError: If no valid structures loaded.
     """
-    from dasm2.data.structural_embedding_registry import (
-        resolve_structural_embedding_path,
-    )
 
     resolved_path = str(resolve_structural_embedding_path(hermes_path))
 

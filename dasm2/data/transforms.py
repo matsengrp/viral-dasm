@@ -22,14 +22,6 @@ import torch
 
 from dasm2.codon_table import NUM_AA
 from dasm2.constants import SMALL_PROBABILITY
-from dasm2.data._neutral_matrix_exp import (
-    check_codon_pref_compatible,
-    check_multihit_compatible,
-    compute_neutral_codon_probs_matrix_exp_per_pcp,
-    finalize_matrix_exp_log_probs,
-    is_matrix_exp_mode_enabled,
-    parent_sense_idxs_of_codon64_idxs,
-)
 from dasm2.molevol.aao_neutral_rates import marginalize_codon_to_aao_rates
 from dasm2.molevol.codon_neutral_rates import (
     NUM_CODON_INDICES,
@@ -455,20 +447,6 @@ class ComputeNeutralCodonProbs:
 
     def __call__(self, sample: Dict[str, Any]) -> Dict[str, Any]:
         codon_pref_log = sample.get("codon_pref_log", self.codon_pref_log)
-        if is_matrix_exp_mode_enabled():
-            # Pilot-only escape hatch for issue #654: route per-sample
-            # neutral through GY94 matrix-exp instead of product-of-three.
-            check_multihit_compatible(self.multihit_model)
-            check_codon_pref_compatible(codon_pref_log)
-            if self.tandem is not None:
-                raise ValueError(
-                    "The tandem term (issue #1683) is applied only on the "
-                    "product-of-three neutral, not in matrix-exp mode."
-                )
-            sample["log_neutral_codon_probs"] = (
-                _per_sample_log_neutral_codon_probs_matrix_exp(sample)
-            )
-            return sample
         codon_probs = neutral_codon_probs_with_padding(
             sample["codon_parents_idxs"],
             sample["loss_mask"],
@@ -483,47 +461,6 @@ class ComputeNeutralCodonProbs:
         codon_probs = torch.nan_to_num(codon_probs, nan=SMALL_PROBABILITY)
         sample["log_neutral_codon_probs"] = torch.log(codon_probs)
         return sample
-
-
-def _per_sample_log_neutral_codon_probs_matrix_exp(
-    sample: Dict[str, Any],
-) -> "torch.Tensor":
-    """Compute log_neutral_codon_probs for a single sample via GY94 matrix-exp.
-
-    Mirrors the per-sample bookkeeping (truncation, padding, masking,
-    nan_to_num, log) of ``neutral_codon_probs_with_padding`` but
-    routes through ``exp(Q_codon · branch_length)`` per PCP.
-    """
-    codon_idxs = sample["codon_parents_idxs"]
-    target_len = codon_idxs.shape[0]
-    nt_rates = sample["nt_rates"]
-    nt_csps = sample["nt_csps"]
-    bl = float(sample["branch_length"].item())
-    mask = sample["loss_mask"]
-
-    aa_length = nt_rates.shape[0] // 3
-    if aa_length == 0:
-        return torch.full((target_len, 64), math.log(SMALL_PROBABILITY))
-
-    truncated_codon_idxs = codon_idxs[:aa_length]
-    truncated_mask = mask[:aa_length]
-    clamped = torch.clamp(truncated_codon_idxs, 0, 63)
-    parent_nt_idxs = unflatten_codon_idxs(clamped).reshape(-1)
-
-    sense_idxs = parent_sense_idxs_of_codon64_idxs(clamped)
-    sense_idxs = torch.where(
-        truncated_mask, sense_idxs, torch.full_like(sense_idxs, -1)
-    )
-
-    probs = compute_neutral_codon_probs_matrix_exp_per_pcp(
-        parent_nt_idxs_flat=parent_nt_idxs,
-        parent_sense_idxs_per_codon=sense_idxs,
-        nt_rates=nt_rates,
-        nt_csps=nt_csps,
-        branch_length=bl,
-    )
-
-    return finalize_matrix_exp_log_probs(probs, truncated_mask, target_len)
 
 
 @dataclass(frozen=True)
