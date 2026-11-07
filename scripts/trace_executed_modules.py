@@ -76,11 +76,13 @@ def main() -> None:
         if code.co_filename.startswith(dasm2_root):
             seen.add(f"{code.co_filename[prefix_len:]}::{code.co_name}")
 
-    # The repository root first, for the same reason scripts/lib.py does it:
-    # otherwise the venv's editable install resolves `dasm2` to whatever
-    # checkout it was installed from, and this traces that tree instead.
+    # `lib` owns putting the repository root on `sys.path`; importing it is
+    # how this script gets that, rather than repeating the insert and being
+    # the copy that drifts. Without it the venv's editable install resolves
+    # `dasm2` to whatever checkout it was installed from and this traces
+    # that tree -- reporting every file of *this* one as dead.
     sys.path.insert(0, str(REPO / "scripts"))
-    sys.path.insert(0, str(REPO))
+    from lib import assert_dasm2_is_this_repo
 
     if args.phase == "imports":
         sys.setprofile(profile)
@@ -89,6 +91,7 @@ def main() -> None:
             from dasm2.train_command import train_model  # noqa: F401
         finally:
             sys.setprofile(None)
+        assert_dasm2_is_this_repo()
     else:
         script = (REPO / args.script).resolve()
         sys.argv = [str(script), *passthrough]
