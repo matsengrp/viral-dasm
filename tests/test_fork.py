@@ -167,3 +167,32 @@ def test_a_script_run_resolves_dasm2_inside_this_repository():
     assert resolved.is_relative_to(REPO_ROOT), (
         f"a script run resolved `dasm2` to {resolved}, outside {REPO_ROOT}"
     )
+
+
+def test_no_dasm2_submodule_resolves_outside_this_repository():
+    """A module deleted here must not be served from another checkout.
+
+    The editable finder maps the *name* `dasm2` to the directory it was
+    installed from and resolves submodules against that, not against the
+    parent package's `__path__`. So deleting `dasm2/foo.py` here does not
+    make `import dasm2.foo` fail while that path still has one: `PathFinder`
+    finds nothing and the editable finder serves the other copy. The prune
+    deleted `positional_encoding.py` and the gates kept passing on the other
+    checkout's copy of it.
+    """
+    probe = (
+        "import sys;"
+        f" sys.path.insert(0, {str(REPO_ROOT / 'scripts')!r});"
+        " import lib;"
+        " import dasm2.train_command;"
+        " lib.assert_dasm2_is_this_repo();"
+        " print('ok')"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=tempfile.gettempdir(),
+        capture_output=True,
+        text=True,
+        check=False,  # the assertion below reports the guard's own message
+    )
+    assert result.returncode == 0, result.stderr.strip().splitlines()[-1:]

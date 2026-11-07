@@ -41,21 +41,39 @@ if str(REPO_ROOT) not in sys.path:
 
 
 def assert_dasm2_is_this_repo() -> None:
-    """Fail unless `import dasm2` resolved inside this repository.
+    """Fail unless every loaded `dasm2` module came from this repository.
 
     Called by every script that imports `dasm2`, right after it does.
+
+    Checking the package root is not enough, and the difference matters. The
+    editable install's finder maps the name `dasm2` to the directory it was
+    installed from and resolves submodules against *that*, not against the
+    parent package's `__path__`. So `import dasm2` can land here while
+    `import dasm2.foo` lands in the other checkout -- which is exactly what
+    happens to a module this repository has deleted: `PathFinder` finds
+    nothing, and the editable finder then serves the copy that still exists
+    over there. A prune verified that way deletes files that keep running.
     """
     import dasm2
 
-    resolved = Path(dasm2.__file__).resolve()
-    if not resolved.is_relative_to(REPO_ROOT):
+    leaked = sorted(
+        f"{name} -> {Path(module.__file__).resolve()}"
+        for name, module in list(sys.modules.items())
+        if (name == "dasm2" or name.startswith("dasm2."))
+        and getattr(module, "__file__", None)
+        and not Path(module.__file__).resolve().is_relative_to(REPO_ROOT)
+    )
+    if leaked:
+        listing = "\n  ".join(leaked)
         raise RuntimeError(
-            f"`import dasm2` resolved to {resolved}, outside {REPO_ROOT}. "
-            "Something installed in this environment -- most likely an "
-            "editable install pointing at another checkout -- is shadowing "
+            f"{len(leaked)} `dasm2` module(s) resolved outside {REPO_ROOT}:\n"
+            f"  {listing}\n"
+            "An editable install pointing at another checkout is shadowing "
             "the vendored fork, so this run would measure code this "
-            "repository does not contain."
+            "repository does not contain -- most likely a module deleted "
+            "here that still exists there."
         )
+    assert dasm2  # the import above is the point; keep linters quiet
 
 
 CONFIG_PATH = REPO_ROOT / "config.yaml"
