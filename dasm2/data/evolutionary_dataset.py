@@ -86,7 +86,6 @@ from dasm2.data.parquet_backend import (
 )
 from dasm2.data.protocols import SequenceProvider
 from dasm2.data.registry import (
-    _require_holdout_samples,
     determine_nickname_from_data_spec,
     is_parquet_data_spec,
     load_dataframe_with_split_markers,
@@ -3143,36 +3142,19 @@ def _parquet_metadata(
     column_names = set(first_file.schema_arrow.names)
     file_metadata = read_parquet_file_metadata(first_file)
 
-    # Read in_train column (or fall back to holdout-based splitting)
-    if "in_train" in column_names:
-        in_train_values = _read_parquet_column_raw(parquet_paths, "in_train")
-        train_filter = [bool(v) for v in in_train_values]
-    elif "sample_id" in column_names and nickname is not None:
-        # Fallback: compute train filter from holdout sample IDs
-        try:
-            holdout_ids = _require_holdout_samples(nickname)
-        except ValueError:
-            raise ValueError(
-                f"Parquet file(s) missing 'in_train' column and no holdout "
-                f"samples defined for dataset '{nickname}'. Either add an "
-                f"'in_train' column or define holdout_samples in the YAML registry."
-            )
-        holdout_set = set(holdout_ids)
-        sample_ids = _read_parquet_column_raw(parquet_paths, "sample_id")
-        train_filter = [str(sid) not in holdout_set for sid in sample_ids]
-        logger.info(
-            "Parquet fallback: computed train/val split from holdout_samples "
-            "(%d holdout IDs, %d train, %d val)",
-            len(holdout_set),
-            sum(train_filter),
-            sum(not v for v in train_filter),
-        )
-    else:
+    # The split is a property of the corpus, carried in the file. Upstream
+    # there was a second path that derived it from a `holdout_samples` list in
+    # a YAML registry when `in_train` was absent; this fork has no registry,
+    # and a split that depended on one would not survive being handed to a
+    # reader with their own corpus.
+    if "in_train" not in column_names:
         raise ValueError(
-            "Parquet file(s) missing required 'in_train' column for train/val "
-            "splitting. Ensure the data preparation pipeline writes this column, "
-            "or provide a 'sample_id' column with holdout_samples in the YAML registry."
+            "Parquet file(s) missing the required 'in_train' column, which "
+            "carries the train/val split. The corpus-building pipeline writes "
+            "it; a corpus without it cannot be split reproducibly here."
         )
+    in_train_values = _read_parquet_column_raw(parquet_paths, "in_train")
+    train_filter = [bool(v) for v in in_train_values]
     val_filter = [not v for v in train_filter]
 
     # Detect segment handler
