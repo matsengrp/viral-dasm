@@ -12,6 +12,7 @@ pipeline's inputs for a reader who has their own mat-pcp run.
 from __future__ import annotations
 
 import hashlib
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -25,7 +26,19 @@ CONFIG_PATH = REPO_ROOT / "config.yaml"
 with CONFIG_PATH.open() as handle:
     CONFIG = yaml.safe_load(handle)
 
-ARTIFACT_ROOT = Path(CONFIG["artifact_root"])
+#: Where the pipeline writes. ``config.yaml`` is the answer unless
+#: ``VIRAL_DASM_ARTIFACT_ROOT`` overrides it.
+#:
+#: The override exists for one case: a second checkout -- a ``git worktree``
+#: used to change the code while a multi-day run is still going in the main
+#: one. Both read the same ``config.yaml``, so without it a forced ``fast_test``
+#: or ``gate1`` rerun writes into the live run's directories and can overwrite
+#: its logs and checkpoints. It is deliberately not a config key: a value that
+#: belongs to one checkout for a few days should not be committed, and the
+#: default must stay the one written down.
+ARTIFACT_ROOT = Path(
+    os.environ.get("VIRAL_DASM_ARTIFACT_ROOT", CONFIG["artifact_root"])
+)
 GENE = CONFIG["mat_pcp"]["gene"]
 TRAIN_SEED = int(CONFIG["train_seed"])
 

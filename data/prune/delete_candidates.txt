@@ -1,0 +1,132 @@
+# lines  path  <- live modules that import it (blank: none)
+# 128 files, 36,509 lines
+# regenerate: python scripts/prune_candidates.py <traces> --write
+
+   103  dasm2/blocks/attention.py
+   336  dasm2/blocks/pooling.py  dasm2/heads/pooled_prediction.py
+   194  dasm2/data/binding_corruption.py  dasm2/train_command.py
+   805  dasm2/data/contrastive_binding.py  dasm2/train_command.py
+   190  dasm2/data/dataset_utils.py  dasm2/data/evolutionary_dataset.py
+   507  dasm2/data/delta_affinity.py  dasm2/heads/pooled_prediction.py dasm2/train_command.py
+   687  dasm2/data/dms_matrix_dataset.py  dasm2/train_command.py
+    68  dasm2/data/embedding_io.py
+   131  dasm2/data/esm2_wrapper.py  dasm2/data/evolutionary_dataset.py dasm2/train_command.py
+   133  dasm2/data/functional/consensus.py
+   561  dasm2/data/functional/dms_matrix.py
+   316  dasm2/data/functional/model_scores.py
+   142  dasm2/data/functional/replicates.py
+   196  dasm2/data/functional/selection_score.py
+   111  dasm2/data/functional/single_mutants.py
+   837  dasm2/data/functional/visualization.py
+   799  dasm2/data/functional_formats.py
+   649  dasm2/data/functional_registry.py  dasm2/data/discovery.py
+   864  dasm2/data/hermes.py
+   491  dasm2/data/hermes_dataset.py  dasm2/data/evolutionary_dataset.py
+   444  dasm2/data/manifests.py  dasm2/data/discovery.py
+   328  dasm2/data/masking.py  dasm2/train_command.py
+   472  dasm2/data/mlm.py  dasm2/train_command.py
+   109  dasm2/data/mpnn_dms.py  dasm2/train_command.py
+    74  dasm2/data/mpnn_validation.py
+   126  dasm2/data/mpnn_whichmut.py  dasm2/data/evolutionary_dataset.py
+   735  dasm2/data/pairwise_binding.py  dasm2/train_command.py
+   512  dasm2/data/registry_schema.py  dasm2/data/discovery.py dasm2/data/yaml_registry.py
+   256  dasm2/data/size_utils.py  dasm2/data/discovery.py
+   191  dasm2/data/structural_embedding_registry.py  dasm2/data/discovery.py dasm2/data/evolutionary_dataset.py
+   145  dasm2/data/tdi_whichmut.py  dasm2/data/evolutionary_dataset.py
+   276  dasm2/data/token_budget_sampler.py  dasm2/training/trainer.py
+   408  dasm2/data/viral_fitness_registry.py  dasm2/data/discovery.py
+    93  dasm2/esm2_constants.py  dasm2/config.py
+    64  dasm2/heads/_selection_factor_forward.py
+    88  dasm2/heads/aah_whichmut.py  dasm2/heads/factory.py
+   297  dasm2/heads/binding_classification.py  dasm2/heads/factory.py
+   276  dasm2/heads/contrastive_binding.py  dasm2/heads/factory.py
+   133  dasm2/heads/dasmfit_residual.py  dasm2/heads/factory.py
+    97  dasm2/heads/delta_affinity.py  dasm2/heads/factory.py
+    91  dasm2/heads/dms.py  dasm2/heads/factory.py
+    76  dasm2/heads/hybrid.py  dasm2/heads/factory.py
+    88  dasm2/heads/m0.py  dasm2/heads/factory.py
+    60  dasm2/heads/mlm.py  dasm2/heads/factory.py
+    58  dasm2/heads/neutral.py  dasm2/heads/factory.py
+   143  dasm2/heads/per_site_child.py  dasm2/heads/factory.py
+    92  dasm2/heads/per_site_mean_selection.py  dasm2/heads/factory.py
+   102  dasm2/heads/per_site_parent_child.py  dasm2/heads/factory.py
+   110  dasm2/heads/per_site_preference.py  dasm2/heads/factory.py
+    89  dasm2/heads/qdasm.py  dasm2/heads/factory.py
+   104  dasm2/heads/single_matrix.py  dasm2/heads/factory.py
+    73  dasm2/heads/single_value.py  dasm2/heads/factory.py
+   101  dasm2/heads/site_masked.py  dasm2/heads/factory.py
+    75  dasm2/heads/structural_guidance.py  dasm2/heads/factory.py
+   146  dasm2/heads/types.py  dasm2/artifacts.py dasm2/config.py dasm2/data/registry.py dasm2/heads/factory.py dasm2/models/core/base.py dasm2/models/factory.py dasm2/train_command.py dasm2/training/factory.py dasm2/training/hooks/branch_lengths.py dasm2/training/task.py dasm2/training/trainer.py
+   108  dasm2/heads/whichmut_residual.py  dasm2/heads/factory.py dasm2/models/factory.py
+   110  dasm2/losses/_kmer_table_loader.py
+    91  dasm2/losses/aao_whichmut_loss.py  dasm2/losses/whichmut_losses.py
+    69  dasm2/losses/binding_classification.py  dasm2/losses/factory.py
+   477  dasm2/losses/capability.py  dasm2/training/hooks/branch_lengths.py
+   217  dasm2/losses/contrastive_binding.py  dasm2/losses/factory.py
+   283  dasm2/losses/dasm.py  dasm2/losses/factory.py
+    53  dasm2/losses/dasmfit.py  dasm2/losses/factory.py
+    38  dasm2/losses/delta_affinity.py  dasm2/losses/factory.py
+    59  dasm2/losses/dms.py  dasm2/losses/factory.py
+   283  dasm2/losses/dms_matrix.py  dasm2/losses/factory.py dasm2/training/metric_providers.py
+   149  dasm2/losses/hybrid.py  dasm2/losses/factory.py
+   135  dasm2/losses/loss_utils.py  dasm2/losses/whichmut_loss.py dasm2/training/hooks/branch_lengths.py
+    43  dasm2/losses/mlm.py  dasm2/losses/factory.py
+    68  dasm2/losses/pooled.py  dasm2/losses/factory.py
+   247  dasm2/losses/qdasm.py  dasm2/losses/factory.py
+   158  dasm2/losses/structural_guidance.py  dasm2/config.py dasm2/losses/factory.py
+   369  dasm2/model_catalog.py  dasm2/config.py dasm2/train_command.py
+  1356  dasm2/models/core/attention.py  dasm2/models/core/transformer.py dasm2/models/core/transformer_block.py dasm2/train_command.py
+   318  dasm2/models/core/esm2.py  dasm2/models/factory.py
+   243  dasm2/models/core/esm2_core_model.py  dasm2/models/factory.py
+    68  dasm2/models/core/identity.py  dasm2/models/factory.py
+   214  dasm2/models/core/mlm_core_model.py  dasm2/models/factory.py
+   180  dasm2/models/core/mpnn_core_model.py  dasm2/models/factory.py
+   225  dasm2/models/core/mpnn_light_attention.py  dasm2/models/factory.py
+   350  dasm2/models/core/site_masked_core_model.py  dasm2/models/factory.py
+    77  dasm2/models/key_migration.py  dasm2/serialization/checkpoints.py
+   210  dasm2/models/netam_loader.py  dasm2/models/core/transformer.py
+   335  dasm2/molevol/_parent_row_q.py
+    44  dasm2/molevol/aao_neutral_rates.py  dasm2/data/transforms.py
+   392  dasm2/molevol/branch_optimization.py  dasm2/training/hooks/branch_lengths.py
+   464  dasm2/molevol/codon_preference.py  dasm2/train_command.py
+   330  dasm2/molevol/hybrid.py  dasm2/training/hooks/branch_lengths.py
+   524  dasm2/molevol/kmer_q.py
+   682  dasm2/molevol/matrix_exp.py
+   108  dasm2/molevol/mutation_matrices.py  dasm2/molevol/codon_conversion.py
+   505  dasm2/molevol/mutsel.py  dasm2/config.py dasm2/training/hooks/branch_lengths.py
+   436  dasm2/molevol/neutral_evolution.py  dasm2/data/evolutionary_dataset.py dasm2/data/transforms.py dasm2/training/hooks/branch_lengths.py
+   321  dasm2/molevol/q_matrix.py  dasm2/config.py dasm2/training/hooks/branch_lengths.py
+   471  dasm2/molevol/qdasm.py  dasm2/training/hooks/branch_lengths.py
+   144  dasm2/molevol/tandem.py  dasm2/config.py dasm2/data/transforms.py dasm2/training/hooks/branch_lengths.py
+   246  dasm2/molevol/tensor_ops.py  dasm2/models/core/sf_projection.py dasm2/molevol/codon_conversion.py dasm2/neutral/hit_class.py
+   358  dasm2/neutral/base.py  dasm2/config.py dasm2/data/evolutionary_dataset.py dasm2/data/neutral_rates_source.py dasm2/data/segment_handlers.py dasm2/data/transforms.py dasm2/train_command.py dasm2/training/factory.py dasm2/training/trainer.py
+   532  dasm2/neutral/boundary_table.py  dasm2/data/evolutionary_dataset.py
+   190  dasm2/neutral/codon_boundary.py  dasm2/data/transforms.py
+   917  dasm2/neutral/gtr_codon.py  dasm2/config.py dasm2/data/_neutral_matrix_exp.py
+   258  dasm2/neutral/kmer_encoding.py
+   248  dasm2/neutral/multihit.py  dasm2/config.py
+   448  dasm2/neutral/per_family_gtr.py  dasm2/config.py
+   132  dasm2/neutral/precomputed_rates.py  dasm2/config.py
+   585  dasm2/neutral/s5f.py  dasm2/config.py
+   371  dasm2/neutral/shm_codon.py  dasm2/config.py
+   896  dasm2/neutral/tabular_rates.py  dasm2/config.py
+   754  dasm2/neutral/thrifty.py  dasm2/config.py
+   210  dasm2/neutral/thrifty_lookup.py
+    74  dasm2/positional_encoding.py  dasm2/models/core/embeddings.py dasm2/models/core/transformer.py
+   139  dasm2/pretrained.py
+    57  dasm2/sequence/tdi_constants.py  dasm2/models/core/base.py dasm2/models/core/transformer.py
+   247  dasm2/tensors_of_seqs.py  dasm2/data/evolutionary_dataset.py dasm2/data/transforms.py
+   567  dasm2/training/checkpoint_selection.py  dasm2/training/hooks/checkpoints.py
+   192  dasm2/training/head_optimizer_state.py  dasm2/serialization/checkpoints.py dasm2/training/factory.py dasm2/training/trainer.py
+   433  dasm2/training/hooks/alpha_optimizer.py
+   162  dasm2/training/hooks/base.py  dasm2/train_command.py dasm2/training/factory.py dasm2/training/hooks/branch_lengths.py dasm2/training/hooks/checkpoints.py dasm2/training/task.py dasm2/training/trainer.py
+   759  dasm2/training/hooks/codon_strength.py  dasm2/train_command.py
+   119  dasm2/training/hooks/factory.py  dasm2/train_command.py
+   751  dasm2/training/hooks/multihit_optimizer.py  dasm2/train_command.py
+   178  dasm2/training/hooks/overfit_guard.py  dasm2/train_command.py
+   169  dasm2/training/hooks/pcgrad.py
+   221  dasm2/training/log_reader.py  dasm2/training/logging.py
+    92  dasm2/training/train_argv.py
+    48  dasm2/utils/artifacts.py
+   512  dasm2/utils/parallel.py  dasm2/training/hooks/branch_lengths.py
+    38  dasm2/utils/validation.py
