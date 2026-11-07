@@ -15,10 +15,6 @@ from dasm2.metadata import (
     SourceLaunchInfo,
 )
 from dasm2.models.factory import needs_sf_projection
-from dasm2.models.key_migration import (
-    migrate_sf_projection_keys,
-    migrate_transformer_block_keys,
-)
 from dasm2.serialization.training_state import TrainingState
 from dasm2.serialization.zip_io import (
     model_archive_exists,
@@ -262,26 +258,25 @@ def migrate_legacy_state_dict(
             k: v for k, v in state_dict.items() if k != "encoder.distance_proj.bias"
         }
 
-    # Rename keys that don't already match the model; validate all mappings
-    migrated: Dict[str, Any] = {}
-    for key, value in state_dict.items():
-        new_key = key
-        if new_key not in expected_keys:
-            new_key = migrate_transformer_block_keys(new_key)
-        if new_key not in expected_keys:
-            new_key = migrate_sf_projection_keys(new_key)
-        if new_key in migrated:
+    # Every key must already name a parameter of the model being loaded into.
+    #
+    # `dasm2` renamed keys here for two pre-#513/#379 layouts: the
+    # `TransformerEncoderLayer` -> `TransformerBlock` rename, and the three
+    # shared-SF heads whose `prediction_layer` moved into `sf_projection`.
+    # Both migrations ran only for a key that did not already match, and the
+    # checkpoints this repository loads predate neither: all 64 keys of the
+    # `dasm-85k` reference match as written. The rewrites were also not
+    # idempotent -- applied to a current key, the block migration produces
+    # `feed_forward.feed_forward.linear1` -- so carrying them would have
+    # claimed support for formats this repository has never read (#4).
+    for key in state_dict:
+        if key not in expected_keys:
             raise ValueError(
-                f"Key collision during migration: '{key}' -> '{new_key}' "
-                f"already present in migrated dict"
+                f"Checkpoint key '{key}' names no parameter of this model. "
+                "This fork loads the checkpoint layout its own code writes; "
+                "it carries no migrations for older `dasm2` layouts."
             )
-        if new_key not in expected_keys:
-            raise ValueError(
-                f"Migration produced unexpected key '{new_key}' (from '{key}'). "
-                f"This checkpoint may require a different migration path."
-            )
-        migrated[new_key] = value
-    return migrated
+    return dict(state_dict)
 
 
 # Sentinel for "not yet set" — distinct from None, which is a valid domain

@@ -76,7 +76,11 @@ def main() -> None:
         if code.co_filename.startswith(dasm2_root):
             seen.add(f"{code.co_filename[prefix_len:]}::{code.co_name}")
 
+    # The repository root first, for the same reason scripts/lib.py does it:
+    # otherwise the venv's editable install resolves `dasm2` to whatever
+    # checkout it was installed from, and this traces that tree instead.
     sys.path.insert(0, str(REPO / "scripts"))
+    sys.path.insert(0, str(REPO))
 
     if args.phase == "imports":
         sys.setprofile(profile)
@@ -93,6 +97,14 @@ def main() -> None:
             runpy.run_path(str(script), run_name="__main__")
         finally:
             sys.setprofile(None)
+
+    if not seen:
+        raise RuntimeError(
+            "the profiler recorded nothing under "
+            f"{dasm2_root}. Either the run imported `dasm2` from another "
+            "checkout, or nothing ran. An empty trace reports the whole tree "
+            "as dead, so it is an error rather than a result."
+        )
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(sorted(seen), indent=0))
