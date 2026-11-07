@@ -706,13 +706,8 @@ def load_checkpoint(
 
     Examples:
         >>> from pathlib import Path
-        >>> from dasm2.analysis.oe_plots import OEPlotter
-        >>> from dasm2.data.evolutionary_dataset import create_evolutionary_dataset
         >>> trainer = load_checkpoint(Path("checkpoints/8m_final.zip"))
-        >>> # Trainer ready for OE plotting
-        >>> bundle = create_evolutionary_dataset("v1jaffe", trainer.neutral_model)
-        >>> plotter = OEPlotter(trainer, bundle)
-        >>> predictions_df = plotter.oe_plot_df
+        >>> trainer.model.eval()
     """
     from dasm2.config import TrainingConfig
 

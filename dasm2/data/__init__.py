@@ -4,12 +4,9 @@ This module provides unified data representations for evolutionary modeling.
 
 Create datasets using factory functions::
 
-    from dasm2.data.evolutionary_dataset import (
-        create_evolutionary_dataset,
-        create_whichmut_dataset,
-        create_dms_dataset,
-    )
-    bundle = create_evolutionary_dataset(df, neutral_model)
+    from dasm2.data.evolutionary_dataset import create_whichmut_dataset
+
+    bundle = create_whichmut_dataset(df, neutral_model)
 
 Import utilities from their specific modules::
 

@@ -177,9 +177,9 @@ def _attach_info_print_handler(logger_name: str, print_fn: Callable[..., None]) 
 #     for the same head_config and pairs each with the right
 #     ``LossConfig``.
 #   * AAH branch in ``train_model``'s ``head_datasets`` loop — head-keyed
-#     dispatch that calls ``load_aah_datasets`` and writes the
-#     ``f"{head_type_str}:whichmut"`` / ``f"{head_type_str}:aao"``
-#     entries into ``head_datasets``.
+#     dispatch that writes the ``f"{head_type_str}:whichmut"`` /
+#     ``f"{head_type_str}:aao"`` entries into ``head_datasets``. The loader
+#     it called upstream is not in this fork.
 #   * ``suffix_to_loss_type`` (inside ``_create_tasks_from_config``) —
 #     colon-suffix → ``LossType`` map.
 #
@@ -1096,10 +1096,10 @@ def train_model_from_datasets(  # noqa: C901
 
     Example:
         >>> from dasm2.train_command import train_model_from_datasets
-        >>> from dasm2.data.evolutionary_dataset import create_evolutionary_dataset
+        >>> from dasm2.data.evolutionary_dataset import create_whichmut_dataset
         >>> # Create datasets via unified pipeline (user's responsibility)
-        >>> train_bundle = create_evolutionary_dataset(train_df, ...)
-        >>> val_bundle = create_evolutionary_dataset(val_df, ...)
+        >>> train_bundle = create_whichmut_dataset(train_df, ...)
+        >>> val_bundle = create_whichmut_dataset(val_df, ...)
         >>> train_model_from_datasets(
         ...     config_name="8m",
         ...     head_datasets={"SelectionFactorHead": (train_bundle, val_bundle)},

@@ -1348,8 +1348,8 @@ def validate_precomputed_columns(df: pd.DataFrame) -> None:
     """
     if not has_precomputed_neutral_columns(df):
         raise ValueError(
-            "DataFrame lacks precomputed neutral outputs (nt_rates/nt_csps columns). "
-            "Use load_evolutionary_train_val() with a neutral model instead."
+            "DataFrame lacks precomputed neutral outputs (nt_rates/nt_csps "
+            "columns), which this fork's Parquet corpora always carry."
         )
 
     for col in df.columns:
