@@ -199,3 +199,61 @@ rule gate2:
         " --report {output.report}"
         " {params.tolerance}"
         " > {log} 2>&1"
+
+
+rule full_run:
+    """Gate 3: train dasm-85k to the learning-rate floor.
+
+    The reference stopped at step 436,000 with its best validation loss
+    7.766710 at step 412,000. It stopped on the LR floor, not on patience:
+    1e-3 x 0.5^10 = 9.77e-7 < 1e-6, and patience 30 never fires.
+
+    Roughly 33 hours at the rate the first canary measured -- 20,000 steps in
+    1.51 h, of which 31% was evaluation. `scripts/train.py` resumes from its
+    own latest checkpoint, so a preemption or a full disk costs the time since
+    the last save rather than the whole run.
+    """
+    input:
+        config=f"{CONFIG_DIR}/{CANARY_MODEL}_full.yaml",
+        corpus_guard=f"{ARTIFACT_ROOT}/corpus_guard/full_depth.json",
+        config_check=f"{GATE_DIR}/check_config_canary.json",
+    output:
+        done=touch(f"{ARTIFACT_ROOT}/full_run/seed{{seed}}/training_complete.done"),
+    params:
+        outdir=f"{ARTIFACT_ROOT}/full_run/seed{{seed}}",
+        parquet=str(FULL_DEPTH.path),
+    log:
+        f"{ARTIFACT_ROOT}/logs/full_run_seed{{seed}}.log",
+    shell:
+        "{TRAIN_ENV} python scripts/train.py"
+        " --config {input.config}"
+        " --parquet {params.parquet}"
+        " --output-dir {params.outdir}"
+        " --seed {wildcards.seed}"
+        " --device cuda"
+        " > {log} 2>&1"
+
+
+rule gate3:
+    """Compare the full run's endpoint against the reference's.
+
+    Gates the stop *reason* -- reaching the LR floor is a structural fact
+    about the schedule -- and reports the losses for judgement rather than
+    thresholding them. The two canaries tracked the reference to within 0.012
+    nats with a wider seed-to-seed spread than that, so a loss threshold here
+    would be measuring the seed rather than the port.
+    """
+    input:
+        done=f"{ARTIFACT_ROOT}/full_run/seed{{seed}}/training_complete.done",
+    output:
+        report=f"{GATE_DIR}/gate3_seed{{seed}}.json",
+    params:
+        run_dir=f"{ARTIFACT_ROOT}/full_run/seed{{seed}}",
+    log:
+        f"{ARTIFACT_ROOT}/logs/gate3_seed{{seed}}.log",
+    shell:
+        "python scripts/gate3_compare_endpoint.py"
+        " --run-dir {params.run_dir}"
+        f" --model {CANARY_MODEL}"
+        " --report {output.report}"
+        " > {log} 2>&1"
