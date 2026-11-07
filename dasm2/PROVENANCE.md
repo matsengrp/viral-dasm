@@ -46,10 +46,10 @@ lines.
 **After the gates (#4):** what the import closure reaches but never runs.
 The closure is inflated by eager registry imports that load every head,
 dataset, loss and encoder so their factories populate, so most of it was
-reachable without being executed. That cut removed a further 107 files and
-left 111 files and 48,013 lines. It came *after* Gate 1 deliberately: once
-the reference checkpoint scores to seven significant figures, each deletion
-is checked rather than argued.
+reachable without being executed. That cut removed a further 111 files and
+left **107 files and 46,088 lines**. It came *after* Gate 1 deliberately:
+once the reference checkpoint scores to seven significant figures, each
+deletion is checked rather than argued.
 
 By feature area, it removed the other encoders (ESM2, MPNN light-attention,
 site-masked, MLM, identity); the datasets this pipeline has no input for
@@ -59,6 +59,24 @@ it; branch-length optimization; and the heads and losses the paper does not
 train. Three registries now state what this repository can build rather than
 what `dasm2` could: one encoder, two heads (`SelectionFactorHead` for
 `dasm-85k` and `dasm-293k`, `PerSiteParentChildHead` for `ci-484k`), one loss.
+
+It also removed 3Di structural tokens entirely. That one came last and by a
+different route: `_load_whichmut_head_data` was typed `neutral_model: None`
+once the neutral models were gone, so every non-Parquet arm could only
+raise, and `use_tdi` was hardcoded `False` at its only call site. With no
+loader left to supply tokens, the encoder's `num_tdi_tokens` embedding, the
+`tdi_token_ids` batch key, the two `TrainingConfig` fields and their path
+into checkpoint metadata had nothing to do. The embedding is the only part
+that could have moved the state dict, and it could not: the reference has
+`num_tdi_tokens` unset, so the branch never built a parameter for it, which
+is why Gate 1's key-set assertion is what certifies the cut.
+
+`model_catalog.yaml` went with `neutral/` -- it holds only Thrifty and S5F
+models. Two things still named it, and both were inert rather than stale:
+`TrainingConfig.tdi_tokens_name` resolved a tokens directory through the
+catalog using resolution code that had already been deleted, so the key had
+become settable and silent; and `data/segment_handlers.py`'s uncalled
+`add_neutral_model_outputs_to_pcp_df` carried it in a docstring example.
 
 ### What the measurement got wrong
 
@@ -109,7 +127,32 @@ stays. Anything that reports a result or an argument from elsewhere is
 collected in `dasm2/COMMENT-FLAGS.md` for a decision before this repository
 goes public.
 
-The prune took out 534 of them on its own — 1,235 flags before, **701**
+The prune took out 568 of them on its own — 1,235 flags before, **667**
 after — which is why it came before the comment review rather than after.
 What is left is in files this pipeline actually runs, so each one needs
 reading rather than deleting with its module.
+
+## What is left that the trace calls dead
+
+`data/prune/delete_candidates.txt` still lists 23 files and 6,630 lines, and
+most of that list is the measurement's known false positive rather than work
+remaining: a module whose contribution is a class, an enum or a `Protocol`
+has no named `def` to execute, so it reads as dead however load-bearing it
+is. `positional_encoding.py` is the clearest case — deleting it is an
+`ImportError`, and it still appears on the list.
+
+Three things on it are real and are deliberately not in this cut:
+
+* **`models/core/attention.py`** (1,356 lines) is the flash-attention
+  decision, which belongs with the training-run scheduling in #1 rather than
+  here.
+* **The DASM and AAO transform chains** inside `data/evolutionary_dataset.py`.
+  A trace of the file's own top-level definitions puts **3,529 of its 6,224
+  lines** in functions nothing enters: `_evolutionary_transforms`,
+  `create_evolutionary_dataset`, the three AAO builders, and the DMS,
+  structural, HERMES and MPNN dataset factories. Cutting them is what would
+  free `molevol/{neutral_evolution,codon_preference,aao_neutral_rates,tandem}.py`
+  and `neutral/codon_boundary.py`.
+* **`training/checkpoint_selection.py`** (567 lines) and
+  `data/{manifests,registry_schema}.py` (956), each reached only from a live
+  module's import line.

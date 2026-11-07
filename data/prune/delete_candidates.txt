@@ -1,8 +1,7 @@
 # lines  path  <- live modules that import it (blank: none)
-# 26 files, 8,018 lines
+# 23 files, 6,630 lines
 # regenerate: python scripts/prune_candidates.py <traces> --write
 
-   190  dasm2/data/dataset_utils.py
    444  dasm2/data/manifests.py  dasm2/data/discovery.py
    512  dasm2/data/registry_schema.py  dasm2/data/discovery.py dasm2/data/yaml_registry.py
    276  dasm2/data/token_budget_sampler.py  dasm2/training/trainer.py
@@ -17,11 +16,9 @@
    436  dasm2/molevol/neutral_evolution.py  dasm2/data/transforms.py
    144  dasm2/molevol/tandem.py  dasm2/data/transforms.py
    246  dasm2/molevol/tensor_ops.py  dasm2/models/core/sf_projection.py dasm2/molevol/codon_conversion.py dasm2/neutral/hit_class.py
-   683  dasm2/molevol/uniformization.py
-   358  dasm2/neutral/base.py  dasm2/data/neutral_rates_source.py dasm2/data/segment_handlers.py dasm2/data/transforms.py dasm2/training/factory.py dasm2/training/trainer.py
-   532  dasm2/neutral/boundary_table.py
+   358  dasm2/neutral/base.py  dasm2/data/neutral_rates_source.py dasm2/data/transforms.py dasm2/training/factory.py dasm2/training/trainer.py
    190  dasm2/neutral/codon_boundary.py  dasm2/data/transforms.py
-    57  dasm2/sequence/tdi_constants.py  dasm2/models/core/base.py dasm2/models/core/transformer.py
+    74  dasm2/positional_encoding.py  dasm2/models/core/embeddings.py dasm2/models/core/transformer.py
    247  dasm2/tensors_of_seqs.py  dasm2/data/transforms.py
    567  dasm2/training/checkpoint_selection.py  dasm2/training/hooks/checkpoints.py
    192  dasm2/training/head_optimizer_state.py  dasm2/serialization/checkpoints.py dasm2/training/factory.py dasm2/training/trainer.py
