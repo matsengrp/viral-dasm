@@ -70,6 +70,13 @@ from lib import (
 #: Columns the digest is taken over, in this order. The three that identify a
 #: PCP; `era` is derived from `clade` and `in_train` is the column the fold
 #: draw replaces.
+#:
+#: **What this does not cover**, because the boundary is load-bearing: the
+#: digest says nothing about `nt_rates`, `nt_csps`, `branch_length`, the
+#: row-group geometry, or any key-value metadata. It answers "are these the
+#: same PCPs in the same order", which is what fold 0 is drawn from, and
+#: nothing about the neutral model's numbers. Those are gated separately, by
+#: `verify_neutral` against the `neutral_archives` digests in `config.yaml`.
 DIGEST_COLUMNS = ("clade", "parent", "child")
 
 #: Bytes per inner digest. 16 = blake2b-128, the same width as the outer one.
