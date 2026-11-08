@@ -11,7 +11,7 @@ substitutions. The between-AA levels are unidentifiable from sequence data
 (Proposition 1(ii)) and are kept as metadata for optional post-hoc
 attribution only.
 
-Two measured-optimality axes are supported (issue #747):
+Two measured-optimality axes are supported:
 
 - **CSC** (codon stability coefficient) via :func:`load_csc_table`.
 - **tAI** (tRNA adaptation index) via :func:`load_tai_table`.
@@ -44,7 +44,7 @@ from dasm2.codon_table import (
 from dasm2.sequence.constants import CODON_TO_IDX
 
 #: The two ways a codon preference vector is injected into the neutral codon
-#: distribution (issue #930). See :func:`apply_codon_pref_log`.
+#: distribution. See :func:`apply_codon_pref_log`.
 CodonPrefForm = Literal["divide_z", "ratio"]
 
 
@@ -364,7 +364,7 @@ def design_conditioning(tables: list[CodonPreferenceTable]) -> DesignConditionin
     restricted to single-nt-reachable synonymous codons (the subset that
     actually pins the strengths). Collinearity between CSC and tAI does not
     block the aggregate fit, but it destabilizes the per-axis split, so it is
-    surfaced explicitly rather than hidden (issue #747).
+    surfaced explicitly rather than hidden.
 
     Args:
         tables: Codon-optimality axes (in strength-vector column order).
@@ -409,21 +409,21 @@ def apply_codon_pref_log(
 ) -> Tensor:
     """Apply codon preference to log neutral codon probabilities.
 
-    Two forms (issue #930):
+    Two forms:
 
-    - ``"divide_z"`` (default, the #749/#767 merged form): add the log
+    - ``"divide_z"`` (the default): add the log
       preference, then renormalize with a softmax over all 64 codons
       (``÷ Z``, ``Z = Σ_k p_k·g_k``). Not a cycle-consistent potential — ``Z``
       depends on the neutral row (branch length, parent) — but agrees with the
       ratio form on the identifiable within-box synonymous signal.
-    - ``"ratio"`` (issue #930 Rung 1): add the log preference gauged by the
+    - ``"ratio"``: add the log preference gauged by the
       *parent codon's own* preference, i.e. ``g_{c'}/g_{x̄_j}`` for child ``c'``
       and parent codon ``x̄_j``. This is the cycle-consistent form the DASM
       likelihood uses (``ℓ = p·(g_{c'}/g_{x̄_j})·f``): a global shift of
       ``codon_pref_log`` is an exactly flat direction, and the output is
       **not** renormalized to sum to 1 — the 64-way normalization comes from
       the caller's ``compute_log_adjusted_codon_probs`` step, not from this
-      primitive. That step is configurable since issue #1238 (parent-absorb
+      primitive. That step is configurable (parent-absorb
       or a sense-restricted ``log_softmax``); the flat-direction claim holds
       under either, since both denominators scale with a global shift.
       Requires ``parent_codon_idxs``.

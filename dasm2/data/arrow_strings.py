@@ -1,7 +1,7 @@
 """Row-aligned numpy views of parent/child NT columns, read off Arrow buffers.
 
-The columnar passes over Parquet PCPs (the branch-length cold start, issue
-#992, and the scored-substitution guard, issue #1243) compare parent and child
+The columnar passes over Parquet PCPs (the branch-length cold start and the
+scored-substitution guard) compare parent and child
 sequences byte for byte without building Python strings. They share the
 reading: null-fill each segment column, split both columns at the union of
 their chunk boundaries, take zero-copy ``(offsets, data)`` views of each
@@ -49,7 +49,7 @@ def string_array_views(arr: pa.Array) -> tuple[np.ndarray, np.ndarray]:
     Returns offsets rebased to zero (int64, length ``len(arr) + 1``) and the
     exact byte range they index, so ``data[offsets[i]:offsets[i + 1]]`` is row
     ``i``'s bytes. Four ways to read a plausible-but-wrong answer off Arrow
-    string buffers are closed here rather than assumed away (issue #992);
+    string buffers are closed here rather than assumed away;
     none of them would crash on its own, they would all just shift or pad the
     numbers that become branch lengths:
 

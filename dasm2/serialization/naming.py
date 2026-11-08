@@ -13,13 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional, Tuple, Union
 
 if TYPE_CHECKING:
-    from dasm2.config import (
-        EncoderConfig,
-        ESM2EncoderConfig,
-        IdentityEncoderConfig,
-        MPNNLightAttentionEncoderConfig,
-        TrainingConfig,
-    )
+    from dasm2.config import EncoderConfig, TrainingConfig
 
 #: Literal prefix marking the run-token component of a checkpoint filename.
 RUN_TOKEN_PREFIX = "run"
@@ -38,7 +32,7 @@ RUN_TOKEN_PATTERN = re.compile(rf"_({RUN_TOKEN_BODY})_")
 #: The optional ``_{run_token}`` segment that :func:`build_checkpoint_filename`
 #: places between a checkpoint's suffix and its ``_{hash}_{date}`` trailer.
 #: Callers matching a suffix against that trailer must allow for it, and must
-#: allow for its absence: checkpoints predating #1011, or written by a run
+#: allow for its absence: checkpoints predating the token, or written by a run
 #: with no structured logger, carry no token.
 OPTIONAL_RUN_TOKEN = rf"(?:_{RUN_TOKEN_BODY})?"
 
@@ -49,7 +43,7 @@ def run_token_from_run_id(run_id: Optional[str]) -> Optional[str]:
     Checkpoint filenames carry this token so that two attempts writing into
     the same directory produce distinguishable files, and so any checkpoint
     can be traced back to the ``logs/{run_id}_log.jsonl`` that describes it
-    (issue #1011). The token keeps the run ID's timestamp so filenames sort
+    The token keeps the run ID's timestamp so filenames sort
     chronologically within a naming group, unlike the metadata hash.
 
     Args:
@@ -100,7 +94,7 @@ def parse_run_token(filename: str) -> Optional[str]:
 
 def generate_model_identifier(
     config_name: Optional[str],
-    encoder_config: "Union[EncoderConfig, ESM2EncoderConfig, MPNNLightAttentionEncoderConfig, IdentityEncoderConfig]",
+    encoder_config: "EncoderConfig",
 ) -> str:
     """Generate model identifier from config name or architecture.
 
@@ -222,7 +216,7 @@ def compute_metadata_hash(
 
 def build_checkpoint_filename(
     config_name: Optional[str],
-    encoder_config: "Union[EncoderConfig, ESM2EncoderConfig, MPNNLightAttentionEncoderConfig, IdentityEncoderConfig]",
+    encoder_config: "EncoderConfig",
     head_dataset_pairs: List[Tuple[str, str]],
     training_config: "TrainingConfig",
     suffix: Optional[str] = None,
@@ -238,7 +232,7 @@ def build_checkpoint_filename(
     provided. The run token identifies the training run that wrote the file,
     so two attempts sharing an output directory stay distinguishable; it sits
     ahead of the hash so that lexicographic sorting within a naming group is
-    chronological rather than hash-ordered (issue #1011). The date (YYYYMMDD
+    chronological rather than hash-ordered. The date (YYYYMMDD
     format) is appended after the hash for easy identification of when the
     checkpoint was created.
 

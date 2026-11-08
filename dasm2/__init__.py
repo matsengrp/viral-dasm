@@ -11,12 +11,12 @@ Import components directly from their modules:
 from dasm2.arrow_pool import use_system_arrow_pool
 
 # First, before anything imports pyarrow: Arrow fixes its C++ default pool at
-# import time. See #1368 and the function's docstring.
+# import time. See the function's docstring.
 use_system_arrow_pool()
 
 from dasm2.mha_fastpath import disable_mha_fastpath  # noqa: E402
 
 # Applied at import so it covers every entry point -- CLI, Snakemake, notebooks,
-# tests -- and netam models that bypass DASM2's own encoder. See #1005 and the
-# function's docstring for why this is process-wide rather than call-scoped.
+# tests -- and models that bypass DASM2's own encoder. See the function's
+# docstring for why this is process-wide rather than call-scoped.
 disable_mha_fastpath()

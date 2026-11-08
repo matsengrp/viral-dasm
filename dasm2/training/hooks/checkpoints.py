@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
 from dasm2.config import HookConfig
-from dasm2.training.checkpoint_selection import PERIODIC_MARKER
 from dasm2.training.hooks.base import TrainingHook
 
 if TYPE_CHECKING:
@@ -15,7 +14,13 @@ class CheckpointSaveHook(TrainingHook):
     """Hook to save model checkpoints after each training cycle."""
 
     #: Marks step-cadence saves in the filename; only these are rotated.
-    PERIODIC_TAG = PERIODIC_MARKER
+    #:
+    #: Upstream this came from ``training/checkpoint_selection.py``, which
+    #: shared it with the readers that pick a final checkpoint out of a
+    #: finished run's directory. This fork has no such reader -- it names the
+    #: checkpoint it wants -- so the module is not vendored and the writer
+    #: owns the marker.
+    PERIODIC_TAG = "periodic"
     #: Step-cadence saves kept: the newest, plus one in case it is truncated.
     PERIODIC_KEEP = 2
 
@@ -24,7 +29,6 @@ class CheckpointSaveHook(TrainingHook):
         output_dir: str,
         notes: Optional[str] = None,
         checkpoint_every_n_evals: Optional[int] = None,
-        tdi_tokens_dir: Optional[Path] = None,
         save_training_state: bool = False,
         checkpoint_every_n_steps: Optional[int] = None,
     ) -> None:
@@ -37,12 +41,10 @@ class CheckpointSaveHook(TrainingHook):
                 evaluations via on_eval(). None disables intra-cycle
                 checkpointing (the post_cycle save still fires once per
                 cycle on the restored best model).
-            tdi_tokens_dir: Optional 3Di tokens directory to include in checkpoint
-                metadata. Only needed when using a TDI encoder.
             save_training_state: If True, save resumable checkpoints that include
                 optimizer, scheduler, counters, and RNG state for training resume.
             checkpoint_every_n_steps: If set, also save every N optimizer steps
-                via on_step() (issue #1640: D₂'s evals are hours apart), as
+                via on_step(), which matters when evals are hours apart, as
                 ``periodic_step{N}`` files of which only the newest
                 ``PERIODIC_KEEP`` are kept. The save follows the step's eval, if
                 one ran.
@@ -54,7 +56,6 @@ class CheckpointSaveHook(TrainingHook):
         self.output_dir = Path(output_dir)
         self.notes = notes
         self.checkpoint_every_n_evals = checkpoint_every_n_evals
-        self.tdi_tokens_dir = tdi_tokens_dir
         self.save_training_state = save_training_state
         self.checkpoint_every_n_steps = checkpoint_every_n_steps
         # Periodic saves on disk, oldest first; read from disk at the first.
@@ -75,8 +76,8 @@ class CheckpointSaveHook(TrainingHook):
         The trainer calls ``_restore_best_model()`` at the end of every
         cycle's step loop, so *every* post-cycle save holds that cycle's
         best-validation weights rather than its last-step weights. The
-        ``_best`` marker in the suffix says so on the file itself: before
-        issue #1011 the final cycle's save was the one file with neither a
+        ``_best`` marker in the suffix says so on the file itself: formerly
+        the final cycle's save was the one file with neither a
         cycle nor a step suffix, which read as a generic "last state"
         artifact and, with two attempts in one directory, produced two
         equally anonymous files that selection heuristics picked between at
@@ -162,13 +163,11 @@ class CheckpointSaveHook(TrainingHook):
                 str(self.output_dir),
                 suffix=suffix,
                 notes=self.notes,
-                tdi_tokens_dir=self.tdi_tokens_dir,
             )
         return trainer.save_checkpoint(
             str(self.output_dir),
             suffix=suffix,
             notes=self.notes,
-            tdi_tokens_dir=self.tdi_tokens_dir,
         )
 
     def to_config(self) -> HookConfig:

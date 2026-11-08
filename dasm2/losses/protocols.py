@@ -16,9 +16,9 @@ class SelfNormalizingLoss(Protocol):
     """A loss whose normalization label count differs from ``loss_mask.sum()``.
 
     Joint training normalizes each task by its own window-total label count
-    (issue #688). The default count is ``batch['loss_mask'].sum()`` (resolved
+    The default count is ``batch['loss_mask'].sum()`` (resolved
     by ``Trainer._get_n_loss_positions``). A loss whose "events" are a strict
-    subset of ``loss_mask`` — e.g. CSP (#679), defined only at substituted
+    subset of ``loss_mask`` — e.g. CSP, defined only at substituted
     sites while sharing DASM's broad evolutionary mask — implements this to
     report its own label count so that ``loss_weight`` stays a clean relative
     weight rather than silently carrying a label-count ratio.
@@ -87,7 +87,7 @@ class CodonSamplingLoss(Protocol):
        practice, but a caller feeding in large *positive* factors can leave
        a row summing above 1. QDASM's ``exp(tQ)`` rows are normalized by
        construction and have no such condition.
-       ``DASMLoss(normalization="sense_conditional")`` (issue #1238) is the
+       ``DASMLoss(normalization="sense_conditional")`` is the
        unconditional mutsel form: one ``log_softmax`` over the
        sense-restricted weight row, so the clause holds for any finite
        selection factors.
@@ -103,7 +103,7 @@ class CodonSamplingLoss(Protocol):
        escapes that because an argmax is normalization-free; a multinomial
        draw does not. Whichmut needs a *sibling* contract (sample event
        count and locations, then the substitution), not a stretched version
-       of this one — see #192. ``AAOWhichmutLoss`` is further out still,
+       of this one. ``AAOWhichmutLoss`` is further out still,
        being AA-level.
 
     Positions the batch masks out (padding, separators, ambiguous parent

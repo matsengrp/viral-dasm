@@ -1,4 +1,4 @@
-"""Encapsulates a second, head-scoped optimizer's own state (issue #1220).
+"""Encapsulates a second, head-scoped optimizer's own state.
 
 ``HeadOptimizerState`` is deliberately **not** a ``TrainingHook`` or
 ``GradientCombineHook`` (see ``dasm2/training/hooks/``), and is not
@@ -11,7 +11,7 @@ shape: it isn't per-task (``TrainingHook``'s ``pre_cycle``/``post_cycle``/
 under ``dasm2/training/hooks/`` for exactly this reason — an earlier version
 of this class was misnamed ``HeadOptimizerHook`` and placed in that
 directory, which invited exactly the confusion this paragraph is now
-avoiding (PR #1223 review).
+avoiding.
 
 What it actually is: ``Trainer`` supports giving exactly one head its own
 optimizer, separate from the shared main optimizer every other parameter
@@ -48,15 +48,13 @@ def assert_head_optimizer_supported_by_backend(backend: "ComputeBackend") -> Non
     """Raise if a configured head_optimizer can't run under ``backend``.
 
     Only ``SingleGPUBackend`` has been exercised with a second, head-scoped
-    optimizer (issue #1220). Call this once head_optimizer/head_optimizer_config
+    optimizer. Call this once head_optimizer/head_optimizer_config
     is already known to be set (the caller decides *whether* it's configured;
     this only decides whether ``backend`` can support it), before any
     expensive model/dataset setup — the three call sites
     (``create_trainer``, ``Trainer.__init__``, ``resume_training``) each want
     to fail fast at their own entry point rather than share one call site,
-    which is why this is a shared function, not a single shared call
-    (PR #1223 review: the check itself was previously copy-pasted three
-    times with three slightly different messages).
+    which is why this is a shared function, not a single shared call.
 
     Raises:
         ValueError: If ``backend.num_processes > 1``.
@@ -66,7 +64,7 @@ def assert_head_optimizer_supported_by_backend(backend: "ComputeBackend") -> Non
             "head_optimizer is not supported under multi-process backends "
             f"(backend.num_processes={backend.num_processes}): only "
             "SingleGPUBackend has been exercised with a second, head-scoped "
-            "optimizer (issue #1220). Run single-process (SingleGPUBackend) "
+            "optimizer. Run single-process (SingleGPUBackend) "
             "until DDP support is added."
         )
 
@@ -101,7 +99,7 @@ class HeadOptimizerState:
         # Initial LR, for the same cycle-boundary reset the main optimizer
         # gets (Trainer._reset_optimizer_with_adjusted_lr),
         # kept distinct from the main optimizer's own initial LR so the two
-        # never mix (issue #1220).
+        # never mix.
         self.learning_rate: float = optimizer.param_groups[0]["lr"]
 
     def current_lr(self) -> float:
@@ -133,7 +131,7 @@ class HeadOptimizerState:
         scheduler_state_dict: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Restore this optimizer's (and, if present, scheduler's) state
-        from a checkpoint (issue #1220). All mutation of this state during
+        from a checkpoint. All mutation of this state during
         checkpoint restore goes through this one method — the caller
         (``Trainer.restore_training_state``) only decides *whether* to call
         it (the head-type mismatch / presence checks it already does),
@@ -166,7 +164,7 @@ class HeadOptimizerState:
 
         Reads from ``self.optimizer``/``self.learning_rate`` (the initial
         LR) rather than the main optimizer's own config, since the two can
-        legitimately differ (issue #1220).
+        legitimately differ.
 
         Args:
             backend: Strips any backend-specific optimizer wrapper — same

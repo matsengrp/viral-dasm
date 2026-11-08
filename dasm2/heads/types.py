@@ -1,6 +1,6 @@
 """Head type enumeration for prediction heads.
 
-After #621 Task #4 the dispatch frozensets that lived here have moved:
+The dispatch frozensets that once lived here have moved:
 
 - Loss-keyed sets (``WHICHMUT_LOSS_TYPES``, ``EVOLUTIONARY_LOSS_TYPES``,
   ``QDASM_FAMILY_LOSS_TYPES``) live in ``dasm2/losses/types.py``.
@@ -9,9 +9,9 @@ After #621 Task #4 the dispatch frozensets that lived here have moved:
   ``DELTA_AFFINITY_HEAD_TYPES``, ``CONTRASTIVE_BINDING_HEAD_TYPES``,
   ``BINDING_CLASSIFICATION_HEAD_TYPES``) live in ``dasm2/data/registry.py``.
 
-The deprecated v3 head-type-keyed dispatch sets
-``EVOLUTIONARY_HEAD_TYPES`` and ``QDASM_FAMILY_HEAD_TYPES`` were deleted
-in Task #4. ``DASM_LOSS_HEAD_TYPES`` is retained here as the single
+The head-type-keyed dispatch sets ``EVOLUTIONARY_HEAD_TYPES`` and
+``QDASM_FAMILY_HEAD_TYPES`` are gone. ``DASM_LOSS_HEAD_TYPES`` is
+retained here as the single
 source for the BL-optimizer and OE-plot dispatch paths that still need a
 head-type filter — see its docstring below.
 """

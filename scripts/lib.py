@@ -12,6 +12,8 @@ pipeline's inputs for a reader who has their own mat-pcp run.
 from __future__ import annotations
 
 import hashlib
+import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,12 +22,78 @@ import yaml
 #: Repository root -- the directory holding config.yaml.
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
+# Put this repository ahead of anything installed, so `import dasm2` is the
+# vendored fork sitting next to this file.
+#
+# Not belt-and-braces. The venv carries an editable install of this project
+# whose finder maps `dasm2` to the path it was installed from, and that is a
+# *different checkout* whenever the pipeline runs from a `git worktree` -- the
+# arrangement #4's prune uses, because the main checkout is busy with a
+# multi-day run. `_EditableFinder` sits after `PathFinder` in `sys.meta_path`,
+# so the repository wins only while its root is on `sys.path`; a script run
+# puts `scripts/` there, never the root. Without this line the gates import
+# the other checkout's code and pass against it, which is a silent failure
+# in the worst direction: it reports the tree as working when the tree under
+# test was never loaded. `assert_dasm2_is_this_repo` below is the check that
+# makes it loud.
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+
+def assert_dasm2_is_this_repo() -> None:
+    """Fail unless every loaded `dasm2` module came from this repository.
+
+    Called by every script that imports `dasm2`, right after it does.
+
+    Checking the package root is not enough, and the difference matters. The
+    editable install's finder maps the name `dasm2` to the directory it was
+    installed from and resolves submodules against *that*, not against the
+    parent package's `__path__`. So `import dasm2` can land here while
+    `import dasm2.foo` lands in the other checkout -- which is exactly what
+    happens to a module this repository has deleted: `PathFinder` finds
+    nothing, and the editable finder then serves the copy that still exists
+    over there. A prune verified that way deletes files that keep running.
+    """
+    import dasm2
+
+    leaked = sorted(
+        f"{name} -> {Path(module.__file__).resolve()}"
+        for name, module in list(sys.modules.items())
+        if (name == "dasm2" or name.startswith("dasm2."))
+        and getattr(module, "__file__", None)
+        and not Path(module.__file__).resolve().is_relative_to(REPO_ROOT)
+    )
+    if leaked:
+        listing = "\n  ".join(leaked)
+        raise RuntimeError(
+            f"{len(leaked)} `dasm2` module(s) resolved outside {REPO_ROOT}:\n"
+            f"  {listing}\n"
+            "An editable install pointing at another checkout is shadowing "
+            "the vendored fork, so this run would measure code this "
+            "repository does not contain -- most likely a module deleted "
+            "here that still exists there."
+        )
+    assert dasm2  # the import above is the point; keep linters quiet
+
+
 CONFIG_PATH = REPO_ROOT / "config.yaml"
 
 with CONFIG_PATH.open() as handle:
     CONFIG = yaml.safe_load(handle)
 
-ARTIFACT_ROOT = Path(CONFIG["artifact_root"])
+#: Where the pipeline writes. ``config.yaml`` is the answer unless
+#: ``VIRAL_DASM_ARTIFACT_ROOT`` overrides it.
+#:
+#: The override exists for one case: a second checkout -- a ``git worktree``
+#: used to change the code while a multi-day run is still going in the main
+#: one. Both read the same ``config.yaml``, so without it a forced ``fast_test``
+#: or ``gate1`` rerun writes into the live run's directories and can overwrite
+#: its logs and checkpoints. It is deliberately not a config key: a value that
+#: belongs to one checkout for a few days should not be committed, and the
+#: default must stay the one written down.
+ARTIFACT_ROOT = Path(
+    os.environ.get("VIRAL_DASM_ARTIFACT_ROOT", CONFIG["artifact_root"])
+)
 GENE = CONFIG["mat_pcp"]["gene"]
 TRAIN_SEED = int(CONFIG["train_seed"])
 

@@ -28,19 +28,34 @@ evidence of a problem.
 GISAID: per-evaluation aggregate scalars only.
 """
 
-import dasm2  # noqa: F401  (imported first for its side effects)
-
 import argparse
 import sys
 from pathlib import Path
 
-import pandas as pd
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from lib import CANARY_STEPS, EVAL_EVERY_STEPS
+# `lib` first: it is what puts this repository's root on `sys.path`, and
+# `import dasm2` below is served by the venv's editable install -- which
+# points at another checkout -- until it has. A script run puts `scripts/`
+# on `sys.path[0]`, never the repository root, and `_EditableFinder` sits
+# after `PathFinder` in `sys.meta_path` with nothing ahead of it to find.
+# `lib` imports only the standard library and `yaml`, so putting it here
+# cannot cost `dasm2` the Arrow race below.
+from lib import assert_dasm2_is_this_repo, CANARY_STEPS, EVAL_EVERY_STEPS
+
+# `dasm2` next, above anything that pulls pyarrow in -- pandas does. Arrow
+# fixes its C++ default memory pool at first import, and `dasm2/__init__.py`
+# calls `use_system_arrow_pool()` to steer it off mimalloc, which under
+# pyarrow 25 requests transparent huge pages. Whichever import lands first
+# wins, and dasm2's complaint about losing goes to a Snakemake log nobody
+# reads. `tests/test_import_order.py` keeps both orderings honest.
+import dasm2  # noqa: F401  (imported for its side effects)
+
+import pandas as pd
 
 from dasm2.training.log_reader import get_run_eval_losses
+
+assert_dasm2_is_this_repo()
 
 #: Columns Gate 2 compares, and so the columns a tolerance is needed for.
 COLUMNS = ("avg_train_loss", "val_loss", "val_aa_acc_mutated")
@@ -98,14 +113,18 @@ def main() -> None:
         rows.append(row)
     table = pd.DataFrame(rows)
 
+    # What the runs differ in is the caller's choice, and it decides what the
+    # number means: two seeds in one tree measure seed variation, two runs at
+    # one seed in one tree measure run-to-run nondeterminism, and the second is
+    # the tighter null. The header names the runs rather than asserting what
+    # varied, because this script cannot tell.
     header = (
-        f"# Gate 2 tolerance, measured from {len(curves)} canary runs "
-        f"differing only in --seed.\n"
+        f"# Gate 2 tolerance, measured from {len(curves)} canary runs.\n"
         f"# runs: {', '.join(str(Path(d).name) for d in args.canary_dir)}\n"
         f"# tolerance = observed spread x {args.safety}, floored at "
         f"{MIN_TOLERANCE}.\n"
-        f"# Two seeds understate the spread they estimate; raising the seed "
-        f"count is how to tighten this.\n"
+        f"# {len(curves)} runs understate the spread they estimate; raising "
+        f"the run count is how to tighten this.\n"
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(header + table.to_csv(index=False, float_format="%.6f"))

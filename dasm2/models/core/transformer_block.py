@@ -4,7 +4,7 @@ Replaces PyTorch's monolithic nn.TransformerEncoderLayer with a composable
 TransformerBlock where each sub-component (normalization, activation, FFN,
 attention) is independently configurable.
 
-See #375 and #376 for design rationale.
+Attention and feed-forward are separately configurable blocks.
 """
 
 from typing import Callable, Literal, Optional
@@ -35,7 +35,7 @@ from dasm2.models.core.attention import FlashVarlenBatch, flash_varlen_batch
 # takes ``varlen=``, the batch's FlashVarlenBatch. TransformerStack builds it
 # once per forward and TransformerBlock passes it only to such mixers, so the
 # stack makes one host sync for the padding metadata instead of several per
-# layer (issue #1292).
+# layer.
 
 AttentionFactory = Callable[[], nn.Module]
 """Factory that creates a sequence-mixing module per layer.

@@ -32,9 +32,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from lib import CANARY_STEPS, EVAL_EVERY_STEPS, reference_run
+from lib import CANARY_STEPS, EVAL_EVERY_STEPS, assert_dasm2_is_this_repo, reference_run
 
 from dasm2.training.log_reader import get_run_eval_losses
+
+assert_dasm2_is_this_repo()
 
 #: What Gate 2 compares. Narrow on purpose: the run logs 26 columns, most of
 #: them diagnostics whose run-to-run spread nobody has measured, and a gate

@@ -1,4 +1,4 @@
-"""Capability-driven validation-metric providers (issue #738).
+"""Capability-driven validation-metric providers.
 
 Validation metric groups (child-codon prediction, selection-factor
 distribution) used to be gated by ``isinstance`` checks against the
@@ -25,7 +25,7 @@ Two gating shapes coexist behind one uniform loop:
   loss-intrinsic — ``AAOWhichmutLoss`` is AA-level and cannot produce a
   codon distribution even though it shares a head with codon-capable
   losses — so the provider gates on the loss exposing ``predict_codons``.
-  Behavior is identical to the pre-#738 ``isinstance(loss, ...)`` gate.
+  Behavior is identical to a plain ``isinstance(loss, ...)`` gate.
 
 Either shape can be narrowed by loss class. ``excluded_loss_classes`` removes
 a provider for losses whose batches lack the keys its ``update`` reads (the
@@ -57,7 +57,6 @@ from torch import Tensor
 
 from dasm2.heads.base import Capability
 from dasm2.heads.factory import HEAD_REGISTRY
-from dasm2.losses.dms_matrix import DMSMatrixCalibrationLoss
 from dasm2.training.codon_metrics import (
     CodonPredictionMetrics,
     mutated_codon_accuracy_from_counts,
@@ -233,8 +232,10 @@ METRIC_PROVIDERS: List[MetricProvider] = [
         update=_update_sf,
         metrics_from_counts=SelectionFactorMetrics.metrics_from_counts,
         counts_are_int=False,
-        # The sf update reads codon keys a dense DMS-matrix batch does not have.
-        excluded_loss_classes=(DMSMatrixCalibrationLoss,),
+        # Upstream this excluded the dense DMS-matrix loss, whose batches carry
+        # no codon keys for the sf update to read. That loss has no factory
+        # branch in this fork, so the exclusion could never fire; the mechanism
+        # is left unused rather than kept alive by a dead class to name.
     ),
 ]
 
@@ -266,7 +267,7 @@ def build_active_metrics(
     (from the loss or the head fallback); a declared capability with no
     resolvable extractor is a wiring bug and raises here — at task-build
     time — rather than silently omitting the metric at eval time (the
-    failure mode #738 fixes).
+    failure mode this registry exists to prevent).
     """
     active: List[ActiveMetric] = []
     for provider in providers if providers is not None else METRIC_PROVIDERS:

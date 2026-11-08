@@ -23,19 +23,33 @@ a draw from a distribution.
 GISAID: aggregate per-evaluation scalars only.
 """
 
-import dasm2  # noqa: F401  (imported first for its side effects)
-
 import argparse
 import json
 import sys
 from pathlib import Path
 
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from lib import reference_run
+# `lib` first: it is what puts this repository's root on `sys.path`, and
+# `import dasm2` below is served by the venv's editable install -- which
+# points at another checkout -- until it has. A script run puts `scripts/`
+# on `sys.path[0]`, never the repository root, and `_EditableFinder` sits
+# after `PathFinder` in `sys.meta_path` with nothing ahead of it to find.
+# `lib` imports only the standard library and `yaml`, so putting it here
+# cannot cost `dasm2` the Arrow race below.
+from lib import assert_dasm2_is_this_repo, reference_run
+
+# `dasm2` next, above anything that pulls pyarrow in -- pandas does. Arrow
+# fixes its C++ default memory pool at first import, and `dasm2/__init__.py`
+# calls `use_system_arrow_pool()` to steer it off mimalloc, which under
+# pyarrow 25 requests transparent huge pages. Whichever import lands first
+# wins, and dasm2's complaint about losing goes to a Snakemake log nobody
+# reads. `tests/test_import_order.py` keeps both orderings honest.
+import dasm2  # noqa: F401  (imported for its side effects)
 
 from dasm2.training.log_reader import get_run_eval_losses
+
+assert_dasm2_is_this_repo()
 
 #: What the reference's stop reason has to say. The schedule reaching its
 #: floor is the designed ending; anything else means the run ended for a

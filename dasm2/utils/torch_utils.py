@@ -49,7 +49,7 @@ def set_deterministic_mode(num_threads: int = 1) -> None:
     """Pin intra-op thread count and enable deterministic algorithms.
 
     `set_seed` alone leaves run-to-run recovery-r drift possible even with
-    fixed seeds (issue #816). The `torch.set_num_threads` call here is
+    fixed seeds. The `torch.set_num_threads` call here is
     redundant inside training, which pins one thread itself
     (`TRAINING_NUM_THREADS` in `dasm2.train_command`); it's kept so this
     function is a complete, self-contained determinism switch for other

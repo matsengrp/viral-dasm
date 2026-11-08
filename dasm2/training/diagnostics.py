@@ -1,7 +1,7 @@
 """Forensic diagnostics knobs for the trainer, resolved from the environment.
 
-These are opt-in *debugging* toggles surfaced while diagnosing the issue-#724
-cycle-1 crash. Unlike the run-shaping DataLoader knobs (``dataloader_prefetch_
+These are opt-in *debugging* toggles surfaced while diagnosing a cycle-1
+crash. Unlike the run-shaping DataLoader knobs (``dataloader_prefetch_
 factor`` / ``dataloader_pin_memory``, now ``TrainingConfig`` fields), these are
 throwaway forensics, so they stay environment-driven rather than baked into the
 serialized training config. Collecting them here gives a single place to see
@@ -29,8 +29,8 @@ def _step_watchdog_seconds() -> Optional[float]:
     ``faulthandler.dump_traceback_later`` before each optimizer step and cancels
     it after. A step that runs longer than the timeout dumps every thread's stack
     to stderr (and so into the training log) without exiting, turning a silent
-    multi-minute stall — a stuck collective, a wedged data load, the issue-#724
-    hang — into a traceback that pins the stuck operation, instead of an opaque
+    multi-minute stall — a stuck collective, a wedged data load, a hang —
+    into a traceback that pins the stuck operation, instead of an opaque
     NCCL watchdog timeout. Returns ``None`` (disabled) when unset or invalid.
     """
     raw = os.environ.get("DASM2_STEP_WATCHDOG_SECONDS")
@@ -50,7 +50,7 @@ def _long_batch_log_codons() -> Optional[int]:
     the forward, a flushed line for any accumulation window whose padded
     sequence length reaches the threshold, with that rank's CUDA memory. This
     catches the heavy long-sequence batches that crash one rank's GPU under DDP
-    load imbalance (issue #724) — the line is flushed pre-compute, so it survives
+    load imbalance — the line is flushed pre-compute, so it survives
     even a SIGSEGV in the step it describes. Unset/non-positive ⇒ disabled.
     """
     raw = os.environ.get("DASM2_LOG_LONG_BATCH_CODONS")
@@ -64,7 +64,7 @@ def _long_batch_log_codons() -> Optional[int]:
 
 
 def _capture_window_detail_codons() -> Optional[int]:
-    """Valid-codon threshold for per-sequence window-detail forensics (issue #724).
+    """Valid-codon threshold for per-sequence window-detail forensics.
 
     Set ``DASM2_CAPTURE_WINDOW_DETAIL=<int>`` to dump, on EVERY rank and BEFORE
     the forward, one flushed ``[window-row]`` line per sequence whose true
@@ -91,9 +91,9 @@ def _capture_window_steps() -> Optional[Tuple[int, int, int]]:
     ``[window-row]`` dump to a single 0-indexed ``cycle`` and an inclusive,
     1-indexed step range (matching the ``step=`` field printed in the
     forensics). Without it the dump fires for every qualifying window in every
-    cycle — ~1M flushed lines on a full Compara run, which both bloats the log
+    cycle — on the order of a million flushed lines on a full run, which both bloats the log
     and perturbs the timing it is meant to measure. Confining it to the crash
-    window (e.g. ``1:1700-1850`` for the issue-#724 cycle-1 ~step-1792 crash)
+    window (e.g. ``1:1700-1850`` for a cycle-1 crash near step 1792)
     keeps the I/O overhead out of the steps under study. Unset/malformed ⇒ no
     gate (capture fires for every qualifying window).
     """

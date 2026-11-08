@@ -68,6 +68,7 @@ from lib import (
     CV_SEED,
     DATALOADER_WORKERS,
     SELF_CHECK_TOLERANCE,
+    assert_dasm2_is_this_repo,
     corpus,
     reference_run,
 )
@@ -83,6 +84,8 @@ from dasm2.train_command import (
     _resolve_censor_table,
     _resolve_reference_bases,
 )
+
+assert_dasm2_is_this_repo()
 
 #: The banner the three censoring sources print, as (name, regex, expected).
 #: Hard-coded against the v12 Spike corpus; a different mat-pcp run gives

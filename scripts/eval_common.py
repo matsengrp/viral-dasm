@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Literal
 
 import torch
+from lib import assert_dasm2_is_this_repo
 from torch.utils.data import DataLoader
 
 from dasm2.data.evolutionary_dataset import (
@@ -35,6 +36,9 @@ from dasm2.data.evolutionary_dataset import (
 from dasm2.heads.types import HeadType
 from dasm2.losses.whichmut_losses import WhichmutLoss
 from dasm2.train_command import _resolve_censor_table, _resolve_reference_bases
+
+assert_dasm2_is_this_repo()
+
 
 Split = Literal["train", "val"]
 

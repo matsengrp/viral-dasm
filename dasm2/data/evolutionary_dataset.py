@@ -14,13 +14,13 @@ Adding a new head type requires only a new transform list, output keys, and
 collator specs — no new dataset class needed.
 
 Heads supported:
-    - SelectionFactorHead + DASMLoss family: create_evolutionary_dataset()
-    - SelectionFactorHead + Whichmut/AAO losses, PerSiteChildHead,
-      WhichmutResidualHead: create_whichmut_dataset()
-    - SelectionFactorHead + AAOWhichmutLoss: create_aao_whichmut_dataset()
-    - DMSHead: create_dms_dataset()
-    - HERMESHead: create_hermes_dataset()
-    - DeltaAffinityHead: create_delta_affinity_dataset() (in delta_affinity.py)
+    - SelectionFactorHead + WhichmutLoss: create_whichmut_dataset() from a
+      DataFrame, create_whichmut_dataset_from_parquet() from a Parquet corpus.
+
+That is the whole list. Upstream this module also built datasets for the DASM
+and AAO loss families and for the DMS, HERMES, MPNN and structural heads;
+viral-DASM trains none of them, so those factories are not in this fork. See
+``PROVENANCE.md``.
 
 Usage:
     from dasm2.data.evolutionary_dataset import create_whichmut_dataset
@@ -43,7 +43,6 @@ Usage:
 import copy
 import logging
 import math
-import multiprocessing
 import time
 import warnings
 from pathlib import Path
@@ -68,25 +67,11 @@ import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 import torch
-import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset, Sampler, Subset
 
-from dasm2.codon_table import NUM_AA
 from dasm2.constants import SMALL_PROBABILITY
-from dasm2.data._neutral_matrix_exp import (
-    check_codon_pref_compatible,
-    check_multihit_compatible,
-    compute_neutral_codon_probs_matrix_exp_per_pcp,
-    finalize_matrix_exp_log_probs,
-    is_matrix_exp_mode_enabled,
-    parent_sense_idxs_of_codon64_idxs,
-)
 from dasm2.data.arrow_strings import iter_selected_row_group_values
 from dasm2.data.collators import ESM2_COLLATOR_SPECS, TensorScale, TransformCollator
-from dasm2.data.dataset_utils import group_kfold_in_train
-from dasm2.data.esm2_wrapper import ESM2DatasetWrapper
-from dasm2.data.hermes_dataset import HERMESDataset
-from dasm2.data.mpnn_whichmut import MPNNWhichmutDataset
 from dasm2.data.neutral_rates_source import (
     NeutralRatesSource,
     parquet_carries_neutral_columns,
@@ -101,26 +86,19 @@ from dasm2.data.parquet_backend import (
 )
 from dasm2.data.protocols import SequenceProvider
 from dasm2.data.registry import (
-    _require_holdout_samples,
     determine_nickname_from_data_spec,
     is_parquet_data_spec,
     load_dataframe_with_split_markers,
     parse_multiname,
-    preprocess_sequences_dataframe_columns,
     registered_nickname_or_none,
     resolve_data_path,
-    sequence_df_and_handler_from_spec,
     split_dataframe,
-    validate_precomputed_columns,
     verify_parquet_seam_stamp,
 )
 from dasm2.data.segment_handlers import (
     SegmentHandler,
     detect_compatible_handler,
-    parent_sequences_from_frame,
-    validate_parent_columns,
 )
-from dasm2.data.tdi_whichmut import TdiWhichmutDataset
 from dasm2.data.transforms import (
     NT_SEPARATOR_LEN,
     SEPARATOR_NT_CSP_FILL,
@@ -136,10 +114,7 @@ from dasm2.data.transforms import (
     ComputeNtRatesAndCsps,
     ComputeParentNtWindows,
     FusedTranslateTokenizeCodonIndex,
-    LookupAAONeutralRates,
-    MarginalizeCodonsToAAO,
     NarrowLossMask,
-    ReshapeNtToCodonRatesAndCsps,
     TranslateAndTokenize,
 )
 from dasm2.data.validation import (
@@ -147,7 +122,6 @@ from dasm2.data.validation import (
     scored_substitution_flags_from_arrow,
 )
 from dasm2.molevol.branch_length_init import (
-    SOURCE_FILE_FEATURE,
     BranchLengthInitStrategy,
     PerSourceStrategy,
     deserialize_strategy,
@@ -156,38 +130,24 @@ from dasm2.molevol.codon_neutral_rates import (
     NUM_CODON_INDICES,
     compute_codon_mutation_rates,
 )
-from dasm2.molevol.neutral_evolution import (
-    neutral_codon_probs,
-    neutral_codon_probs_with_padding,
-)
-from dasm2.neutral.boundary_table import validate_boundary_coverage
 from dasm2.sequence.constants import (
     AA_AMBIG_IDX,
-    AA_PADDING_TOKEN,
-    AA_STR_TO_IDX,
     AMBIGUOUS_CODON_IDX,
     NT_SEPARATOR,
 )
 from dasm2.sequence.conversion import (
     fused_translate_tokenize_codon_index,
     translate_sequence,
-    unflatten_codon_idxs,
 )
-from dasm2.sequence.layout import layout_of_aa_idxs, padding_sentinel_for
+from dasm2.sequence.layout import padding_sentinel_for
 from dasm2.sequence.masking import CensorMode, CensorSpec
-from dasm2.tensors_of_seqs import (
-    tokenize_aa_sequences as _tokenize_aa_sequences,
-)
-from dasm2.tensors_of_seqs import (
-    tokenize_single_aa_sequence,
-)
 from dasm2.tokenizers import ESM2Tokenizer
-from dasm2.utils.tensor import clamp_probability, numpy_to_tensors, tensors_to_numpy
+from dasm2.utils.tensor import clamp_probability, tensors_to_numpy
 from dasm2.utils.torch_utils import pin_single_thread
 
 if TYPE_CHECKING:
     from dasm2.config import CvSplitConfig
-    from dasm2.neutral.base import AbstractNeutralModel, RatesCSPNeutralModel
+    from dasm2.neutral.base import RatesCSPNeutralModel
     from dasm2.neutral.hit_class import HitClassModel
 
 logger = logging.getLogger(__name__)
@@ -207,14 +167,14 @@ def warn_if_parquet_dataset_mode_mismatch(dataset_mode: str) -> None:
 
     "streaming" matches what Parquet actually does, so only the
     "precomputed" request is silently violated -- warning on "streaming"
-    instead (the inverted pre-#501 condition) fired on the case that
+    instead (the inverted condition) fired on the case that
     already matches reality and stayed silent on the one config knob a
     user would reach for to get precomputed behavior, which Parquet can't
     provide.
 
     Lives here rather than in ``train_command`` because the eval path
     (``dasm_evaluation.load_trainer_and_dataset``) takes the same knob and
-    has the same Parquet blind spot (issue #988); importing it from
+    has the same Parquet blind spot; importing it from
     ``train_command`` would be circular.
 
     Args:
@@ -242,89 +202,10 @@ def warn_if_parquet_dataset_mode_mismatch(dataset_mode: str) -> None:
 MAX_FETCH_WORKERS = 10
 
 
-def max_fetch_worker_count() -> int:
-    """Half the host's cores, floored at 1 and capped at ``MAX_FETCH_WORKERS``.
-
-    The single definition of the share-the-host arithmetic, so
-    :func:`fetch_worker_count` and
-    ``branch_lengths._calculate_optimal_worker_count`` cannot drift apart on
-    the formula the way they previously could on the cap alone.
-
-    Returns:
-        Worker count, at least 1.
-    """
-    return max(1, min(multiprocessing.cpu_count() // 2, MAX_FETCH_WORKERS))
 
 
-def fetch_worker_count(dataset: Dataset) -> int:
-    """DataLoader worker count for a forward-only sweep over ``dataset``.
-
-    Returns 0 for a precomputed dataset and ``min(cpu_count // 2, 10)`` for a
-    streaming one.
-
-    The split is not a tuning preference — the two modes have per-sample fetch
-    costs three orders of magnitude apart. Precomputed ``__getitem__`` is a
-    dict lookup into tensors built at load time, so a worker process would add
-    IPC for a fetch that costs nothing. Streaming re-runs the neutral model
-    per sample: measured at 10.6 ms/sample on the real ``v1tangCC`` +
-    ``qdasm_v4_4m_tang`` pair, which single-threaded is ~1.9 h per pass over
-    that 652K-PCP dataset (issue #988). Workers are what make streaming's 30x
-    memory saving affordable rather than a 12x wall-clock regression, which is
-    the tradeoff ``experiments/2026-03-10-unified-dataset-benchmark``'s
-    ``streaming_w0`` rows show.
-
-    Args:
-        dataset: The dataset a DataLoader is about to sweep. Read through
-            ``is_precomputed``, which ``ESM2DatasetWrapper`` delegates and
-            ``Subset`` does not — hence the unwrap below. The distributed BL
-            path wraps each rank's slice in a ``Subset``
-            (``branch_lengths._RankSlicedBLSource``), and without the unwrap a
-            precomputed dataset there would pay for workers it cannot use.
-
-    Returns:
-        Worker count, suitable for ``DataLoader(num_workers=...)``.
-    """
-    while isinstance(dataset, Subset):
-        dataset = dataset.dataset
-    if getattr(dataset, "is_precomputed", False):
-        return 0
-    return max_fetch_worker_count()
 
 
-def fetch_dataloader_kwargs(dataset: Dataset) -> Dict[str, Any]:
-    """``DataLoader`` worker kwargs for a forward-only sweep over ``dataset``.
-
-    Pairs :func:`fetch_worker_count` with an explicit ``fork`` start method,
-    which is load-bearing twice over:
-
-    - **Memory.** Fork gives the workers the parent's neutral model and warm
-      caches copy-on-write. Under ``spawn`` each of the up-to-10 workers
-      re-imports and re-builds the streaming dataset, so the model is
-      resident once per worker — which would undo the host-memory bound
-      these workers exist to make affordable (issue #988).
-    - **Correctness.** ``spawn`` pickles the worker's arguments by reference,
-      so it fails outright if the referenced module object is not the one in
-      ``sys.modules``. Pinning ``fork`` makes that failure mode unreachable
-      regardless of what set the global start method: ``utils.parallel``'s
-      ``force_spawn`` sets it *globally* (``force=True``), macOS defaults to
-      ``spawn``, and CPython is moving POSIX's default to ``forkserver``. (As
-      of this writing ``force_spawn``'s two call sites in ``utils.parallel``
-      are themselves reached only from tests, so today's exposure is the
-      platform defaults rather than that helper.)
-
-    ``trainer.py`` pins ``fork`` for its own DataLoader for the same two
-    reasons; this keeps the eval-side sweeps consistent with it rather than
-    depending on whatever last touched the global start method.
-
-    Args:
-        dataset: The dataset a DataLoader is about to sweep.
-
-    Returns:
-        Kwargs to splat into ``DataLoader(...)``. ``multiprocessing_context``
-        is omitted when the worker count is 0, since ``DataLoader`` rejects it
-        without multiprocessing enabled.
-    """
-    return fork_worker_kwargs(fetch_worker_count(dataset))
 
 
 def fork_worker_kwargs(num_workers: int) -> Dict[str, Any]:
@@ -426,7 +307,7 @@ def _validate_codon_mutations_exist(
     """Validate every sequence pair has at least one scored codon substitution.
 
     Uses :func:`dasm2.data.validation.has_scored_substitution`, the definition
-    the Parquet converter filters on (issue #1243): a codon position where
+    the Parquet converter filters on: a codon position where
     the parent is a sense codon over ``ACGT``, the child is over ``ACGT``, and
     they differ. Such a pair's branch length fits to zero, so it has no
     evolutionary signal.
@@ -466,14 +347,14 @@ def _validate_parquet_scored_substitutions(
 
     Streams the parent/child segment columns one row group at a time through
     :func:`dasm2.data.validation.scored_substitution_flags_from_arrow`,
-    without materializing the NT strings (#992). Checks only the rows the
+    without materializing the NT strings. Checks only the rows the
     backend's ``row_filter`` selects. A segment whose columns the files lack
     (a heavy-only file under an antibody handler) is absent, as in
     ``make_parquet_row_converter``.
 
     Raises:
         ValueError: If any selected row has no scored substitution. The
-            converter drops these rows (issue #1243), so the file was built
+            converter drops these rows, so the file was built
             without it.
     """
     absent = segment_handler.validate_segment_columns(
@@ -493,41 +374,18 @@ def _validate_parquet_scored_substitutions(
         raise ValueError(
             f"{num_inert} of {backend.total_rows} selected rows in "
             f"{[str(path) for path in parquet_paths]} have no scored codon "
-            f"substitution. Rebuild the file with "
-            f"scripts/prepare_compara_parquet.py or "
-            f"scripts/prepare_superfamily_parquet.py, which drop these rows "
-            f"(issue #1243)."
+            f"substitution. The corpus-building pipeline drops such rows; "
+            f"rebuild the file with it."
         )
 
 
-def _iter_parquet_parents(
-    backend: ParquetBackend, segment_handler: SegmentHandler
-) -> Iterable[str]:
-    """Stream selected parents through the dataset's shared segment validation."""
-    # Validate each file, not only the backend's union of column names. Missing
-    # columns in one component must not masquerade as null-valued strings.
-    expected = segment_handler.get_column_names("parent")
-    for available in backend.file_column_names:
-        validate_parent_columns(available, segment_handler)
-    columns = [name for name in expected if name in backend.column_names]
-
-    def combine(parents: list, children: list) -> np.ndarray:
-        frame = pd.DataFrame(
-            {name: column.to_pylist() for name, column in zip(columns, parents)}
-        )
-        return np.asarray(
-            list(parent_sequences_from_frame(frame, segment_handler)), dtype=object
-        )
-
-    for values in iter_selected_row_group_values(backend, columns, [], combine):
-        yield from values
 
 
 def _reject_context_model_on_csv(neutral_model: "RatesCSPNeutralModel") -> None:
     """Refuse a neutral model that needs per-row context on the CSV path.
 
     Only the Parquet loader carries a model's ``required_context`` columns
-    into each sample (issue #1299). Without this check, a CSV streaming
+    into each sample. Without this check, a CSV streaming
     bundle would fail inside a DataLoader worker's first ``__getitem__``.
 
     Raises:
@@ -542,26 +400,6 @@ def _reject_context_model_on_csv(neutral_model: "RatesCSPNeutralModel") -> None:
         )
 
 
-def _reject_tandem_on_precomputed(
-    neutral_model: Optional["RatesCSPNeutralModel"],
-) -> None:
-    """Refuse a tandem term on the precomputed path (issue #1683).
-
-    The batched precompute (``_batched_compute_neutral_codon_probs``) and its
-    branch-length recompute do not apply the term, while the branch-length
-    objective reads it off the neutral model; this keeps the two from
-    silently disagreeing. Today only ``PerFamilyGTR`` carries the term, and
-    it is Parquet-only, so this guards future models.
-
-    Raises:
-        ValueError: If ``neutral_model.tandem`` is set.
-    """
-    if neutral_model is not None and neutral_model.tandem is not None:
-        raise ValueError(
-            f"Neutral model {neutral_model.name} carries a tandem term, which "
-            "only the streaming and Parquet paths apply; the precomputed path "
-            "would drop it."
-        )
 
 
 def _prepare_pcp_sequences(
@@ -598,7 +436,7 @@ def _precompute_neutral_outputs_vectorized(
     neutral_model: "RatesCSPNeutralModel",
     segment_handler: SegmentHandler,
 ) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
-    """Precompute neutral model outputs using vectorized encoding (~100x faster).
+    """Precompute neutral model outputs using vectorized encoding.
 
     Collects all segments across all sequences, runs the neutral model in
     one batched call per segment index using ``compute_rates_and_csps_vectorized``,
@@ -702,10 +540,10 @@ class TransformDataset(torch.utils.data.Dataset):
             modes (streaming reads per-sample in ``__getitem__``, precomputed stores
             reference for ``recompute_neutral_probs``).
         codon_pref_log: Optional log-space codon preference vector (64,)
-            (issue #747). Shared-memory, same live-update pattern as
+            Shared-memory, same live-update pattern as
             ``branch_lengths``: streaming/Parquet ``__getitem__`` injects it
             into the sample dict for ``ComputeNeutralCodonProbs`` to read;
-            ``CodonStrengthOptimizer`` refits it in-place (issue #1039).
+            ``CodonStrengthOptimizer`` refits it in-place.
         parquet_backend: For Parquet streaming mode — reads rows from disk with
             row-group LRU cache. When present, replaces raw_parents/raw_children
             and extra_tensor_fields for per-sample data access.
@@ -753,17 +591,11 @@ class TransformDataset(torch.utils.data.Dataset):
         # ``BranchLengthOptimizer(init_from_input=True)`` refuses a dataset
         # without it.
         self.branch_lengths_from_input = False
-        # Codon-optimality log-preference vector (issue #747), shared-memory
+        # Codon-optimality log-preference vector, shared-memory
         # so a between-cycle refit (CodonStrengthOptimizer) can update it
         # in-place and have streaming/Parquet workers see the change on their
         # next __getitem__ call — the same live-dataset-state pattern as
-        # ``branch_lengths`` (DESIGN.md D6; verified by probe, issue #1039).
-        # Checked here (construction time, every mode) rather than only
-        # inside ComputeNeutralCodonProbs.__call__, so a matrix-exp +
-        # configured-table combination fails with a clean traceback instead
-        # of surfacing from inside a DataLoader worker's first __getitem__.
-        if is_matrix_exp_mode_enabled():
-            check_codon_pref_compatible(codon_pref_log)
+        # ``branch_lengths`` (DESIGN.md D6).
         self._codon_pref_log = (
             codon_pref_log.clone().share_memory_()
             if codon_pref_log is not None
@@ -1062,8 +894,8 @@ class TransformDataset(torch.utils.data.Dataset):
           ``copy_``.
 
         Always updates ``self._codon_pref_log`` — the single source of truth
-        ``BranchLengthDatasetBundle.codon_pref_log`` reads through to (issue
-        #1039; mirrors ``branch_lengths``, which is exactly the same
+        ``BranchLengthDatasetBundle.codon_pref_log`` reads through to
+        (mirroring ``branch_lengths``, which is exactly the same
         read-through relationship). For streaming/Parquet mode, this alone
         makes the update visible: the per-sample ``ComputeNeutralCodonProbs``
         transform reads ``sample["codon_pref_log"]`` fresh on every
@@ -1071,7 +903,7 @@ class TransformDataset(torch.utils.data.Dataset):
         in-place update here reaches DataLoader workers on their next fetch —
         the same shared-memory live-dataset-state pattern
         ``update_branch_lengths``/``recompute_neutral_probs`` use for branch
-        lengths (DESIGN.md D6). Verified by probe (issue #1039): a between-
+        lengths (DESIGN.md D6). Verified by probe: a between-
         cycle mutation is immediately and exactly visible starting with the
         next cycle's DataLoader iterator (the actual usage pattern for
         ``CodonStrengthOptimizer.post_cycle``); only an in-flight mutation
@@ -1130,11 +962,11 @@ class TransformDataset(torch.utils.data.Dataset):
         ``_codon_pref_log`` on every call, so there is nothing for this
         branch-length-triggered recompute to change. Use
         ``set_codon_pref_log`` to update the streaming/Parquet table
-        in place (issue #1039). ``multihit_model`` below is ignored for
+        in place. ``multihit_model`` below is ignored for
         streaming/Parquet for the same reason: the transform holds the very
         object the bundle exposes as ``multihit_model``, and its
         ``log_hit_class_factors`` are shared memory, so a refit mutates it in
-        place rather than routing through here (issue #1041; see
+        place rather than routing through here (see
         ``_prepare_transform_multihit``).
 
         Args:
@@ -1144,7 +976,7 @@ class TransformDataset(torch.utils.data.Dataset):
             multihit_model: Optional multihit correction model. Only applied
                 in precomputed mode; ignored in streaming mode (see above).
             codon_pref_log: Optional log-space codon preference vector (64,)
-                for codon-optimality adjustment (issue #747). Only applied in
+                for codon-optimality adjustment. Only applied in
                 precomputed mode; ignored in streaming mode (see above).
 
         Raises:
@@ -1212,7 +1044,7 @@ class TransformDataset(torch.utils.data.Dataset):
 def neutral_rates_source_of(dataset: Dataset) -> Optional[NeutralRatesSource]:
     """The rate source of a training dataset, looking through wrappers.
 
-    Wrappers such as ``ESM2DatasetWrapper`` and ``TdiWhichmutDataset`` hold
+    Wrappers such as ``ESM2DatasetWrapper`` hold
     the ``TransformDataset`` they wrap as ``base_dataset``.
 
     Returns:
@@ -1401,7 +1233,7 @@ class BranchLengthDatasetBundle(DatasetBundle):
 
         False means reading either one triggers a full column read from
         Parquet. Cold-start branch length initialization uses this to decide
-        between its columnar Arrow path and the per-edge string path (#992):
+        between its columnar Arrow path and the per-edge string path:
         when the strings are already in hand there is nothing to gain by
         re-reading the columns.
         """
@@ -1530,7 +1362,7 @@ class BranchLengthDatasetBundle(DatasetBundle):
 
     @property
     def codon_pref_log(self) -> Optional[torch.Tensor]:
-        """Codon preference log-vector (issue #747), or None if not configured.
+        """Codon preference log-vector, or None if not configured.
 
         Read-through to ``self.dataset.codon_pref_log`` — structurally the
         same single-source-of-truth relationship as ``branch_lengths`` above,
@@ -1538,7 +1370,7 @@ class BranchLengthDatasetBundle(DatasetBundle):
         ``getattr(bundle, "codon_pref_log", None)`` lookup
         (``branch_lengths.py``) and the loss's per-sample transform always
         see the same tensor, not two independently-writable copies that could
-        drift (issue #1039).
+        drift.
         """
         return self.dataset.codon_pref_log
 
@@ -1554,13 +1386,13 @@ class BranchLengthDatasetBundle(DatasetBundle):
            ``create_bl_optimization_dataloader``. That chain is the training
            forward pass's: it reads the file's columns when it has them, and
            runs ``ComputeNtRatesAndCsps`` with the configured model on a
-           rate-free file (issue #1299). Preferred over recomputing here,
+           rate-free file. Preferred over recomputing here,
            because stored columns need not match any configured model —
            Compara's v10 columns hold per-family GTR rates that no single
            model reproduces — so recomputing would fit branch lengths and
            hit-class factors against rates the model was never trained on.
            Streaming columns is also what lets a ``PrecomputedRates`` carrier
-           (multihit correction only, no rate model) work here (issue #1041).
+           (multihit correction only, no rate model) work here.
         3. **The neutral model**, recomputed from raw parents. The in-memory
            (CSV) path, where there are no stored rates and no Parquet columns.
 
@@ -1615,7 +1447,6 @@ class BranchLengthDatasetBundle(DatasetBundle):
                 be obtained (not Parquet-backed, and no neutral model or raw
                 sequences for on-the-fly computation).
         """
-        from dasm2.training.hooks.branch_lengths import PerSequenceBLInputs
 
         nt_rates_list, nt_csps_list = self._resolve_nt_rates_and_csps()
 
@@ -1676,7 +1507,7 @@ class BranchLengthDatasetBundle(DatasetBundle):
         cache.  With ``num_workers > 0`` the rows are read and transformed in
         forked workers, each through its own
         ``ParquetBackend.sequential_sweep_copy``: the serial read was the cap
-        on post-cycle BL throughput (issue #1276), and a sweep needs only a
+        on post-cycle BL throughput, and a sweep needs only a
         few row groups per worker.  Batches still arrive in index order, but
         with numpy arrays in place of tensors; pass each through
         :func:`bl_batch_to_torch`.
@@ -1711,13 +1542,13 @@ class BranchLengthDatasetBundle(DatasetBundle):
         # ComputeNeutralCodonProbs: the BL objective recomputes neutral probs
         # from nt_rates/nt_csps at each trial length, and nothing reads
         # log_neutral_codon_probs from these batches, yet it cost ~36% of the
-        # serial loader's time on v10 (issue #1276). Keep this an exclusion of
+        # serial loader's time on v10. Keep this an exclusion of
         # that one type, not an allow-list: every other transform, including a
-        # ComputeNtRatesAndCsps for rate-free files (#1266), must stay in the
+        # ComputeNtRatesAndCsps for rate-free files, must stay in the
         # BL chain, since the BL objective needs nt_rates/nt_csps.
         # If the training dataset includes "distance", carry it through so the
         # model's head can access it during BL optimization forward passes
-        # (issue #199).
+        #.
         output_keys = BL_OPTIMIZATION_OUTPUT_KEYS
         has_distance = (
             self.dataset._output_keys is not None
@@ -1756,7 +1587,7 @@ class BranchLengthDatasetBundle(DatasetBundle):
                 padding_sentinel, include_parent_nt_windows=include_parent_nt_windows
             )
         )
-        # Issue #199: carry the per-sample distance scalar through BL optimization
+        # Carry the per-sample distance scalar through BL optimization
         # when the training dataset exposes it.
         if has_distance:
             collator_specs["distance"] = (0.0, "scalar")
@@ -1777,7 +1608,7 @@ class BranchLengthDatasetBundle(DatasetBundle):
         if num_workers > 0:
             bl_collator = _NumpyBatchCollator(bl_collator)
 
-        # One torch thread per worker beside the BL scipy pool (issue #1276).
+        # One torch thread per worker beside the BL scipy pool.
         return DataLoader(
             bl_dataset,
             batch_size=batch_size,
@@ -1796,7 +1627,7 @@ class _NumpyBatchCollator:
     carries two list-collated tensors per row (``nt_rates``, ``nt_csps``), so
     32-row batches in flight from a few workers exhausted a 1024-fd limit
     ("received 0 items of ancdata"), and the hand-offs capped the parent's
-    receive rate (issue #1276). Numpy arrays are pickled by value instead, as
+    receive rate. Numpy arrays are pickled by value instead, as
     ``PerSequenceBLInputs`` does for the spawn pool. The parent restores the
     batch with :func:`bl_batch_to_torch`.
     """
@@ -1809,9 +1640,6 @@ class _NumpyBatchCollator:
         return {key: tensors_to_numpy(value) for key, value in batch.items()}
 
 
-def bl_batch_to_torch(batch: Dict[str, Any]) -> Dict[str, Any]:
-    """Undo :class:`_NumpyBatchCollator`; tensors pass through unchanged, uncopied."""
-    return {key: numpy_to_tensors(value) for key, value in batch.items()}
 
 
 # ---------------------------------------------------------------------------
@@ -1864,13 +1692,13 @@ def _whichmut_transforms(
     Args:
         num_segments: Number of protein segments.
         censor_table: Optional ``{clade: CensorSpec}`` enabling UShER censoring
-            (#1079). Appended last, since it must run after *both*
+            Appended last, since it must run after *both*
             ``ComputeCodonMutationRates`` and ``NarrowLossMask``.
         censor_mode: Which half of censoring to apply; shared by both censoring
             transforms. See
             :class:`~dasm2.data.transforms.CensorMaskedMutations`.
         reference_base_idxs: Optional reference base indices enabling
-            parent -> reference reversion censoring (#1099). Appended after the
+            parent -> reference reversion censoring. Appended after the
             table's transform; order does not matter, since the two compose.
 
     Returns:
@@ -1982,10 +1810,10 @@ def create_whichmut_dataset(
             ``"streaming"`` for per-sample computation (zero memory overhead).
         nickname: Human-readable identifier.
         censor_table: Optional ``{clade: CensorSpec}`` enabling UShER censoring
-            (#1079). Requires a ``clade`` column in ``sequences_df``.
+            Requires a ``clade`` column in ``sequences_df``.
         censor_mode: Which half of censoring to apply, for both sources.
         reference_base_idxs: Optional reference base indices enabling
-            parent -> reference reversion censoring (#1099). Needs **no**
+            parent -> reference reversion censoring. Needs **no**
             ``clade`` column: the rule is clade-independent, which is why it is
             usable on its own.
 
@@ -2125,278 +1953,8 @@ def create_whichmut_dataset(
 # ---------------------------------------------------------------------------
 
 
-def create_mpnn_whichmut_dataset(
-    sequences_df: pd.DataFrame,
-    neutral_model: "RatesCSPNeutralModel",
-    mpnn_features_dir: str,
-    structure_id_list: List[str],
-    segment_handler: Optional[SegmentHandler] = None,
-    mode: Mode = "precomputed",
-    nickname: str = "unnamed_mpnn_whichmut",
-    censor_table: Optional[Dict[str, CensorSpec]] = None,
-    censor_mode: CensorMode = "both",
-    reference_base_idxs: Optional[torch.Tensor] = None,
-) -> DatasetBundle:
-    """Create Whichmut dataset wrapped with MPNN features.
-
-    Builds a whichmut base dataset, wraps it with ``MPNNWhichmutDataset``,
-    and returns a ``DatasetBundle`` with combined collator specs covering
-    both whichmut and MPNN tensor keys.
-
-    Args:
-        sequences_df: DataFrame with parent/child NT sequence columns.
-        neutral_model: Neutral mutation model.
-        mpnn_features_dir: Directory containing {structure_id}.npz files.
-        structure_id_list: List of structure IDs (one per sequence).
-        segment_handler: Handler for multi-segment sequences. Auto-detected if None.
-        mode: ``"precomputed"`` or ``"streaming"``.
-        nickname: Human-readable identifier.
-        censor_table: Optional censor table, forwarded to the base factory.
-        censor_mode: Which half of censoring to apply.
-        reference_base_idxs: Optional reference bases for reversion censoring
-            (#1099), forwarded to the base factory. Forwarded explicitly because
-            this wrapper calls that factory **positionally**: a new keyword left
-            out here trains uncensored without a word.
-
-    Returns:
-        DatasetBundle with wrapped dataset, combined collator, and worker_init_fn.
-    """
-    base_bundle = create_whichmut_dataset(
-        sequences_df,
-        neutral_model,
-        segment_handler,
-        mode,
-        nickname,
-        censor_table=censor_table,
-        censor_mode=censor_mode,
-        reference_base_idxs=reference_base_idxs,
-    )
-
-    wrapped = MPNNWhichmutDataset(
-        base_bundle.dataset,
-        Path(mpnn_features_dir),
-        structure_id_list=structure_id_list,
-    )
-
-    # Combined collator: base whichmut specs + MPNN additions.
-    # Extract padding_sentinel from the base collator (avoids re-running handler detection).
-    base_specs = base_bundle.collator.tensor_specs
-    combined_specs = {
-        **base_specs,
-        "mpnn_features": (0.0, "codon"),
-        "structural_logits": (0.0, "codon"),
-    }
-    collator = TransformCollator(tensor_specs=combined_specs)
-
-    return DatasetBundle(
-        dataset=wrapped,
-        collator=collator,
-        worker_init_fn=base_bundle.worker_init_fn,
-    )
 
 
-# ---------------------------------------------------------------------------
-# Factory: TDI Whichmut (wrapper + combined collator)
-# ---------------------------------------------------------------------------
-
-
-def create_tdi_whichmut_dataset(
-    sequences_df: pd.DataFrame,
-    neutral_model: "RatesCSPNeutralModel",
-    tdi_tokens_dir: str,
-    structure_id_list: List[str],
-    segment_handler: Optional[SegmentHandler] = None,
-    mode: Mode = "precomputed",
-    nickname: str = "unnamed_tdi_whichmut",
-    *,
-    pad_shorter_tokens: bool = False,
-    censor_table: Optional[Dict[str, CensorSpec]] = None,
-    censor_mode: CensorMode = "both",
-    reference_base_idxs: Optional[torch.Tensor] = None,
-) -> DatasetBundle:
-    """Create Whichmut dataset wrapped with 3Di structural tokens.
-
-    Builds a whichmut base dataset, wraps it with ``TdiWhichmutDataset``,
-    and returns a ``DatasetBundle`` with combined collator specs covering
-    both whichmut and TDI tensor keys.
-
-    Args:
-        sequences_df: DataFrame with parent/child NT sequence columns.
-        neutral_model: Neutral mutation model.
-        tdi_tokens_dir: Directory containing {structure_id}_3di.txt files.
-        structure_id_list: List of structure IDs (one per sequence).
-        segment_handler: Handler for multi-segment sequences. Auto-detected if None.
-        mode: ``"precomputed"`` or ``"streaming"``.
-        nickname: Human-readable identifier.
-        censor_table: Optional censor table, forwarded to the base factory.
-        censor_mode: Which half of censoring to apply.
-        reference_base_idxs: Optional reference bases for reversion censoring
-            (#1099), forwarded to the base factory. Forwarded explicitly because
-            this wrapper calls that factory **positionally**: a new keyword left
-            out here trains uncensored without a word.
-
-    Returns:
-        DatasetBundle with wrapped dataset, combined collator, and worker_init_fn.
-    """
-    base_bundle = create_whichmut_dataset(
-        sequences_df,
-        neutral_model,
-        segment_handler,
-        mode,
-        nickname,
-        censor_table=censor_table,
-        censor_mode=censor_mode,
-        reference_base_idxs=reference_base_idxs,
-    )
-
-    wrapped = TdiWhichmutDataset(
-        base_bundle.dataset,
-        Path(tdi_tokens_dir),
-        structure_id_list=structure_id_list,
-        pad_shorter_tokens=pad_shorter_tokens,
-    )
-
-    # Combined collator: base whichmut specs + TDI addition.
-    # Extract specs from base collator (avoids re-running handler detection).
-    base_specs = base_bundle.collator.tensor_specs
-    combined_specs = {
-        **base_specs,
-        "tdi_token_ids": (0, "codon"),
-    }
-    collator = TransformCollator(tensor_specs=combined_specs)
-
-    return DatasetBundle(
-        dataset=wrapped,
-        collator=collator,
-        worker_init_fn=base_bundle.worker_init_fn,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Factory: Evolutionary (DASM)
-# ---------------------------------------------------------------------------
-
-
-def _prepare_transform_multihit(
-    multihit_model: Optional["HitClassModel"],
-) -> Optional["HitClassModel"]:
-    """Deep-copy, freeze, and share the hit-class factors for a dataset build.
-
-    Every evolutionary factory hands the *same* prepared object to both
-    ``_evolutionary_transforms`` (which bakes it into
-    ``ComputeNeutralCodonProbs`` at construction time) and to
-    ``BranchLengthDatasetBundle(multihit_model=...)`` — so a bundle's
-    ``multihit_model`` attribute and its per-sample transform's model are one
-    object, not two copies that can drift.
-
-    The deep copy is for worker safety. ``share_memory_()`` on the one
-    parameter that carries the whole refit-visible state is what lets
-    ``MultihitOptimizer``'s between-cycle in-place refit reach DataLoader
-    worker *processes* on streaming and Parquet-backed bundles (DESIGN.md D6,
-    issues #501/#1041) — it must happen here, before any worker is forked.
-    Anything that *rebinds* the parameter afterwards (``reinitialize_weights``,
-    and so ``HitClassModel.from_weights``) silently breaks the channel; refits
-    must ``copy_`` into the existing parameter instead.
-
-    Reaches it through ``.values``, not ``log_hit_class_factors``: netam's
-    ``HitClassModel`` names the parameter ``values`` and dasm2's exposes
-    ``values`` as a read-only alias, and the netam-compatibility tests hand a
-    netam model straight to these factories. The property has no setter, but
-    both calls below mutate the returned tensor in place.
-
-    Also the construction-time matrix-exp guard for every mode: without it, a
-    matrix-exp + multihit combination on a streaming bundle only surfaces from
-    inside a DataLoader worker's first ``__getitem__`` (mirrors the
-    ``codon_pref_log`` guard in ``TransformDataset.__init__``, issue #1039).
-
-    Args:
-        multihit_model: The neutral model's multihit correction, or None.
-
-    Returns:
-        A frozen, shared-memory deep copy, or None if none was given.
-
-    Raises:
-        ValueError: If a multihit model is given while matrix-exp mode is on.
-    """
-    if multihit_model is None:
-        return None
-    if is_matrix_exp_mode_enabled():
-        check_multihit_compatible(multihit_model)
-    prepared = copy.deepcopy(multihit_model)
-    prepared.eval()
-    prepared.values.requires_grad_(False)
-    prepared.values.share_memory_()
-    return prepared
-
-
-def _evolutionary_transforms(
-    num_segments: int,
-    multihit_model: Optional["HitClassModel"] = None,
-    include_parent_nt_windows: bool = False,
-    neutral_model: Optional["RatesCSPNeutralModel"] = None,
-    segment_handler: Optional[SegmentHandler] = None,
-) -> List[Callable[[Dict[str, Any]], Dict[str, Any]]]:
-    """Build per-sample transform chain for SelectionFactorHead + DASM loss.
-
-    These transforms are shared between precomputed and streaming modes.
-    They assume nt_rates and nt_csps are already in the sample dict.
-
-    Args:
-        num_segments: Number of protein segments.
-        multihit_model: Optional multihit correction model, already prepared
-            by ``_prepare_transform_multihit`` (frozen, shared-memory factors).
-            Baked into ``ComputeNeutralCodonProbs`` here, but the *values* stay
-            live: a between-cycle refit mutates the shared parameter in place
-            (issue #1041).
-        include_parent_nt_windows: When True, append ``ComputeParentNtWindows``
-            so global-kmer QDASM/Hybrid losses can read the per-codon 15-nt
-            window and look up source-codon boundary features.
-            Requires neutral_model; defaults to False.
-
-    Note:
-        No ``codon_pref_log`` parameter here (issue #747/#1039): it is a bare
-        tensor with no model to hang it on, so ``TransformDataset`` injects it
-        into the sample dict from its own shared-memory ``_codon_pref_log``
-        (mirroring ``branch_length``) and ``CodonStrengthOptimizer`` refits it
-        via ``TransformDataset.set_codon_pref_log``. Both quantities reach a
-        live between-cycle refit; they just carry the value differently.
-
-    Returns:
-        List of per-sample transforms.
-    """
-    transforms: List[Callable[[Dict[str, Any]], Dict[str, Any]]] = [
-        FusedTranslateTokenizeCodonIndex(
-            "raw_parent", "aa_parents_idxs", "codon_parents_idxs"
-        ),
-        FusedTranslateTokenizeCodonIndex(
-            "raw_child", "aa_children_idxs", "codon_children_idxs"
-        ),
-        ComputeLayout(num_segments),
-        ComputeMasks(
-            num_segments,
-            exclude_parent_codon_ambiguity=True,
-            exclude_child_codon_ambiguity=True,
-        ),
-        # The term is a fixed frozen dataclass, so the transform holds the
-        # neutral model's own object; nothing refits it (unlike multihit).
-        ComputeNeutralCodonProbs(
-            multihit_model,
-            tandem=neutral_model.tandem if neutral_model is not None else None,
-        ),
-        ReshapeNtToCodonRatesAndCsps(),
-    ]
-    if include_parent_nt_windows:
-        if neutral_model is None:
-            raise ValueError(
-                "Global k-mer windows require a neutral_model for source-codon "
-                "boundary rescanning; parent rates/CSPs alone are insufficient."
-            )
-        # Factories preflight complete Thrifty coverage before reaching here.
-        # The copied neutral model shares the frozen table and decoded cache.
-        transforms.append(
-            ComputeParentNtWindows(copy.deepcopy(neutral_model), segment_handler)
-        )
-    return transforms
 
 
 EVOLUTIONARY_OUTPUT_KEYS = frozenset(
@@ -2428,7 +1986,7 @@ BL_OPTIMIZATION_OUTPUT_KEYS = frozenset(
 Extends ``EVOLUTIONARY_OUTPUT_KEYS`` with ``nt_rates`` and ``nt_csps`` so
 that the BL optimizer can stream these from Parquet instead of bulk-loading
 them into memory, and drops ``log_neutral_codon_probs``, which the BL
-objective recomputes at each trial branch length (issue #1276).
+objective recomputes at each trial branch length.
 """
 
 
@@ -2441,7 +1999,7 @@ def _bl_optimization_collator_specs(
     Extends evolutionary specs with ``nt_rates`` and ``nt_csps`` as
     ``"list"``-scale keys (variable-length tensors kept as ``List[Tensor]``,
     not padded/stacked), minus ``log_neutral_codon_probs``, which the BL
-    dataset does not compute (issue #1276).
+    dataset does not compute.
     """
     specs = dict(
         _evolutionary_collator_specs(
@@ -2502,386 +2060,14 @@ _PARQUET_BL_REMEDIATION = (
 )
 
 
-def branch_length_column_tensor(
-    values: Any,
-    num_sequences: int,
-    source: str,
-    remediation: str,
-) -> torch.Tensor:
-    """Validate raw ``branch_length`` column values into a float32 tensor.
-
-    Shared by the DataFrame and Parquet loaders so a malformed column fails
-    the same way on both (issue #1168), and public rather than
-    module-private because ``dasm_evaluation`` reuses it to validate the
-    column behind ``branch_length_mode='generating'`` — same column, same
-    failure. Missing values are rejected rather than defaulted: silently
-    substituting ``DEFAULT_BRANCH_LENGTH`` for some rows is the failure
-    mode #1168 is about, and a NaN that survives would poison the loss
-    instead.
-
-    Args:
-        values: Column entries in dataset row order. ``None``/NA entries
-            become NaN and are rejected.
-        num_sequences: Number of sequences in the dataset.
-        source: Human-readable origin, used in error messages.
-        remediation: Source-specific advice appended to the missing-value
-            error. Dropping a column means something different on a
-            DataFrame than across a set of Parquet files.
-
-    Returns:
-        Float32 tensor of shape ``(num_sequences,)``, not yet shared.
-
-    Raises:
-        ValueError: If the column shape disagrees with ``(num_sequences,)``
-            or any entry is missing.
-    """
-    array = np.asarray(values, dtype=np.float32)
-    if array.shape != (num_sequences,):
-        # Report the full shape, not just its first axis: a duplicated
-        # ``branch_length`` column selects as a DataFrame and lands here as
-        # ``(n, 2)``, where quoting ``shape[0]`` alone would print an error
-        # saying the received count equals the expected one.
-        raise ValueError(
-            f"'branch_length' from {source} has shape {tuple(array.shape)}, "
-            f"expected ({num_sequences},) to match the sequence count."
-        )
-    if np.isnan(array).any():
-        num_missing = int(np.isnan(array).sum())
-        raise ValueError(
-            f"'branch_length' from {source} has {num_missing} missing "
-            f"value(s). {remediation}"
-        )
-    return torch.from_numpy(array.copy())
 
 
-def _resolve_initial_branch_lengths(
-    branch_lengths: Optional[torch.Tensor],
-    column_values: Optional[Any],
-    num_sequences: int,
-    source: str,
-    remediation: str,
-) -> Tuple[torch.Tensor, bool]:
-    """Resolve a dataset's initial branch lengths from the available sources.
-
-    Precedence is the same on every loader (issue #1168): an explicit
-    ``branch_lengths`` tensor wins, then a ``branch_length`` column, then
-    ``DEFAULT_BRANCH_LENGTH``. Keeping the whole precedence chain here — not
-    just the column validation — is what makes a malformed input fail
-    identically whichever loader received it. Before #1168 the DataFrame
-    path ignored the column outright, so ``freeze_branch_lengths`` on a CSV
-    corpus pinned every sequence at 0.1 instead of freezing at the values
-    carried by the data.
-
-    Args:
-        branch_lengths: Optional explicit override, cloned when used.
-        column_values: ``branch_length`` column entries in dataset row
-            order, or ``None`` when the corpus carries no such column.
-        num_sequences: Number of sequences in the dataset.
-        source: Human-readable origin, used in error messages.
-        remediation: Source-specific advice for the missing-value error.
-
-    Returns:
-        Float32 tensor of shape ``(num_sequences,)``, not yet shared, and
-        whether it came from the input (False for ``DEFAULT_BRANCH_LENGTH``).
-
-    Raises:
-        ValueError: If an explicit tensor or a ``branch_length`` column has
-            the wrong shape, or if the column contains missing values.
-    """
-    if branch_lengths is not None:
-        if branch_lengths.shape != (num_sequences,):
-            raise ValueError(
-                f"branch_lengths has shape {tuple(branch_lengths.shape)}, "
-                f"expected ({num_sequences},) to match the sequence count."
-            )
-        return branch_lengths.clone(), True
-
-    if column_values is None:
-        return torch.full((num_sequences,), DEFAULT_BRANCH_LENGTH), False
-
-    return (
-        branch_length_column_tensor(column_values, num_sequences, source, remediation),
-        True,
-    )
 
 
-def _resolve_dataframe_branch_lengths(
-    sequences_df: pd.DataFrame,
-    num_sequences: int,
-    branch_lengths: Optional[torch.Tensor],
-) -> Tuple[torch.Tensor, bool]:
-    """Resolve the initial branch lengths for a DataFrame-backed dataset.
-
-    Thin adapter over :func:`_resolve_initial_branch_lengths` supplying the
-    DataFrame's ``branch_length`` column, or ``None`` when it has none;
-    :func:`_resolve_parquet_branch_lengths` is its Parquet counterpart.
-
-    Row order is positional: ``_prepare_pcp_sequences`` neither filters nor
-    reorders rows, so column entry ``i`` belongs to sequence ``i``.
-
-    Args:
-        sequences_df: DataFrame the dataset is built from.
-        num_sequences: Number of sequences in the dataset.
-        branch_lengths: Optional explicit override.
-
-    Returns:
-        Float32 tensor of shape ``(num_sequences,)``, not yet shared, and
-        whether it came from the input.
-
-    Raises:
-        ValueError: If an explicit tensor or a ``branch_length`` column has
-            the wrong shape, or if the column contains missing values.
-    """
-    column_values = (
-        sequences_df["branch_length"].to_numpy(dtype=np.float32)
-        if "branch_length" in sequences_df.columns
-        else None
-    )
-    return _resolve_initial_branch_lengths(
-        branch_lengths,
-        column_values,
-        num_sequences,
-        "the DataFrame",
-        DATAFRAME_BL_REMEDIATION,
-    )
 
 
-def _resolve_parquet_branch_lengths(
-    backend: ParquetBackend,
-    branch_lengths: Optional[torch.Tensor],
-) -> Tuple[torch.Tensor, bool]:
-    """Resolve the initial branch lengths for a Parquet-backed dataset.
-
-    Parquet counterpart to :func:`_resolve_dataframe_branch_lengths`: same
-    precedence, same validation, same errors, differing only in how the
-    column is read. Keeping the two as thin adapters over one resolver is
-    the point — the divergence #1168 fixed came from each loader deciding
-    branch-length initialization for itself.
-
-    The column is read only when no explicit tensor was given, via a
-    vectorized scan rather than row-by-row (which would pull full
-    DataFrames into the row-group cache). ``read_column`` fills its
-    ``default`` per file, so files lacking the column contribute
-    ``DEFAULT_BRANCH_LENGTH`` rather than NaN; a file that has the column
-    but leaves entries null still reaches the missing-value check. The
-    lengths count as from the input only if every file has the column.
-
-    Args:
-        backend: Backend over the Parquet files the dataset is built from.
-        branch_lengths: Optional explicit override.
-
-    Returns:
-        Float32 tensor of shape ``(backend.total_rows,)``, not yet shared,
-        and whether it came from the input.
-
-    Raises:
-        ValueError: If an explicit tensor or a ``branch_length`` column has
-            the wrong shape, or if the column contains missing values.
-    """
-    column_values = (
-        None
-        if branch_lengths is not None
-        else backend.read_column("branch_length", default=DEFAULT_BRANCH_LENGTH)
-    )
-    resolved, from_input = _resolve_initial_branch_lengths(
-        branch_lengths,
-        column_values,
-        backend.total_rows,
-        "the Parquet files",
-        _PARQUET_BL_REMEDIATION,
-    )
-    if branch_lengths is None:
-        from_input = all(
-            "branch_length" in names for names in backend.file_column_names
-        )
-    return resolved, from_input
 
 
-def create_evolutionary_dataset(
-    sequences_df: pd.DataFrame,
-    neutral_model: "RatesCSPNeutralModel",
-    segment_handler: Optional[SegmentHandler] = None,
-    multihit_model: Optional["HitClassModel"] = None,
-    branch_lengths: Optional[torch.Tensor] = None,
-    mode: Mode = "precomputed",
-    nickname: str = "unnamed_evolutionary",
-    use_distance: bool = False,
-    include_parent_nt_windows: bool = False,
-    codon_pref_log: Optional[torch.Tensor] = None,
-) -> BranchLengthDatasetBundle:
-    """Create dataset for SelectionFactorHead + DASM loss with branch length support.
-
-    Same transform definitions for both modes. Branch length updates
-    are supported in both modes:
-    - Precomputed: recomputes ``log_neutral_codon_probs`` for all samples.
-    - Streaming: writes to shared-memory tensor; transforms read on next call.
-
-    Args:
-        sequences_df: DataFrame with parent/child NT sequence columns.
-        neutral_model: Neutral mutation model.
-        segment_handler: Handler for multi-segment sequences. Auto-detected if None.
-        multihit_model: Optional multihit correction model.
-        branch_lengths: Optional initial branch lengths. When None, taken
-            from a ``branch_length`` column on ``sequences_df`` if present
-            (matching the Parquet loader, issue #1168), else
-            ``DEFAULT_BRANCH_LENGTH`` for all.
-        mode: ``"precomputed"`` or ``"streaming"``.
-        nickname: Human-readable identifier.
-        codon_pref_log: Optional log-space codon preference vector (64,)
-            (issue #747). Precomputed mode bakes it into
-            ``log_neutral_codon_probs`` at build time. Streaming mode stores
-            it as shared-memory dataset state (mirroring ``branch_lengths``,
-            DESIGN.md D6) that ``CodonStrengthOptimizer`` can update in place
-            between cycles, so the loss and the branch-length objective agree
-            on the table on every write (issue #1039).
-        use_distance: If True, include 'distance' column from DataFrame in batch
-            output for maturation stage conditioning. Fails fast if column is missing.
-
-    Returns:
-        BranchLengthDatasetBundle with BL optimization support.
-
-    Raises:
-        ValueError: If sequences have no codon mutations, or if use_distance=True
-            but 'distance' column is missing from sequences_df.
-    """
-    if use_distance and "distance" not in sequences_df.columns:
-        raise ValueError(
-            "use_distance=True but 'distance' column is missing from sequences_df. "
-            "Ensure your PCP DataFrame has IQ-TREE distance values."
-        )
-    _reject_context_model_on_csv(neutral_model)
-    t_factory_start = time.perf_counter()
-
-    t0 = time.perf_counter()
-    handler, raw_parents, raw_children = _prepare_pcp_sequences(
-        sequences_df, segment_handler
-    )
-    _validate_codon_mutations_exist(raw_parents, raw_children)
-    if include_parent_nt_windows:
-        validate_boundary_coverage(neutral_model, raw_parents, nickname)
-    logger.info(
-        "Evolutionary prepare+validate: %.1fs (%d sequences)",
-        time.perf_counter() - t0,
-        len(raw_parents),
-    )
-
-    num_seg = handler.get_num_segments()
-    num_sequences = len(raw_parents)
-
-    # Shared-memory branch lengths
-    shared_branch_lengths, branch_lengths_from_input = (
-        _resolve_dataframe_branch_lengths(sequences_df, num_sequences, branch_lengths)
-    )
-    shared_branch_lengths.share_memory_()
-
-    transform_multihit = _prepare_transform_multihit(multihit_model)
-    transforms = _evolutionary_transforms(
-        num_seg,
-        transform_multihit,
-        include_parent_nt_windows=include_parent_nt_windows,
-        neutral_model=neutral_model,
-        segment_handler=handler,
-    )
-
-    # Extend output keys and collator specs with distance if needed
-    output_keys = EVOLUTIONARY_OUTPUT_KEYS
-    distance_values: Optional[List[float]] = None
-    if use_distance:
-        output_keys = output_keys | {"distance"}
-        distance_values = sequences_df["distance"].tolist()
-
-    nt_rates_list: Optional[List[torch.Tensor]] = None
-    nt_csps_list: Optional[List[torch.Tensor]] = None
-
-    if mode == "precomputed":
-        # Fused translate+tokenize+codon_index: single pass per sequence
-        t0 = time.perf_counter()
-        (
-            aa_parents,
-            parent_aa_tokens,
-            parent_codon_idxs,
-            child_aa_tokens,
-            child_codon_idxs,
-        ) = _precompute_sequence_tensors(raw_parents, raw_children)
-        logger.info(
-            "Evolutionary fused translate+tokenize+codon_index: %.1fs",
-            time.perf_counter() - t0,
-        )
-
-        dataset, nt_rates_list, nt_csps_list = _build_precomputed_evolutionary_dataset(
-            raw_parents=raw_parents,
-            raw_children=raw_children,
-            neutral_model=neutral_model,
-            handler=handler,
-            transforms=transforms,
-            output_keys=output_keys,
-            aa_parents=aa_parents,
-            branch_lengths=shared_branch_lengths,
-            nickname=nickname,
-            multihit_model=transform_multihit,
-            per_sample_tensors={
-                "aa_parents_idxs": parent_aa_tokens,
-                "aa_children_idxs": child_aa_tokens,
-                "codon_parents_idxs": parent_codon_idxs,
-                "codon_children_idxs": child_codon_idxs,
-            },
-            codon_pref_log=codon_pref_log,
-        )
-        # Inject distance into precomputed samples (not part of transform chain)
-        if distance_values is not None:
-            assert dataset._precomputed is not None
-            for i, sample in enumerate(dataset._precomputed):
-                sample["distance"] = torch.tensor(
-                    distance_values[i], dtype=torch.float32
-                )
-    else:
-        aa_parents = [translate_sequence(p) for p in raw_parents]
-        transform_neutral = copy.deepcopy(neutral_model)
-        all_transforms: List[Callable[[Dict[str, Any]], Dict[str, Any]]] = [
-            ComputeNtRatesAndCsps(transform_neutral, handler),
-            *transforms,
-        ]
-        extra_fields: Optional[Dict[str, List[float]]] = None
-        if distance_values is not None:
-            extra_fields = {"distance": distance_values}
-        dataset = TransformDataset(
-            aa_parents=aa_parents,
-            raw_parents=raw_parents,
-            raw_children=raw_children,
-            transforms=all_transforms,
-            output_keys=output_keys,
-            branch_lengths=shared_branch_lengths,
-            nickname=nickname,
-            codon_pref_log=codon_pref_log,
-            extra_fields=extra_fields,
-        )
-    dataset.branch_lengths_from_input = branch_lengths_from_input
-
-    padding_sentinel = padding_sentinel_for(num_seg)
-    collator_specs = dict(
-        _evolutionary_collator_specs(
-            padding_sentinel, include_parent_nt_windows=include_parent_nt_windows
-        )
-    )
-    if use_distance:
-        collator_specs["distance"] = (0.0, "scalar")
-    collator = TransformCollator(tensor_specs=collator_specs)
-
-    logger.info(
-        "Evolutionary factory total: %.1fs", time.perf_counter() - t_factory_start
-    )
-    return BranchLengthDatasetBundle(
-        dataset=dataset,
-        collator=collator,
-        worker_init_fn=make_worker_init_fn(),
-        neutral_model=neutral_model,
-        segment_handler=handler,
-        multihit_model=transform_multihit,
-        nt_rates_list=nt_rates_list,
-        nt_csps_list=nt_csps_list,
-        nt_parents=raw_parents,
-        nt_children=raw_children,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -2938,7 +2124,7 @@ def _parquet_neutral_rate_plan(
     segment_handler: SegmentHandler,
     neutral_model: Optional["RatesCSPNeutralModel"],
 ) -> Tuple[List[Callable[[Dict[str, Any]], Dict[str, Any]]], Tuple[str, ...]]:
-    """Decide where a Parquet bundle's per-site rates come from (issue #1299).
+    """Decide where a Parquet bundle's per-site rates come from.
 
     The file's columns decide:
 
@@ -3043,7 +2229,7 @@ def create_whichmut_dataset_from_parquet(
     Per-site ``nt_rates``/``nt_csps`` come from the files' columns when they
     carry them. A rate-free file has them computed at load by
     ``neutral_model`` through ``ComputeNtRatesAndCsps``. See
-    ``_parquet_neutral_rate_plan`` for the full rule (issue #1299).
+    ``_parquet_neutral_rate_plan`` for the full rule.
 
     A ``ShuffleBufferSampler`` is included in the bundle to provide
     shuffle-buffer semantics while keeping the map-style Dataset interface.
@@ -3060,16 +2246,16 @@ def create_whichmut_dataset_from_parquet(
         nickname: Human-readable identifier.
         row_filter: Optional boolean list selecting which rows to include.
         censor_table: Optional ``{clade: CensorSpec}`` enabling UShER censoring
-            (#1079). Requires a ``clade`` column in the Parquet.
+            Requires a ``clade`` column in the Parquet.
         censor_mode: Which half of censoring to apply, for both sources.
         reference_base_idxs: Optional reference base indices enabling
-            parent -> reference reversion censoring (#1099). Needs no ``clade``
+            parent -> reference reversion censoring. Needs no ``clade``
             column, so it imposes no requirement on the Parquet's schema.
         shuffle: Whether the bundle's sampler shuffles. Pass False for
             validation and other single-pass sweeps: order cannot affect the
             result, and a sequential walk needs a handful of cached row groups
             where a shuffle buffer needs hundreds.
-        cache_budget: Row-group cache RAM budget inputs (issue #1272); see
+        cache_budget: Row-group cache RAM budget inputs; see
             ``dasm2.data.parquet_backend.plan_cache``.
 
     Returns:
@@ -3155,223 +2341,6 @@ def create_whichmut_dataset_from_parquet(
     )
 
 
-def create_evolutionary_dataset_from_parquet(
-    parquet_paths: List[Path],
-    segment_handler: SegmentHandler,
-    max_aa_seq_len: int = 0,
-    neutral_model: Optional["RatesCSPNeutralModel"] = None,
-    multihit_model: Optional["HitClassModel"] = None,
-    branch_lengths: Optional[torch.Tensor] = None,
-    buffer_size: int = 8192,
-    nickname: str = "unnamed_evolutionary_parquet",
-    row_filter: Optional[List[bool]] = None,
-    use_distance: bool = False,
-    include_parent_nt_windows: bool = False,
-    cache_size: Optional[int] = None,
-    codon_pref_log: Optional[torch.Tensor] = None,
-    cache_budget: CacheBudgetSpec = CacheBudgetSpec(),
-    shuffle: bool = True,
-) -> BranchLengthDatasetBundle:
-    """Create DASM evolutionary dataset from Parquet files.
-
-    Reads raw sequences from Parquet files on disk, and uses the
-    ``SegmentHandler`` to combine segment-specific columns. Per-sample
-    transforms (translate, tokenize, layout, masks, neutral codon probs) run
-    in ``__getitem__``.
-
-    Per-site ``nt_rates``/``nt_csps`` come from the files' columns when they
-    carry them (with rate adjustments baked in at write time). A rate-free
-    file has them computed at load by ``neutral_model`` through
-    ``ComputeNtRatesAndCsps``, which applies each segment's rate adjustment.
-    The forward pass, the BL loader and the refits all go through that one
-    transform. See ``_parquet_neutral_rate_plan`` for the full rule
-    (issue #1299).
-
-    Branch lengths are stored in a shared-memory tensor and updated by
-    the ``BranchLengthOptimizer`` hook during training. The
-    ``ComputeNeutralCodonProbs`` transform reads the current branch
-    length per-sample, so updated values are picked up automatically.
-
-    A ``ShuffleBufferSampler`` is included in the bundle for training.
-
-    Args:
-        parquet_paths: Paths to Parquet files (one or more).
-        segment_handler: Handler for segment-specific column mapping.
-        max_aa_seq_len: Maximum amino acid sequence length.
-        neutral_model: The configured neutral model. Computes rates for a
-            rate-free file; unused for rates when the file carries columns.
-        multihit_model: Optional multihit correction model.
-        branch_lengths: Optional initial branch lengths. If None, reads
-            ``branch_length`` column from Parquet rows as initial values
-            (defaults to 0.1 if column is missing).
-        buffer_size: Shuffle buffer size for the sampler.
-        nickname: Human-readable identifier.
-        row_filter: Optional boolean list selecting which rows to include.
-        use_distance: If True, include 'distance' column from Parquet in
-            batch output for maturation stage conditioning.
-        cache_size: Explicit LRU row-group cache size for the backend. When
-            ``None`` (default), the backend auto-sizes the cache from
-            ``buffer_size`` and row-group geometry — appropriate for shuffled
-            training. Callers doing sequential sweeps (oe-plot, eval) should
-            pass a small constant (e.g. 2) to avoid pinning every row group
-            in memory; see ``ParquetBackend`` for details.
-        codon_pref_log: Optional log-space codon preference vector (64,)
-            (issue #747). Stored as shared-memory dataset state (mirroring
-            ``branch_lengths``, DESIGN.md D6): the per-sample
-            ``ComputeNeutralCodonProbs`` transform reads the live value from
-            the sample dict, and ``CodonStrengthOptimizer`` can update it
-            in place between cycles via ``TransformDataset.set_codon_pref_log``
-            (issue #1039).
-        cache_budget: Row-group cache RAM budget inputs (issue #1272); see
-            ``dasm2.data.parquet_backend.plan_cache``.
-        shuffle: Whether the bundle's sampler shuffles. Pass False for
-            validation: a sequential sweep visits each row group once, so
-            with ``cache_size`` unset its cache is ``SEQUENTIAL_SWEEP_CACHE_SIZE``
-            row groups. A shuffle-sized LRU would keep every group the sweep
-            visits until full, in every DataLoader worker (issue #1272).
-
-    Returns:
-        BranchLengthDatasetBundle with BL optimization support and sampler.
-
-    Raises:
-        ValueError: If a selected row has no scored codon substitution (see
-            ``_validate_parquet_scored_substitutions``), or if the files'
-            rate columns and ``neutral_model`` leave no rate source (see
-            ``_parquet_neutral_rate_plan``).
-    """
-    if cache_size is None and not shuffle:
-        cache_size = SEQUENTIAL_SWEEP_CACHE_SIZE
-    backend = ParquetBackend(
-        parquet_paths,
-        buffer_size=buffer_size,
-        cache_size=cache_size,
-        row_filter=row_filter,
-        cache_budget=cache_budget,
-    )
-    _validate_parquet_scored_substitutions(backend, segment_handler, parquet_paths)
-    sampler = ShuffleBufferSampler(
-        backend.row_group_boundaries, buffer_size=buffer_size, shuffle=shuffle
-    )
-    rate_transforms, context_cols = _parquet_neutral_rate_plan(
-        backend, segment_handler, neutral_model
-    )
-    row_converter = make_parquet_row_converter(
-        segment_handler,
-        available_columns=set(backend.column_names),
-        scalar_cols=context_cols,
-    )
-
-    if include_parent_nt_windows:
-        validate_boundary_coverage(
-            neutral_model, _iter_parquet_parents(backend, segment_handler), nickname
-        )
-
-    num_segments = segment_handler.get_num_segments()
-
-    shared_branch_lengths, branch_lengths_from_input = _resolve_parquet_branch_lengths(
-        backend, branch_lengths
-    )
-    shared_branch_lengths.share_memory_()
-
-    # NT sequences and nt_rates/nt_csps are NOT bulk-loaded here.
-    # - nt_parents/nt_children: lazy-loaded by BranchLengthDatasetBundle
-    #   properties on first access (for mutation-frequency BL init).
-    # - nt_rates/nt_csps: streamed (from the columns, or from
-    #   ComputeNtRatesAndCsps on a rate-free file) during BL optimization
-    #   via create_bl_optimization_dataloader().
-
-    # Eagerly load per-edge feature columns required by the BL init strategy.
-    # These are small metadata columns (booleans, ints), not large tensors.
-    edge_features: Dict[str, List[Any]] = {}
-    strategy = segment_handler.bl_init_strategy
-    if strategy is not None:
-        # Each file must carry the features its own strategy needs. Under a
-        # PerSourceStrategy that is its component's strategy, not the union
-        # of every component's (issue #1289 review): a file whose strategy
-        # does not stratify on a column need not have it, and ``read_column``
-        # fills its rows with None.
-        for path, columns in zip(parquet_paths, backend.file_column_names):
-            file_strategy = (
-                strategy.strategy_for(str(path))
-                if isinstance(strategy, PerSourceStrategy)
-                else strategy
-            )
-            missing = file_strategy.required_features - set(columns)
-            if missing:
-                raise ValueError(
-                    f"Strategy {type(file_strategy).__name__} requires edge "
-                    f"features {sorted(missing)} but {path} lacks them. "
-                    f"Available: {sorted(columns)}"
-                )
-        for feat_name in strategy.required_features:
-            if feat_name == SOURCE_FILE_FEATURE:
-                edge_features[feat_name] = backend.read_source_paths()
-            else:
-                edge_features[feat_name] = backend.read_column(feat_name)
-
-    transform_multihit = _prepare_transform_multihit(multihit_model)
-
-    transforms: List[Callable[[Dict[str, Any]], Dict[str, Any]]] = [
-        *rate_transforms,
-        *_evolutionary_transforms(
-            num_segments,
-            transform_multihit,
-            include_parent_nt_windows=include_parent_nt_windows,
-            neutral_model=neutral_model,
-            segment_handler=segment_handler,
-        ),
-    ]
-
-    # Extend output keys and collator specs with distance if needed
-    output_keys = EVOLUTIONARY_OUTPUT_KEYS
-    extra_fields: Optional[Dict[str, List[float]]] = None
-    if use_distance:
-        if "distance" not in backend.column_names:
-            raise ValueError(
-                f"use_distance=True but 'distance' column is missing from "
-                f"Parquet file(s). Available columns: {backend.column_names}"
-            )
-        distance_values = backend.read_column("distance", default=0.0)
-        output_keys = output_keys | {"distance"}
-        extra_fields = {"distance": distance_values}
-
-    dataset = TransformDataset(
-        parquet_backend=backend,
-        parquet_row_converter=row_converter,
-        transforms=transforms,
-        output_keys=output_keys,
-        branch_lengths=shared_branch_lengths,
-        max_aa_seq_len_override=max_aa_seq_len if max_aa_seq_len > 0 else None,
-        nickname=nickname,
-        codon_pref_log=codon_pref_log,
-        extra_fields=extra_fields,
-    )
-    dataset.branch_lengths_from_input = branch_lengths_from_input
-
-    padding_sentinel = padding_sentinel_for(num_segments)
-    collator_specs = dict(
-        _evolutionary_collator_specs(
-            padding_sentinel, include_parent_nt_windows=include_parent_nt_windows
-        )
-    )
-    if use_distance:
-        collator_specs["distance"] = (0.0, "scalar")
-    collator = TransformCollator(tensor_specs=collator_specs)
-
-    return BranchLengthDatasetBundle(
-        dataset=dataset,
-        collator=collator,
-        worker_init_fn=make_worker_init_fn(),
-        neutral_model=neutral_model,
-        segment_handler=segment_handler,
-        multihit_model=transform_multihit,
-        nt_rates_list=None,
-        nt_csps_list=None,
-        nt_parents=None,
-        nt_children=None,
-        sampler=sampler,
-        edge_features=edge_features,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -3384,121 +2353,12 @@ def create_evolutionary_dataset_from_parquet(
 # _batched_compute_codon_mutation_rates. At 1M sequences this saves ~80s.
 
 
-def batched_layout_masks_for_samples(
-    samples: List[Dict[str, Any]],
-    num_segments: int,
-    exclude_parent_codon_ambiguity: bool = False,
-    exclude_child_codon_ambiguity: bool = False,
-) -> None:
-    """Compute layout, mask, and loss_mask via concat→compute→split.
-
-    Modifies *samples* in-place by adding ``layout``, ``mask``, ``loss_mask``.
-    """
-    sentinel = padding_sentinel_for(num_segments)
-    n = len(samples)
-    lengths = [sample["aa_parents_idxs"].shape[0] for sample in samples]
-    max_len = max(lengths)
-
-    # Pad-stack into [N, max_len], one batched layout_of_aa_idxs call, then split
-    padded_aa = torch.full((n, max_len), AA_AMBIG_IDX, dtype=torch.long)
-    for i, sample in enumerate(samples):
-        L = lengths[i]
-        padded_aa[i, :L] = sample["aa_parents_idxs"]
-
-    # One call for all N sequences
-    layout_batch = layout_of_aa_idxs(padded_aa, num_segments)
-    mask_batch = (layout_batch != sentinel) & (padded_aa != AA_AMBIG_IDX)
-    loss_mask_batch = mask_batch & (layout_batch != 0)
-
-    if exclude_parent_codon_ambiguity:
-        padded_parent_codons = torch.full(
-            (n, max_len), AMBIGUOUS_CODON_IDX, dtype=torch.long
-        )
-        for i, sample in enumerate(samples):
-            L = lengths[i]
-            padded_parent_codons[i, :L] = sample["codon_parents_idxs"]
-        loss_mask_batch = loss_mask_batch & (
-            padded_parent_codons != AMBIGUOUS_CODON_IDX
-        )
-    if exclude_child_codon_ambiguity:
-        padded_child_codons = torch.full(
-            (n, max_len), AMBIGUOUS_CODON_IDX, dtype=torch.long
-        )
-        for i, sample in enumerate(samples):
-            L = lengths[i]
-            padded_child_codons[i, :L] = sample["codon_children_idxs"]
-        loss_mask_batch = loss_mask_batch & (padded_child_codons != AMBIGUOUS_CODON_IDX)
-
-    # Split back to variable-length per sample
-    for i, sample in enumerate(samples):
-        L = lengths[i]
-        sample["layout"] = layout_batch[i, :L]
-        sample["mask"] = mask_batch[i, :L]
-        sample["loss_mask"] = loss_mask_batch[i, :L]
 
 
-def _batched_mutation_indicator_for_samples(
-    samples: List[Dict[str, Any]],
-    parent_key: str,
-    child_key: str,
-    target_key: str,
-    ambiguous_idx: int,
-) -> None:
-    """Compute mutation indicator via concat→compute→split.
-
-    Modifies *samples* in-place by adding ``target_key``.
-    """
-    lengths = [sample[parent_key].shape[0] for sample in samples]
-    cat_parent = torch.cat([sample[parent_key] for sample in samples])
-    cat_child = torch.cat([sample[child_key] for sample in samples])
-
-    cat_mut = cat_parent != cat_child
-    cat_both_ambig = (cat_parent == ambiguous_idx) & (cat_child == ambiguous_idx)
-    cat_indicator = cat_mut & ~cat_both_ambig
-
-    indicators = cat_indicator.split(lengths)
-    for i, sample in enumerate(samples):
-        sample[target_key] = indicators[i]
 
 
-def _batched_narrow_loss_mask_for_samples(
-    samples: List[Dict[str, Any]],
-    indicator_key: str,
-) -> None:
-    """Narrow loss_mask to mutation positions via concat→compute→split.
-
-    Modifies *samples* in-place.
-    """
-    lengths = [sample["loss_mask"].shape[0] for sample in samples]
-    cat_loss_mask = torch.cat([sample["loss_mask"] for sample in samples])
-    cat_indicator = torch.cat([sample[indicator_key] for sample in samples])
-
-    cat_narrowed = cat_loss_mask & cat_indicator
-
-    narrowed = cat_narrowed.split(lengths)
-    for i, sample in enumerate(samples):
-        sample["loss_mask"] = narrowed[i]
 
 
-def _batched_aao_neutral_rates_for_samples(
-    samples: List[Dict[str, Any]],
-    neutral_aa_rates: torch.Tensor,
-) -> None:
-    """Look up AAO neutral rates via concat→compute→split.
-
-    Modifies *samples* in-place by adding ``aao_neutral_rates``.
-    """
-    lengths = [sample["aa_parents_idxs"].shape[0] for sample in samples]
-    cat_aa = torch.cat([sample["aa_parents_idxs"] for sample in samples])
-
-    cat_valid = cat_aa < NUM_AA
-    cat_safe = cat_aa.clamp(0, NUM_AA - 1)
-    cat_rates = neutral_aa_rates[cat_safe]  # [total_positions, 20]
-    cat_rates[~cat_valid] = 0.0
-
-    rates_list = cat_rates.split(lengths)
-    for i, sample in enumerate(samples):
-        sample["aao_neutral_rates"] = rates_list[i]
 
 
 # ---------------------------------------------------------------------------
@@ -3738,7 +2598,7 @@ def _build_precomputed_dataset(
        skipped if fused/batched)
     3. Batched codon mutation rate computation (if ComputeCodonMutationRates
        was in the transform chain)
-    4. Censoring, for each transform given (#1079, #1099)
+    4. Censoring, for each transform given
 
     Pass 4 exists because censoring cannot ride in the pass-2 chain: pass 2
     filters ``ComputeCodonMutationRates`` out and then strips each sample to
@@ -3748,7 +2608,7 @@ def _build_precomputed_dataset(
     here while working correctly in streaming and Parquet mode — which is why
     the empty-table equivalence test is parameterized over all three.
 
-    Pass 4 takes a *sequence* rather than one transform because #1099's
+    Pass 4 takes a *sequence* rather than one transform because the
     reversion rule is a sibling of the table's, not a mode of it, and the two
     compose. ``clades`` is required only by the clade-keyed transform:
     :class:`~dasm2.data.transforms.CensorReferenceReversions` is
@@ -3824,7 +2684,7 @@ def _build_precomputed_dataset(
         )
         logger.info("Batched CMR: %.1fs", time.perf_counter() - t0)
 
-    # Pass 4: censoring (#1079, #1099). Runs here rather than in the pass-2 chain
+    # Pass 4: censoring. Runs here rather than in the pass-2 chain
     # because it needs codon_neutral_rates, which pass 3 has only just written.
     if censor_transforms and not has_codon_mutation_rates:
         raise ValueError(
@@ -3859,311 +2719,8 @@ def _build_precomputed_dataset(
     )
 
 
-def _batched_compute_neutral_codon_probs_matrix_exp(
-    samples: List[Dict[str, Any]],
-    nt_rates_list: List[torch.Tensor],
-    nt_csps_list: List[torch.Tensor],
-    branch_lengths: torch.Tensor,
-) -> None:
-    """Per-PCP GY94 matrix-exp neutral codon probability path (pilot only).
-
-    Mirrors the per-sample bookkeeping (truncation, padding, masking,
-    nan_to_num, log) of ``_batched_compute_neutral_codon_probs`` but
-    routes through ``exp(Q_codon · branch_length)`` per PCP instead of
-    the product-of-three Poisson. Gated by env var
-    ``DASM2_NEUTRAL_MODE=matrix_exp``; see ``_neutral_matrix_exp`` for
-    the math.
-    """
-    n_samples = len(samples)
-    for i in range(n_samples):
-        codon_idxs = samples[i]["codon_parents_idxs"]
-        nt_rates = nt_rates_list[i]
-        nt_csps = nt_csps_list[i]
-        bl = float(branch_lengths[i].item())
-        mask = samples[i]["loss_mask"]
-
-        target_len = codon_idxs.shape[0]
-        aa_length = nt_rates.shape[0] // 3
-
-        if aa_length == 0:
-            samples[i]["log_neutral_codon_probs"] = torch.full(
-                (target_len, 64), math.log(SMALL_PROBABILITY)
-            )
-            continue
-
-        truncated_codon_idxs = codon_idxs[:aa_length]
-        truncated_mask = mask[:aa_length]
-        clamped = torch.clamp(truncated_codon_idxs, 0, 63)
-        parent_nt_idxs = unflatten_codon_idxs(clamped)  # [num_codons, 3]
-        parent_flat = parent_nt_idxs.reshape(-1)
-
-        sense_idxs = parent_sense_idxs_of_codon64_idxs(clamped)
-        # Zero out masked positions so they don't drive Q_nt recovery if
-        # the mask happens to disagree with stop-codon detection.
-        sense_idxs = torch.where(
-            truncated_mask, sense_idxs, torch.full_like(sense_idxs, -1)
-        )
-
-        probs = compute_neutral_codon_probs_matrix_exp_per_pcp(
-            parent_nt_idxs_flat=parent_flat,
-            parent_sense_idxs_per_codon=sense_idxs,
-            nt_rates=nt_rates,
-            nt_csps=nt_csps,
-            branch_length=bl,
-        )  # (aa_length, 64)
-
-        samples[i]["log_neutral_codon_probs"] = finalize_matrix_exp_log_probs(
-            probs,
-            truncated_mask,
-            target_len,
-            error_context=f"Sample {i}: ",
-        )
 
 
-def _batched_compute_neutral_codon_probs(
-    samples: List[Dict[str, Any]],
-    nt_rates_list: List[torch.Tensor],
-    nt_csps_list: List[torch.Tensor],
-    branch_lengths: torch.Tensor,
-    multihit_model: Optional["HitClassModel"] = None,
-    codon_batch_size: int = 500_000,
-    codon_pref_log: Optional[torch.Tensor] = None,
-) -> None:
-    """Compute log_neutral_codon_probs for all samples in a single batched call.
-
-    Replaces the per-sample ``ComputeNeutralCodonProbs`` transform with a
-    vectorized version that concatenates all codons across samples, runs
-    ``neutral_codon_probs`` once (or in chunks), then splits results back.
-
-    On 184K sequences this reduces computation from ~171s to ~5s by
-    eliminating the Python-level per-sample loop over the neutral evolution
-    math.
-
-    Modifies *samples* in-place by adding ``log_neutral_codon_probs``.
-
-    Args:
-        samples: List of sample dicts from ``_run_transforms_on_all_samples``.
-            Each must contain ``codon_parents_idxs`` and ``loss_mask``.
-        nt_rates_list: Per-sequence neutral rates (from vectorized precompute).
-        nt_csps_list: Per-sequence neutral CSPs (from vectorized precompute).
-        branch_lengths: Per-sequence branch lengths.
-        multihit_model: Optional multihit correction model.
-        codon_batch_size: Max codons per forward pass to limit peak memory.
-        codon_pref_log: Optional log-space codon preference vector, shape (64,).
-            Passed through to neutral_codon_probs() for codon-optimality
-            adjustment (issue #747).
-    """
-    # Pilot-only escape hatch for issue #654: route through a per-PCP
-    # GY94 matrix-exp neutral instead of the product-of-three Poisson
-    # path. See ``dasm2.data._neutral_matrix_exp`` for the rationale.
-    if is_matrix_exp_mode_enabled():
-        check_multihit_compatible(multihit_model)
-        check_codon_pref_compatible(codon_pref_log)
-        _batched_compute_neutral_codon_probs_matrix_exp(
-            samples=samples,
-            nt_rates_list=nt_rates_list,
-            nt_csps_list=nt_csps_list,
-            branch_lengths=branch_lengths,
-        )
-        return
-
-    n_samples = len(samples)
-
-    # --- Collect per-sample codon data ---
-    all_parent_nt_idxs: List[torch.Tensor] = []
-    all_mut_probs: List[torch.Tensor] = []
-    all_csps: List[torch.Tensor] = []
-    all_masks: List[torch.Tensor] = []
-    codon_counts: List[int] = []  # actual codons per sample (after truncation)
-    target_lengths: List[int] = []  # original codon_parents_idxs length (for padding)
-
-    for i in range(n_samples):
-        codon_idxs = samples[i]["codon_parents_idxs"]
-        nt_rates = nt_rates_list[i]
-        nt_csps = nt_csps_list[i]
-        bl = float(branch_lengths[i].item())
-        mask = samples[i]["loss_mask"]
-
-        # Truncate to nt_rates length (same as neutral_codon_probs_with_padding)
-        aa_length = nt_rates.shape[0] // 3
-        target_lengths.append(codon_idxs.shape[0])
-
-        truncated_codon_idxs = codon_idxs[:aa_length]
-        truncated_mask = mask[:aa_length]
-        all_masks.append(truncated_mask)
-
-        if aa_length == 0:
-            codon_counts.append(0)
-            continue
-
-        clamped = torch.clamp(truncated_codon_idxs, 0, 63)
-        parent_nt_idxs = unflatten_codon_idxs(clamped)  # [num_codons, 3]
-        parent_flat = parent_nt_idxs.reshape(-1)
-        parent_len = len(parent_flat)
-
-        mut_probs = -torch.expm1(-bl * nt_rates[:parent_len])
-
-        all_parent_nt_idxs.append(parent_flat.reshape(-1, 3))
-        all_mut_probs.append(mut_probs.reshape(-1, 3))
-        all_csps.append(nt_csps[:parent_len].reshape(-1, 3, 4))
-        codon_counts.append(aa_length)
-
-    total_codons = sum(codon_counts)
-    if total_codons == 0:
-        for i in range(n_samples):
-            samples[i]["log_neutral_codon_probs"] = torch.full(
-                (target_lengths[i], 64), math.log(SMALL_PROBABILITY)
-            )
-        return
-
-    # --- Concatenate all codons ---
-    cat_nt_idxs = torch.cat(all_parent_nt_idxs)  # [total_codons, 3]
-    cat_mut_probs = torch.cat(all_mut_probs)  # [total_codons, 3]
-    cat_csps = torch.cat(all_csps)  # [total_codons, 3, 4]
-
-    # --- Batched forward pass ---
-    if total_codons <= codon_batch_size:
-        all_codon_probs = neutral_codon_probs(
-            cat_nt_idxs,
-            cat_mut_probs,
-            cat_csps,
-            multihit_model=multihit_model,
-            codon_pref_log=codon_pref_log,
-        )
-    else:
-        chunks = []
-        for start in range(0, total_codons, codon_batch_size):
-            end = min(start + codon_batch_size, total_codons)
-            chunk = neutral_codon_probs(
-                cat_nt_idxs[start:end],
-                cat_mut_probs[start:end],
-                cat_csps[start:end],
-                multihit_model=multihit_model,
-                codon_pref_log=codon_pref_log,
-            )
-            chunks.append(chunk)
-        all_codon_probs = torch.cat(chunks)
-
-    # --- Split back per sample, validate, clamp, pad, log ---
-    offset = 0
-    for i in range(n_samples):
-        n = codon_counts[i]
-        target_len = target_lengths[i]
-
-        if n == 0:
-            samples[i]["log_neutral_codon_probs"] = torch.full(
-                (target_len, 64), math.log(SMALL_PROBABILITY)
-            )
-            continue
-
-        probs = all_codon_probs[offset : offset + n]
-        offset += n
-
-        # Validate non-masked positions
-        valid_mask = all_masks[i][:n]
-        if valid_mask.any() and not torch.isfinite(probs[valid_mask]).all():
-            raise ValueError(
-                f"Sample {i}: neutral_probs has non-finite values at valid positions"
-            )
-
-        # Clamp valid positions, NaN for masked.
-        # NOTE: This clamp_probability call is not present in the per-sample
-        # ComputeNeutralCodonProbs transform (which only does nan_to_num + log).
-        # In practice it's a no-op because neutral_codon_probs already returns
-        # values in [0, 1], but it's kept here as a defensive measure since the
-        # batched path concatenates across samples and any numerical edge case
-        # would be harder to diagnose.
-        probs_out = probs.clone()
-        probs_out[valid_mask] = clamp_probability(probs[valid_mask])
-        probs_out[~valid_mask] = float("nan")
-
-        # Pad to target length
-        if n < target_len:
-            probs_out = F.pad(
-                probs_out, (0, 0, 0, target_len - n), value=SMALL_PROBABILITY
-            )
-        elif n > target_len:
-            probs_out = probs_out[:target_len]
-
-        # nan_to_num + log (matches ComputeNeutralCodonProbs.__call__)
-        probs_out = torch.nan_to_num(probs_out, nan=SMALL_PROBABILITY)
-        samples[i]["log_neutral_codon_probs"] = torch.log(probs_out)
-
-    if offset != total_codons:
-        raise RuntimeError(
-            f"Codon offset mismatch: processed {offset}, expected {total_codons}"
-        )
-
-
-def _build_precomputed_evolutionary_dataset(
-    raw_parents: List[str],
-    raw_children: List[str],
-    neutral_model: "RatesCSPNeutralModel",
-    handler: SegmentHandler,
-    transforms: List[Callable[[Dict[str, Any]], Dict[str, Any]]],
-    output_keys: FrozenSet[str],
-    aa_parents: List[str],
-    branch_lengths: torch.Tensor,
-    nickname: str,
-    multihit_model: Optional["HitClassModel"] = None,
-    per_sample_tensors: Optional[Dict[str, List[torch.Tensor]]] = None,
-    codon_pref_log: Optional[torch.Tensor] = None,
-) -> Tuple[TransformDataset, List[torch.Tensor], List[torch.Tensor]]:
-    """Build precomputed dataset for DASM (with branch lengths).
-
-    Three-pass construction:
-    1. Batched neutral model → nt_rates, nt_csps per sequence
-    2. Per-sample transforms (layout, masks — tokenize/codon skipped if fused)
-    3. Batched neutral codon probability computation
-
-    Args:
-        multihit_model: Optional multihit correction model, already prepared
-            (eval mode, no gradients).
-        per_sample_tensors: Optional pre-computed tensors from fused
-            translate+tokenize+codon_index. If provided, TranslateAndTokenize
-            and CodonIndex transforms are filtered out automatically.
-        codon_pref_log: Optional log-space codon preference vector (64,)
-            for codon-optimality adjustment (issue #747).
-
-    Returns:
-        Tuple of (dataset, nt_rates_list, nt_csps_list).
-    """
-    _reject_tandem_on_precomputed(neutral_model)
-
-    samples, nt_rates_list, nt_csps_list = _precompute_passes_1_and_2(
-        raw_parents=raw_parents,
-        raw_children=raw_children,
-        neutral_model=neutral_model,
-        handler=handler,
-        transforms=transforms,
-        batched_transform_type=ComputeNeutralCodonProbs,
-        output_keys=output_keys,
-        branch_lengths=branch_lengths,
-        per_sample_tensors=per_sample_tensors,
-    )
-
-    # Pass 3: Batched neutral codon probability computation
-    t0 = time.perf_counter()
-    logger.info("Computing neutral codon probs (batched)...")
-    _batched_compute_neutral_codon_probs(
-        samples=samples,
-        nt_rates_list=nt_rates_list,
-        nt_csps_list=nt_csps_list,
-        branch_lengths=branch_lengths,
-        multihit_model=multihit_model,
-        codon_pref_log=codon_pref_log,
-    )
-    logger.info("Batched NCP: %.1fs", time.perf_counter() - t0)
-
-    dataset = TransformDataset(
-        aa_parents=aa_parents,
-        precomputed_samples=samples,
-        branch_lengths=branch_lengths,
-        nickname=nickname,
-        codon_pref_log=codon_pref_log,
-    )
-
-    return dataset, nt_rates_list, nt_csps_list
 
 
 def _run_transforms_on_all_samples(
@@ -4334,7 +2891,7 @@ def load_whichmut_train_val(
     Automatically detects Parquet vs CSV/DataFrame storage and dispatches
     accordingly.  CSV data requires ``neutral_model``. Parquet data requires
     it only when the files carry no ``nt_rates``/``nt_csps`` columns: the
-    model then computes rates at load (issue #1299).
+    model then computes rates at load.
 
     Args:
         data_spec: File path, registered nickname, or multiname.
@@ -4347,11 +2904,11 @@ def load_whichmut_train_val(
             the split on the fly. Supported on both Parquet and CSV
             inputs.
         censor_table: Optional ``{clade: CensorSpec}`` enabling UShER censoring
-            (#1079), applied to both splits.
+            Applied to both splits.
         censor_mode: Which half of censoring to apply, for both sources.
         reference_base_idxs: Optional reference bases for parent -> reference
-            reversion censoring (#1099), applied to both splits.
-        cache_budget: Row-group cache RAM budget inputs (issue #1272); see
+            reversion censoring, applied to both splits.
+        cache_budget: Row-group cache RAM budget inputs; see
             ``dasm2.data.parquet_backend.plan_cache``.
 
     Returns:
@@ -4400,419 +2957,14 @@ def load_whichmut_train_val(
     return train_bundle, val_bundle
 
 
-def load_evolutionary_train_val(
-    data_spec: str,
-    neutral_model: Optional["RatesCSPNeutralModel"] = None,
-    multihit_model: Optional["HitClassModel"] = None,
-    branch_lengths: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
-    mode: Mode = "precomputed",
-    buffer_size: int = 8192,
-    use_distance: bool = False,
-    include_parent_nt_windows: bool = False,
-    cv_split: Optional["CvSplitConfig"] = None,
-    codon_pref_log: Optional[torch.Tensor] = None,
-    cache_budget: CacheBudgetSpec = CacheBudgetSpec(),
-) -> Tuple[BranchLengthDatasetBundle, BranchLengthDatasetBundle]:
-    """Load evolutionary train/val datasets for SelectionFactorHead + DASM loss.
-
-    Automatically detects Parquet vs CSV/DataFrame storage and dispatches
-    accordingly.  CSV data requires ``neutral_model``. Parquet data requires
-    it only when the files carry no ``nt_rates``/``nt_csps`` columns: the
-    model then computes rates at load (issue #1299).
-
-    Args:
-        data_spec: File path, registered nickname, or multiname.
-        neutral_model: Neutral mutation model (required for CSV and for
-            rate-free Parquet; unused for rates on column-carrying Parquet).
-        multihit_model: Optional multihit correction model.
-        branch_lengths: Optional tuple of (train_bl, val_bl) tensors
-            (CSV only).
-        mode: ``"precomputed"`` or ``"streaming"`` (CSV only).
-        buffer_size: Shuffle buffer size (Parquet only).
-        use_distance: If True, include 'distance' column in batch output
-            for maturation stage conditioning.
-        cv_split: Optional cross-validation fold spec. Bypasses the
-            ``in_train`` column or registry holdout fallback by computing
-            the split on the fly. Supported on both Parquet and CSV
-            inputs. Not compatible with ``branch_lengths`` (the
-            precomputed BL tensors are positionally tied to the existing
-            split).
-        codon_pref_log: Optional log-space codon preference vector (64,)
-            (issue #747). Forwarded to both the Parquet and CSV dispatch
-            so the loss and the branch-length objective agree on the
-            table on every path (issue #1039).
-        cache_budget: Row-group cache RAM budget inputs (issue #1272); see
-            ``dasm2.data.parquet_backend.plan_cache``.
-
-    Returns:
-        Tuple of (train_bundle, val_bundle).
-
-    Raises:
-        ValueError: If ``neutral_model`` is None for non-Parquet data,
-            or if ``cv_split`` is set together with ``branch_lengths``.
-    """
-    if cv_split is not None and branch_lengths is not None:
-        raise ValueError(
-            "cv_split and branch_lengths cannot be used together: precomputed "
-            "branch lengths are positionally tied to a fixed train/val split."
-        )
-
-    if is_parquet_data_spec(data_spec):
-        return _load_evolutionary_train_val_parquet(
-            data_spec,
-            neutral_model,
-            multihit_model,
-            buffer_size,
-            use_distance=use_distance,
-            include_parent_nt_windows=include_parent_nt_windows,
-            cv_split=cv_split,
-            codon_pref_log=codon_pref_log,
-            cache_budget=cache_budget,
-        )
-
-    if neutral_model is None:
-        raise ValueError(
-            "Non-Parquet evolutionary data requires a neutral_model, but got None."
-        )
-
-    train_df, val_df, nickname = _load_and_split(data_spec, cv_split=cv_split)
-
-    train_bl = branch_lengths[0] if branch_lengths else None
-    val_bl = branch_lengths[1] if branch_lengths else None
-
-    train_bundle = create_evolutionary_dataset(
-        train_df,
-        neutral_model,
-        multihit_model=multihit_model,
-        branch_lengths=train_bl,
-        mode=mode,
-        nickname=f"{nickname}_train",
-        use_distance=use_distance,
-        include_parent_nt_windows=include_parent_nt_windows,
-        codon_pref_log=codon_pref_log,
-    )
-    val_bundle = create_evolutionary_dataset(
-        val_df,
-        neutral_model,
-        multihit_model=multihit_model,
-        branch_lengths=val_bl,
-        mode=mode,
-        nickname=f"{nickname}_val",
-        use_distance=use_distance,
-        include_parent_nt_windows=include_parent_nt_windows,
-        codon_pref_log=codon_pref_log,
-    )
-    return train_bundle, val_bundle
 
 
-def load_single_evolutionary_dataset(
-    data_spec: str,
-    neutral_model: "RatesCSPNeutralModel",
-    branch_lengths: Optional[torch.Tensor] = None,
-    mode: Mode = "precomputed",
-    include_parent_nt_windows: bool = False,
-    use_distance: bool = False,
-) -> Tuple[BranchLengthDatasetBundle, pd.DataFrame]:
-    """Load a single evolutionary dataset as a unified bundle.
-
-    Unified equivalent of ``registry.load_evolutionary_dataset()``.
-    Returns the bundle and the preprocessed DataFrame separately (the
-    bundle is a training object that does not store analysis metadata).
-
-    Args:
-        data_spec: File path, registered nickname, or multiname.
-        neutral_model: Neutral mutation model.
-        branch_lengths: Optional initial branch lengths.
-        mode: ``"precomputed"`` or ``"streaming"``.
-        include_parent_nt_windows: When True, append ``ComputeParentNtWindows``
-            so the batch carries the 15-nt parent windows required by QDASM /
-            Hybrid global-kmer losses. Defaults to False (plain DASM eval does
-            not need them).
-        use_distance: If True, include 'distance' column in batch output
-            for maturation stage conditioning.
-
-    Returns:
-        Tuple of (bundle, sequences_df).
-    """
-    sequences_df, handler = sequence_df_and_handler_from_spec(data_spec)
-    nickname = determine_nickname_from_data_spec(data_spec)
-    sequences_df = preprocess_sequences_dataframe_columns(sequences_df, handler)
-
-    bundle = create_evolutionary_dataset(
-        sequences_df,
-        neutral_model,
-        segment_handler=handler,
-        multihit_model=neutral_model.multihit_model,
-        branch_lengths=branch_lengths,
-        mode=mode,
-        nickname=nickname,
-        include_parent_nt_windows=include_parent_nt_windows,
-        use_distance=use_distance,
-    )
-
-    return bundle, sequences_df
 
 
-def _extract_per_sample_rates_csps(
-    sequences_df: pd.DataFrame,
-    handler: SegmentHandler,
-) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
-    """Extract per-sample variable-length nt_rates/nt_csps from DataFrame columns.
-
-    Reads precomputed columns (e.g., ``nt_rates_heavy``, ``nt_csps_heavy``),
-    combines segments with separators, and returns per-sample tensor lists
-    (matching the format produced by ``_precompute_neutral_outputs_vectorized``).
-
-    Args:
-        sequences_df: DataFrame with ``nt_rates{suffix}``/``nt_csps{suffix}`` columns.
-        handler: Segment handler (defines segment suffixes and separator logic).
-
-    Returns:
-        Tuple of (nt_rates_list, nt_csps_list), each a list of variable-length tensors.
-
-    Raises:
-        ValueError: If no precomputed columns found.
-    """
-    available_segments = []
-    for _seg_idx, suffix in enumerate(handler.segment_suffixes):
-        rates_col = f"nt_rates{suffix}"
-        csps_col = f"nt_csps{suffix}"
-        if rates_col in sequences_df.columns and csps_col in sequences_df.columns:
-            available_segments.append(suffix)
-
-    if not available_segments:
-        raise ValueError(
-            f"No precomputed neutral columns found. "
-            f"Expected columns like nt_rates{handler.segment_suffixes[0]}."
-        )
-
-    # Extract per-segment tensor lists
-    segment_rates = [sequences_df[f"nt_rates{s}"].tolist() for s in available_segments]
-    segment_csps = [sequences_df[f"nt_csps{s}"].tolist() for s in available_segments]
-
-    # Combine segments per sequence
-    nt_rates_list: List[torch.Tensor] = []
-    nt_csps_list: List[torch.Tensor] = []
-
-    for seq_idx in range(len(sequences_df)):
-        seq_rates = [segment_rates[i][seq_idx] for i in range(len(available_segments))]
-        seq_csps = [segment_csps[i][seq_idx] for i in range(len(available_segments))]
-
-        combined_rates = handler._combine_segments_with_separators(seq_rates, fill=1.0)
-        combined_csps = handler._combine_segments_with_separators(seq_csps, fill=0.0)
-
-        nt_rates_list.append(combined_rates)
-        nt_csps_list.append(combined_csps)
-
-    return nt_rates_list, nt_csps_list
 
 
-def _create_evolutionary_dataset_from_precomputed_rates(
-    sequences_df: pd.DataFrame,
-    nt_rates_list: List[torch.Tensor],
-    nt_csps_list: List[torch.Tensor],
-    handler: SegmentHandler,
-    branch_lengths: Optional[torch.Tensor] = None,
-    nickname: str = "unnamed_precomputed",
-    include_parent_nt_windows: bool = False,
-    codon_pref_log: Optional[torch.Tensor] = None,
-    neutral_model: Optional["RatesCSPNeutralModel"] = None,
-) -> Tuple[TransformDataset, torch.Tensor, List[str], List[str]]:
-    """Build a precomputed TransformDataset from pre-extracted rates/csps.
-
-    Runs the same transform pipeline as ``create_evolutionary_dataset``
-    (tokenize, codon index, layout, masks, neutral codon probs) but skips
-    the neutral model forward pass.
-
-    No ``multihit_model`` parameter (issue #1041): the pickle path is this
-    function's only caller and always built the bundle with
-    ``multihit_model=None``, so a model passed here would have been baked into
-    the dataset while the bundle disowned it — leaving
-    ``MultihitOptimizer._rewrite_cache`` unable to find the very parameter it
-    needs to refit. Dead as written, and a trap if revived; deleted rather
-    than wired up, since no caller wants it.
-
-    Args:
-        sequences_df: DataFrame with parent/child NT sequences.
-        nt_rates_list: Per-sample neutral rates (variable-length).
-        nt_csps_list: Per-sample neutral CSPs (variable-length).
-        handler: Segment handler.
-        branch_lengths: Optional initial branch lengths. When None, taken
-            from a ``branch_length`` column on ``sequences_df`` if present,
-            else ``DEFAULT_BRANCH_LENGTH`` for all.
-        nickname: Human-readable identifier.
-        codon_pref_log: Optional log-space codon preference vector (64,)
-            (issue #747). Always precomputed mode here, so this is baked
-            into ``log_neutral_codon_probs`` via the batched
-            ``_batched_compute_neutral_codon_probs`` primitive, same as the
-            CSV+precomputed path (issue #1039).
-
-    Returns:
-        Tuple of (dataset, shared_branch_lengths, raw_parents, raw_children).
-
-    Raises:
-        ValueError: If a sequence pair has no scored codon substitution (see
-            ``_validate_codon_mutations_exist``).
-    """
-    _, raw_parents, raw_children = _prepare_pcp_sequences(sequences_df, handler)
-    _validate_codon_mutations_exist(raw_parents, raw_children)
-    if include_parent_nt_windows:
-        validate_boundary_coverage(neutral_model, raw_parents, nickname)
-
-    num_sequences = len(raw_parents)
-
-    shared_branch_lengths, branch_lengths_from_input = (
-        _resolve_dataframe_branch_lengths(sequences_df, num_sequences, branch_lengths)
-    )
-    shared_branch_lengths.share_memory_()
-
-    _reject_tandem_on_precomputed(neutral_model)
-    num_seg = handler.get_num_segments()
-    transforms = _evolutionary_transforms(
-        num_seg,
-        include_parent_nt_windows=include_parent_nt_windows,
-        neutral_model=neutral_model,
-        segment_handler=handler,
-    )
-
-    # Fused translate+tokenize+codon_index
-    (
-        aa_parents,
-        parent_aa_tokens,
-        parent_codon_idxs,
-        child_aa_tokens,
-        child_codon_idxs,
-    ) = _precompute_sequence_tensors(raw_parents, raw_children)
-
-    per_sample_tensors = {
-        "aa_parents_idxs": parent_aa_tokens,
-        "aa_children_idxs": child_aa_tokens,
-        "codon_parents_idxs": parent_codon_idxs,
-        "codon_children_idxs": child_codon_idxs,
-    }
-
-    # Filter out fused transforms
-    per_sample_transforms = [
-        t
-        for t in transforms
-        if not isinstance(
-            t,
-            (
-                TranslateAndTokenize,
-                CodonIndex,
-                FusedTranslateTokenizeCodonIndex,
-                ComputeNeutralCodonProbs,
-            ),
-        )
-    ]
-
-    # Pass 2: Per-sample transforms (layout, masks)
-    samples = _run_transforms_on_all_samples(
-        raw_parents=raw_parents,
-        raw_children=raw_children,
-        transforms=per_sample_transforms,
-        output_keys=EVOLUTIONARY_OUTPUT_KEYS,
-        nt_rates_list=nt_rates_list,
-        nt_csps_list=nt_csps_list,
-        branch_lengths=shared_branch_lengths,
-        per_sample_tensors=per_sample_tensors,
-    )
-
-    # Pass 3: Batched neutral codon probability computation
-    _batched_compute_neutral_codon_probs(
-        samples=samples,
-        nt_rates_list=nt_rates_list,
-        nt_csps_list=nt_csps_list,
-        branch_lengths=shared_branch_lengths,
-        codon_pref_log=codon_pref_log,
-    )
-
-    dataset = TransformDataset(
-        aa_parents=aa_parents,
-        precomputed_samples=samples,
-        branch_lengths=shared_branch_lengths,
-        nickname=nickname,
-        codon_pref_log=codon_pref_log,
-    )
-    dataset.branch_lengths_from_input = branch_lengths_from_input
-
-    return dataset, shared_branch_lengths, raw_parents, raw_children
 
 
-def load_evolutionary_train_val_precomputed(
-    data_spec: str,
-    include_parent_nt_windows: bool = False,
-    codon_pref_log: Optional[torch.Tensor] = None,
-    neutral_model: Optional["RatesCSPNeutralModel"] = None,
-) -> Tuple[BranchLengthDatasetBundle, BranchLengthDatasetBundle]:
-    """Load evolutionary train/val datasets from pickle with precomputed neutral rates.
-
-    Reads a pickle DataFrame that already contains ``nt_rates``/``nt_csps``
-    columns (produced by a data preparation pipeline). Skips the neutral
-    parent-model forward pass — the tensors are used directly. Global k-mer
-    variants still require neutral_model to rescan boundary source codons.
-
-    Args:
-        data_spec: File path to pickle file, or registered nickname.
-        codon_pref_log: Optional log-space codon preference vector (64,)
-            (issue #747). Always precomputed mode, so this is baked into
-            ``log_neutral_codon_probs`` via the same batched primitive the
-            CSV+precomputed path uses, and also carried on the returned
-            bundle so the branch-length objective's duck-typed lookup
-            (``branch_lengths.py``) sees the same table (issue #1039).
-
-    Returns:
-        Tuple of (train_bundle, val_bundle) as ``BranchLengthDatasetBundle``.
-
-    Raises:
-        ValueError: If data lacks precomputed nt_rates/nt_csps columns.
-    """
-
-    train_df, val_df, nickname = _load_and_split(data_spec)
-    validate_precomputed_columns(train_df)
-
-    handler = detect_compatible_handler(set(train_df.columns), ("parent", "child"))
-    num_seg = handler.get_num_segments()
-    padding_sentinel = padding_sentinel_for(num_seg)
-
-    collator = TransformCollator(
-        tensor_specs=_evolutionary_collator_specs(
-            padding_sentinel, include_parent_nt_windows=include_parent_nt_windows
-        )
-    )
-
-    bundles = []
-    for split_df, split_name in [(train_df, "train"), (val_df, "val")]:
-        nt_rates_list, nt_csps_list = _extract_per_sample_rates_csps(split_df, handler)
-
-        dataset, _shared_bl, raw_parents, raw_children = (
-            _create_evolutionary_dataset_from_precomputed_rates(
-                sequences_df=split_df,
-                nt_rates_list=nt_rates_list,
-                nt_csps_list=nt_csps_list,
-                handler=handler,
-                nickname=f"{nickname}_{split_name}",
-                neutral_model=neutral_model,
-                include_parent_nt_windows=include_parent_nt_windows,
-                codon_pref_log=codon_pref_log,
-            )
-        )
-
-        bundle = BranchLengthDatasetBundle(
-            dataset=dataset,
-            collator=collator,
-            worker_init_fn=make_worker_init_fn(),
-            neutral_model=neutral_model,
-            segment_handler=handler,
-            multihit_model=None,
-            nt_rates_list=nt_rates_list,
-            nt_csps_list=nt_csps_list,
-            nt_parents=raw_parents,
-            nt_children=raw_children,
-        )
-        bundles.append(bundle)
-
-    return bundles[0], bundles[1]
 
 
 # ---------------------------------------------------------------------------
@@ -4849,32 +3001,6 @@ def _resolve_single_parquet_component(resolved: Path, component: str) -> List[Pa
     )
 
 
-def _resolve_parquet_paths(data_spec: str) -> Tuple[List[Path], str]:
-    """Resolve data spec to Parquet file paths and nickname.
-
-    Handles single ``.parquet`` files, directories containing Parquet files,
-    and multiname ``+``-separated specs (e.g. ``"a.parquet+b.parquet"``).
-
-    Args:
-        data_spec: File path, registered nickname, directory path,
-            or ``+``-separated multiname.
-
-    Returns:
-        Tuple of (sorted list of Parquet file paths, dataset nickname).
-
-    Raises:
-        ValueError: If any component is neither a ``.parquet`` file nor
-            a directory containing ``.parquet`` files.
-    """
-    nickname = determine_nickname_from_data_spec(data_spec)
-    components = parse_multiname(data_spec)
-
-    all_paths: List[Path] = []
-    for component in components:
-        resolved = resolve_data_path(component)
-        all_paths.extend(_resolve_single_parquet_component(resolved, component))
-
-    return sorted(all_paths), nickname
 
 
 def _read_parquet_column_raw(parquet_paths: List[Path], col: str) -> List[Any]:
@@ -4984,7 +3110,7 @@ def _parquet_metadata(
 
     Leaves the handler's ``bl_init_strategy`` alone: it is set for the whole
     spec by ``_resolve_parquet_paths_and_schema``, and one component's stamp
-    would overwrite it (issue #1289).
+    would overwrite it.
 
     Uses ``pyarrow.parquet`` directly for lightweight metadata + column reads,
     avoiding construction of a full ``ParquetBackend`` (which is created
@@ -5015,36 +3141,19 @@ def _parquet_metadata(
     column_names = set(first_file.schema_arrow.names)
     file_metadata = read_parquet_file_metadata(first_file)
 
-    # Read in_train column (or fall back to holdout-based splitting)
-    if "in_train" in column_names:
-        in_train_values = _read_parquet_column_raw(parquet_paths, "in_train")
-        train_filter = [bool(v) for v in in_train_values]
-    elif "sample_id" in column_names and nickname is not None:
-        # Fallback: compute train filter from holdout sample IDs
-        try:
-            holdout_ids = _require_holdout_samples(nickname)
-        except ValueError:
-            raise ValueError(
-                f"Parquet file(s) missing 'in_train' column and no holdout "
-                f"samples defined for dataset '{nickname}'. Either add an "
-                f"'in_train' column or define holdout_samples in the YAML registry."
-            )
-        holdout_set = set(holdout_ids)
-        sample_ids = _read_parquet_column_raw(parquet_paths, "sample_id")
-        train_filter = [str(sid) not in holdout_set for sid in sample_ids]
-        logger.info(
-            "Parquet fallback: computed train/val split from holdout_samples "
-            "(%d holdout IDs, %d train, %d val)",
-            len(holdout_set),
-            sum(train_filter),
-            sum(not v for v in train_filter),
-        )
-    else:
+    # The split is a property of the corpus, carried in the file. Upstream
+    # there was a second path that derived it from a `holdout_samples` list in
+    # a YAML registry when `in_train` was absent; this fork has no registry,
+    # and a split that depended on one would not survive being handed to a
+    # reader with their own corpus.
+    if "in_train" not in column_names:
         raise ValueError(
-            "Parquet file(s) missing required 'in_train' column for train/val "
-            "splitting. Ensure the data preparation pipeline writes this column, "
-            "or provide a 'sample_id' column with holdout_samples in the YAML registry."
+            "Parquet file(s) missing the required 'in_train' column, which "
+            "carries the train/val split. The corpus-building pipeline writes "
+            "it; a corpus without it cannot be split reproducibly here."
         )
+    in_train_values = _read_parquet_column_raw(parquet_paths, "in_train")
+    train_filter = [bool(v) for v in in_train_values]
     val_filter = [not v for v in train_filter]
 
     # Detect segment handler
@@ -5062,8 +3171,8 @@ def _combine_component_strategies(
 ) -> Optional[BranchLengthInitStrategy]:
     """One BL init strategy for a multiname spec's rows.
 
-    Returns the components' strategy when they all agree, as before issue
-    #1289, and otherwise a ``PerSourceStrategy`` keyed by file path.
+    Returns the components' strategy when they all agree, and otherwise a
+    ``PerSourceStrategy`` keyed by file path.
 
     Raises:
         ValueError: If some components carry a strategy and others do not:
@@ -5099,9 +3208,9 @@ def _reject_raw_pcp_parquet(
     That is what raw PCP output looks like (pcp-pipeline's Parquet, for one):
     no stamping writer has run, so the rows the CSV and MLM paths drop
     (naughty clonal families) are still in it. An unstamped file that does
-    carry rates was written by a pre-#1131 writer and only warns (see
+    carry rates was written by an older writer and only warns (see
     :func:`verify_parquet_seam_stamp`). A stamped rate-free file is fine: the
-    configured neutral model computes its rates at load (issue #1182).
+    configured neutral model computes its rates at load.
 
     Raises:
         ValueError: If any file lacks both.
@@ -5142,12 +3251,12 @@ def _resolve_parquet_paths_and_schema(
     for files that lack an ``in_train`` column.
 
     Also verifies each component's row-preprocessing seam stamp against the
-    current registry (issue #1131). This is the load-time counterpart of the
+    current registry. This is the load-time counterpart of the
     stamp the Parquet writers emit; it lives here rather than in
     ``train_command`` so every caller that reaches Parquet data -- eval,
     o/e plots, bootstraps, one-off experiment scripts -- is covered.
 
-    I/O cost: this opens every file's footer, where the pre-#1131 version read
+    I/O cost: this opens every file's footer, where an earlier version read
     only ``comp_paths[0]``'s schema. On a many-shard corpus that is O(shards)
     footer reads instead of one -- but every caller here goes on to build a
     ``ParquetBackend``, whose ``__init__`` already opens *every* path and walks
@@ -5174,7 +3283,7 @@ def _resolve_parquet_paths_and_schema(
 
     Sets the returned handler's ``bl_init_strategy``: the components' shared
     strategy, or a ``PerSourceStrategy`` giving each file's rows its own
-    component's strategy when they differ (issue #1289).
+    component's strategy when they differ.
 
     Raises:
         ValueError: If segment handlers differ across multiname components,
@@ -5264,7 +3373,7 @@ def _resolve_parquet_paths_and_schema(
     assert handler is not None, "No parquet components resolved"
     # Assigned unconditionally, including to None: skipping the assignment for
     # an unstamped spec would let a strategy left on the singleton by an
-    # earlier load leak into this one (issue #814 review).
+    # earlier load leak into this one.
     handler.bl_init_strategy = _combine_component_strategies(
         component_strategies, path_strategies
     )
@@ -5302,7 +3411,7 @@ def _resolve_parquet_train_val(
       partition each component's groups into its own folds rather than
       the combined dataset's groups.
 
-    A ``cv_split`` also makes the seam-stamp check strict (issue #1131):
+    A ``cv_split`` also makes the seam-stamp check strict:
     ``GroupKFold`` packs groups by row count, so a Parquet file holding a
     different row set than the CSV/MLM paths would silently realize a
     different fold map. On the ``in_train``/holdout path row counts do not
@@ -5351,165 +3460,8 @@ def _resolve_parquet_train_val(
     )
 
 
-def _load_evolutionary_train_val_parquet(
-    data_spec: str,
-    neutral_model: Optional["RatesCSPNeutralModel"] = None,
-    multihit_model: Optional["HitClassModel"] = None,
-    buffer_size: int = 8192,
-    use_distance: bool = False,
-    include_parent_nt_windows: bool = False,
-    cv_split: Optional["CvSplitConfig"] = None,
-    codon_pref_log: Optional[torch.Tensor] = None,
-    cache_budget: CacheBudgetSpec = CacheBudgetSpec(),
-) -> Tuple[BranchLengthDatasetBundle, BranchLengthDatasetBundle]:
-    """Load evolutionary train/val datasets from Parquet.
-
-    Uses ``cv_split`` when provided; otherwise reads the ``in_train``
-    column or falls back to holdout-based splitting.
-    """
-    paths, nickname, train_filter, val_filter, handler, max_aa_seq_len = (
-        _resolve_parquet_train_val(data_spec, cv_split=cv_split)
-    )
-
-    train_bundle = create_evolutionary_dataset_from_parquet(
-        parquet_paths=paths,
-        segment_handler=handler,
-        max_aa_seq_len=max_aa_seq_len,
-        neutral_model=neutral_model,
-        multihit_model=multihit_model,
-        buffer_size=buffer_size,
-        nickname=f"{nickname}_train",
-        row_filter=train_filter,
-        use_distance=use_distance,
-        include_parent_nt_windows=include_parent_nt_windows,
-        codon_pref_log=codon_pref_log,
-        cache_budget=cache_budget,
-    )
-
-    val_bundle = create_evolutionary_dataset_from_parquet(
-        parquet_paths=paths,
-        segment_handler=handler,
-        max_aa_seq_len=max_aa_seq_len,
-        neutral_model=neutral_model,
-        multihit_model=multihit_model,
-        buffer_size=buffer_size,
-        nickname=f"{nickname}_val",
-        row_filter=val_filter,
-        use_distance=use_distance,
-        include_parent_nt_windows=include_parent_nt_windows,
-        codon_pref_log=codon_pref_log,
-        cache_budget=cache_budget,
-        # A sequential sweep: the same fix as the whichmut val bundle.
-        shuffle=False,
-    )
-
-    return train_bundle, val_bundle
 
 
-def load_single_evolutionary_dataset_from_parquet(
-    data_spec: str,
-    neutral_model: Optional["RatesCSPNeutralModel"] = None,
-    multihit_model: Optional["HitClassModel"] = None,
-    row_filter: Optional[List[bool]] = None,
-    use_distance: bool = False,
-    cache_size: Optional[int] = None,
-    include_parent_nt_windows: bool = False,
-    sequences_df_columns: Optional[List[str]] = None,
-) -> Tuple[BranchLengthDatasetBundle, pd.DataFrame]:
-    """Load a single evolutionary dataset from Parquet as a unified bundle.
-
-    Parquet-specific equivalent of ``load_single_evolutionary_dataset()``.
-    Creates a ``BranchLengthDatasetBundle`` from Parquet files, and reads a
-    lightweight ``sequences_df`` for OE plot metadata (faceting columns,
-    numbering). Rates come from the files' ``nt_rates``/``nt_csps`` columns,
-    or from ``neutral_model`` on a rate-free file (issue #1299).
-
-    Unlike the train/val loaders, this loads the entire dataset (or a
-    filtered subset) as a single bundle — useful for post-training
-    evaluation where train/val splitting is not needed.
-
-    Args:
-        data_spec: File path, registered nickname, or multiname pointing
-            to Parquet file(s).
-        neutral_model: The neutral model. Required for a rate-free file;
-            may be None when the file carries rate columns.
-        multihit_model: Optional multihit correction model.
-        row_filter: Optional boolean list selecting which rows to include.
-            If None, all rows are loaded.
-        use_distance: If True, include 'distance' column from Parquet in
-            batch output for maturation stage conditioning.
-        cache_size: Explicit LRU row-group cache size for the backend. When
-            ``None`` (default), the backend auto-sizes from ``buffer_size``
-            and row-group geometry. Callers iterating sequentially over the
-            data (oe-plot, eval) should pass a small constant (e.g. 2) to
-            avoid pinning every row group in memory.
-        include_parent_nt_windows: When True, append ``ComputeParentNtWindows``
-            so the batch carries the 15-nt parent windows required by QDASM /
-            Hybrid global-kmer losses. Defaults to False (plain DASM eval does
-            not need them).
-        sequences_df_columns: Optional explicit column subset for
-            ``sequences_df`` (still filtered further to columns that actually
-            exist and are never ``nt_rates``/``nt_csps``). Default (``None``)
-            keeps every non-``nt_rates``/``nt_csps`` column — fine for typical
-            corpora, but on wide-sequence corpora the ``parent``/``child`` raw
-            sequence-string columns alone can be tens of GB across millions of
-            rows (issue #813); callers needing only a few metadata columns
-            (e.g. ``sample_id``, ``in_train``) at that scale should pass them
-            explicitly to avoid that read.
-
-    Returns:
-        Tuple of (bundle, sequences_df). ``sequences_df`` contains all
-        non-tensor columns from the Parquet file (for faceting, numbering,
-        and analysis metadata), or just ``sequences_df_columns`` if given.
-    """
-    all_paths, nickname, handler, max_aa_seq_len, all_column_names, _ = (
-        _resolve_parquet_paths_and_schema(data_spec, strict_seam=False)
-    )
-
-    bundle = create_evolutionary_dataset_from_parquet(
-        parquet_paths=all_paths,
-        segment_handler=handler,
-        max_aa_seq_len=max_aa_seq_len,
-        neutral_model=neutral_model,
-        multihit_model=multihit_model,
-        nickname=nickname,
-        row_filter=row_filter,
-        use_distance=use_distance,
-        cache_size=cache_size,
-        include_parent_nt_windows=include_parent_nt_windows,
-    )
-
-    # Read lightweight DataFrame for analysis metadata (non-tensor columns).
-    # Exclude large list columns (nt_rates, nt_csps) to keep memory low, and
-    # further restrict to sequences_df_columns when the caller supplied it.
-    exclude_cols = {
-        c for c in all_column_names if c.startswith(("nt_rates", "nt_csps"))
-    }
-    available_cols = all_column_names - exclude_cols
-    if sequences_df_columns is not None:
-        missing = set(sequences_df_columns) - all_column_names
-        if missing:
-            raise ValueError(
-                f"sequences_df_columns requested columns not present in the "
-                f"parquet schema: {sorted(missing)}"
-            )
-        read_cols = sorted(available_cols & set(sequences_df_columns))
-    else:
-        read_cols = sorted(available_cols)
-    sequences_df = pd.concat(
-        [pq.read_table(p, columns=read_cols).to_pandas() for p in all_paths],
-        ignore_index=True,
-    )
-    if row_filter is not None:
-        assert len(row_filter) == len(sequences_df), (
-            f"row_filter length {len(row_filter)} != "
-            f"sequences_df length {len(sequences_df)}"
-        )
-        sequences_df = sequences_df.loc[row_filter].reset_index(drop=True)
-
-    sequences_df = preprocess_sequences_dataframe_columns(sequences_df, handler)
-
-    return bundle, sequences_df
 
 
 def _load_whichmut_train_val_parquet(
@@ -5561,11 +3513,11 @@ def _load_whichmut_train_val_parquet(
         censor_mode=censor_mode,
         reference_base_idxs=reference_base_idxs,
         cache_budget=cache_budget,
-        # Validation sweeps every row once and reduces to scalars, so its order
-        # is not observable -- but shuffling it is, in wall-clock. See
-        # ``ShuffleBufferSampler``: on the v11 S corpus the shuffled val loader
-        # ran 20x slower than the sequential one, which made evaluation 97% of
-        # training wall-clock at ``eval_every_steps: 2000``.
+        # Validation sweeps every row once and reduces to scalars, so its
+        # order is not observable -- but shuffling it is, in wall-clock. A
+        # shuffled val loader draws rows across row groups and defeats the
+        # Parquet cache (see ``ShuffleBufferSampler``), which at this corpus
+        # size is enough to make evaluation dominate training wall-clock.
         shuffle=False,
     )
 
@@ -5577,84 +3529,8 @@ def _load_whichmut_train_val_parquet(
 # ---------------------------------------------------------------------------
 
 
-def _aao_whichmut_transforms(
-    num_segments: int,
-    neutral_aa_rates: torch.Tensor,
-    translate: bool = True,
-) -> List[Callable[[Dict[str, Any]], Dict[str, Any]]]:
-    """Build per-sample transform chain for AAO whichmut tasks.
-
-    Uses a context-free (20, 20) rate matrix — no neural net needed.
-
-    Args:
-        num_segments: Number of protein segments.
-        neutral_aa_rates: Context-free rate matrix of shape (20, 20).
-        translate: If True, translate NT -> AA before tokenizing.
-
-    Returns:
-        List of per-sample transforms.
-    """
-    return [
-        TranslateAndTokenize("raw_parent", "aa_parents_idxs", translate=translate),
-        TranslateAndTokenize("raw_child", "aa_children_idxs", translate=translate),
-        ComputeLayout(num_segments),
-        LookupAAONeutralRates(neutral_aa_rates),
-        ComputeMasks(num_segments),
-        ComputeMutIndicator(
-            "aa_parents_idxs",
-            "aa_children_idxs",
-            "nonsyn_mut_indicator",
-            AA_AMBIG_IDX,
-        ),
-        NarrowLossMask("nonsyn_mut_indicator"),
-    ]
 
 
-def _aao_whichmut_nt_origin_transforms(
-    num_segments: int,
-) -> List[Callable[[Dict[str, Any]], Dict[str, Any]]]:
-    """Build per-sample transform chain for AAO from NT sequences.
-
-    Computes position-specific AAO rates by marginalizing codon mutation rates.
-    This matches the eager ``load_aaowhichmut_train_val`` path:
-    nt_rates/nt_csps → codon_neutral_rates → marginalize → aao_neutral_rates.
-
-    Requires nt_rates and nt_csps in the sample (from batched precomputation
-    or ComputeNtRatesAndCsps).
-
-    Note:
-        ``codon_parents_idxs`` is an intermediate produced by CodonIndex and
-        consumed by ComputeCodonMutationRates/MarginalizeCodonsToAAO. In
-        precomputed mode it must be retained through ``extended_keys`` for
-        batched CMR, then removed after marginalization.
-
-    Args:
-        num_segments: Number of protein segments.
-
-    Returns:
-        List of per-sample transforms.
-    """
-    return [
-        FusedTranslateTokenizeCodonIndex(
-            "raw_parent", "aa_parents_idxs", "codon_parents_idxs"
-        ),
-        # codon_children_idxs not needed for DASM head (only parent codons used)
-        FusedTranslateTokenizeCodonIndex("raw_child", "aa_children_idxs"),
-        ComputeLayout(num_segments),
-        ComputeMasks(
-            num_segments,
-            exclude_parent_codon_ambiguity=True,
-        ),
-        ComputeCodonMutationRates(),
-        MarginalizeCodonsToAAO(),
-        ComputeMutIndicator(
-            "aa_parents_idxs",
-            "aa_children_idxs",
-            "nonsyn_mut_indicator",
-            AA_AMBIG_IDX,
-        ),
-        NarrowLossMask("nonsyn_mut_indicator"),
-    ]
 
 
 AAO_WHICHMUT_OUTPUT_KEYS = frozenset(
@@ -5670,293 +3546,12 @@ AAO_WHICHMUT_OUTPUT_KEYS = frozenset(
 )
 
 
-def _aao_whichmut_collator_specs(
-    padding_sentinel: int,
-) -> Dict[str, Tuple[float, TensorScale]]:
-    """Build collator tensor_specs for AAO whichmut tasks."""
-    return {
-        "aa_parents_idxs": (AA_AMBIG_IDX, "codon"),
-        "aa_children_idxs": (AA_AMBIG_IDX, "codon"),
-        "aao_neutral_rates": (0.0, "codon"),
-        "nonsyn_mut_indicator": (False, "codon"),
-        "layout": (padding_sentinel, "codon"),
-        "mask": (False, "codon"),
-        "loss_mask": (False, "codon"),
-    }
 
 
-def _filter_aa_mutations(
-    raw_parents: List[str],
-    raw_children: List[str],
-    translate: bool,
-) -> Tuple[List[str], List[str]]:
-    """Filter out sequence pairs with no amino acid mutations.
-
-    Args:
-        raw_parents: Parent sequences (NT or AA).
-        raw_children: Child sequences (NT or AA).
-        translate: If True, translate NT to AA before comparing.
-
-    Returns:
-        Filtered (raw_parents, raw_children) lists.
-
-    Raises:
-        ValueError: If lists have different lengths or all sequences are
-            filtered out.
-    """
-    if len(raw_parents) != len(raw_children):
-        raise ValueError(
-            f"Length mismatch: {len(raw_parents)} parents vs "
-            f"{len(raw_children)} children"
-        )
-    filtered_parents = []
-    filtered_children = []
-    for parent, child in zip(raw_parents, raw_children):
-        if translate:
-            aa_parent = translate_sequence(parent)
-            aa_child = translate_sequence(child)
-        else:
-            aa_parent = parent
-            aa_child = child
-        if aa_parent != aa_child:
-            filtered_parents.append(parent)
-            filtered_children.append(child)
-
-    if not filtered_parents:
-        raise ValueError(
-            "All sequences were filtered out — no amino acid mutations found."
-        )
-
-    removed = len(raw_parents) - len(filtered_parents)
-    if removed > 0:
-        logger.info(
-            "Filtered %d sequences with no AA mutations (%d remaining)",
-            removed,
-            len(filtered_parents),
-        )
-
-    return filtered_parents, filtered_children
 
 
-def create_aao_whichmut_dataset(
-    sequences_df: pd.DataFrame,
-    neutral_aa_rates: torch.Tensor,
-    segment_handler: Optional[SegmentHandler] = None,
-    translate: bool = True,
-    mode: Mode = "precomputed",
-    nickname: str = "unnamed_aao_whichmut",
-) -> DatasetBundle:
-    """Create dataset for AAO whichmut tasks.
-
-    Supports both NT-origin sequences (translate=True) and AA-origin sequences
-    (translate=False). Uses a context-free (20, 20) rate matrix — no neural
-    net in workers.
-
-    Sequences without AA mutations are filtered out before dataset creation.
-
-    Args:
-        sequences_df: DataFrame with parent/child sequence columns.
-        neutral_aa_rates: Context-free rate matrix of shape (20, 20).
-        segment_handler: Handler for multi-segment sequences. Auto-detected if None.
-        translate: If True, sequences are NT and need translation. If False,
-            sequences are already AA strings.
-        mode: ``"precomputed"`` or ``"streaming"``.
-        nickname: Human-readable identifier.
-
-    Returns:
-        DatasetBundle with dataset, collator, and worker_init_fn.
-    """
-    handler, raw_parents, raw_children = _prepare_pcp_sequences(
-        sequences_df, segment_handler
-    )
-
-    # Filter sequences without AA mutations
-    raw_parents, raw_children = _filter_aa_mutations(
-        raw_parents, raw_children, translate
-    )
-
-    num_seg = handler.get_num_segments()
-    transforms = _aao_whichmut_transforms(num_seg, neutral_aa_rates, translate)
-
-    if translate:
-        aa_parents = [translate_sequence(p) for p in raw_parents]
-    else:
-        aa_parents = list(raw_parents)
-
-    if mode == "precomputed":
-        # Fused tokenize + batched layout/masks/rates/mutation/narrow.
-        # Same concat→compute→split pattern as whichmut/dasm batched CMR.
-        parent_aa_tokens = [tokenize_single_aa_sequence(p) for p in aa_parents]
-        child_seqs = (
-            [translate_sequence(c) for c in raw_children]
-            if translate
-            else list(raw_children)
-        )
-        child_aa_tokens = [tokenize_single_aa_sequence(c) for c in child_seqs]
-
-        # Build sample dicts with pre-tokenized tensors
-        samples: List[Dict[str, Any]] = []
-        for i in range(len(raw_parents)):
-            samples.append(
-                {
-                    "aa_parents_idxs": parent_aa_tokens[i],
-                    "aa_children_idxs": child_aa_tokens[i],
-                }
-            )
-
-        # Batched post-tokenization transforms (replaces per-sample loop)
-        batched_layout_masks_for_samples(samples, num_seg)
-        _batched_aao_neutral_rates_for_samples(samples, neutral_aa_rates)
-        _batched_mutation_indicator_for_samples(
-            samples,
-            "aa_parents_idxs",
-            "aa_children_idxs",
-            "nonsyn_mut_indicator",
-            AA_AMBIG_IDX,
-        )
-        _batched_narrow_loss_mask_for_samples(samples, "nonsyn_mut_indicator")
-
-        # Filter to output keys
-        samples = [
-            {k: v for k, v in s.items() if k in AAO_WHICHMUT_OUTPUT_KEYS}
-            for s in samples
-        ]
-
-        dataset = TransformDataset(
-            aa_parents=aa_parents,
-            precomputed_samples=samples,
-            nickname=nickname,
-        )
-    else:
-        dataset = TransformDataset(
-            aa_parents=aa_parents,
-            raw_parents=raw_parents,
-            raw_children=raw_children,
-            transforms=transforms,
-            output_keys=AAO_WHICHMUT_OUTPUT_KEYS,
-            nickname=nickname,
-        )
-
-    padding_sentinel = padding_sentinel_for(num_seg)
-    collator = TransformCollator(
-        tensor_specs=_aao_whichmut_collator_specs(padding_sentinel)
-    )
-
-    return DatasetBundle(
-        dataset=dataset,
-        collator=collator,
-        worker_init_fn=make_worker_init_fn(),
-    )
 
 
-def create_aao_whichmut_nt_dataset(
-    sequences_df: pd.DataFrame,
-    neutral_model: "RatesCSPNeutralModel",
-    segment_handler: Optional[SegmentHandler] = None,
-    mode: Mode = "precomputed",
-    nickname: str = "unnamed_aao_nt_whichmut",
-) -> DatasetBundle:
-    """Create AAO dataset from NT sequences with position-specific rates.
-
-    Computes codon mutation rates from the neutral model, then marginalizes
-    to AA-level rates. Matches the eager ``load_aaowhichmut_train_val`` path.
-
-    Sequences without AA mutations are filtered out before dataset creation.
-
-    Args:
-        sequences_df: DataFrame with parent/child NT sequence columns.
-        neutral_model: Neutral mutation model.
-        segment_handler: Handler for multi-segment sequences. Auto-detected if None.
-        mode: ``"precomputed"`` or ``"streaming"``.
-        nickname: Human-readable identifier.
-
-    Returns:
-        DatasetBundle with dataset, collator, and worker_init_fn.
-
-    Raises:
-        ValueError: If ``neutral_model`` needs per-row context, which the CSV
-            path cannot supply.
-    """
-    _reject_context_model_on_csv(neutral_model)
-    handler, raw_parents, raw_children = _prepare_pcp_sequences(
-        sequences_df, segment_handler
-    )
-
-    # Filter sequences without AA mutations
-    raw_parents, raw_children = _filter_aa_mutations(
-        raw_parents, raw_children, translate=True
-    )
-
-    num_seg = handler.get_num_segments()
-    transforms = _aao_whichmut_nt_origin_transforms(num_seg)
-    aa_parents = [translate_sequence(p) for p in raw_parents]
-
-    if mode == "precomputed":
-        # Split out ComputeCodonMutationRates and MarginalizeCodonsToAAO
-        # for post-processing after batched codon rate computation.
-        marginalize = MarginalizeCodonsToAAO()
-        per_sample_transforms = [
-            t
-            for t in transforms
-            if not isinstance(t, (ComputeCodonMutationRates, MarginalizeCodonsToAAO))
-        ]
-
-        # Keep codon_parents_idxs through pass 2 — needed by batched CMR
-        extended_keys = AAO_WHICHMUT_OUTPUT_KEYS | {"codon_parents_idxs"}
-
-        samples, nt_rates_list, nt_csps_list = _precompute_passes_1_and_2(
-            raw_parents=raw_parents,
-            raw_children=raw_children,
-            neutral_model=neutral_model,
-            handler=handler,
-            transforms=per_sample_transforms,
-            batched_transform_type=None,  # nothing else to split out
-            output_keys=extended_keys,
-        )
-
-        # Batched codon mutation rates
-        _batched_compute_codon_mutation_rates(
-            samples=samples,
-            nt_rates_list=nt_rates_list,
-            nt_csps_list=nt_csps_list,
-        )
-
-        # Marginalize codon rates → AAO rates per sample, clean up intermediates
-        for sample in samples:
-            marginalize(sample)
-            sample.pop("codon_neutral_rates", None)
-            sample.pop("codon_parents_idxs", None)
-
-        dataset = TransformDataset(
-            aa_parents=aa_parents,
-            precomputed_samples=samples,
-            nickname=nickname,
-        )
-    else:
-        transform_neutral = copy.deepcopy(neutral_model)
-        all_transforms: List[Callable[[Dict[str, Any]], Dict[str, Any]]] = [
-            ComputeNtRatesAndCsps(transform_neutral, handler),
-            *transforms,
-        ]
-        dataset = TransformDataset(
-            aa_parents=aa_parents,
-            raw_parents=raw_parents,
-            raw_children=raw_children,
-            transforms=all_transforms,
-            output_keys=AAO_WHICHMUT_OUTPUT_KEYS,
-            nickname=nickname,
-        )
-
-    padding_sentinel = padding_sentinel_for(num_seg)
-    collator = TransformCollator(
-        tensor_specs=_aao_whichmut_collator_specs(padding_sentinel)
-    )
-
-    return DatasetBundle(
-        dataset=dataset,
-        collator=collator,
-        worker_init_fn=make_worker_init_fn(),
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -5964,76 +3559,8 @@ def create_aao_whichmut_nt_dataset(
 # ---------------------------------------------------------------------------
 
 
-def load_aao_from_aa_sequences_train_val(
-    data_spec: str,
-    neutral_aa_rates: torch.Tensor,
-    mode: Mode = "precomputed",
-) -> Tuple[DatasetBundle, DatasetBundle]:
-    """Load AAO train/val datasets from AA-only data.
-
-    Args:
-        data_spec: File path or registered nickname for AA-only data.
-            CSV must have ``parent_aa`` and ``child_aa`` columns.
-        neutral_aa_rates: Context-free neutral AA rate matrix, shape (20, 20).
-        mode: ``"precomputed"`` or ``"streaming"``.
-
-    Returns:
-        Tuple of (train_bundle, val_bundle).
-    """
-    train_df, val_df, nickname = _load_and_split(data_spec)
-
-    train_bundle = create_aao_whichmut_dataset(
-        train_df.rename(columns={"parent_aa": "parent", "child_aa": "child"}),
-        neutral_aa_rates,
-        translate=False,
-        mode=mode,
-        nickname=f"{nickname}_train",
-    )
-    val_bundle = create_aao_whichmut_dataset(
-        val_df.rename(columns={"parent_aa": "parent", "child_aa": "child"}),
-        neutral_aa_rates,
-        translate=False,
-        mode=mode,
-        nickname=f"{nickname}_val",
-    )
-    return train_bundle, val_bundle
 
 
-def load_aaowhichmut_train_val(
-    data_spec: str,
-    neutral_model: "RatesCSPNeutralModel",
-    mode: Mode = "precomputed",
-) -> Tuple[DatasetBundle, DatasetBundle]:
-    """Load AAO train/val datasets from NT data (codon-marginalized rates).
-
-    Computes position-specific AAO neutral rates by:
-    1. Computing NT rates/CSPs from the neutral model
-    2. Converting to codon mutation rates
-    3. Marginalizing codons to amino acid rates
-
-    Args:
-        data_spec: File path, registered nickname, or multiname.
-        neutral_model: Neutral mutation model for rate computation.
-        mode: ``"precomputed"`` or ``"streaming"``.
-
-    Returns:
-        Tuple of (train_bundle, val_bundle).
-    """
-    train_df, val_df, nickname = _load_and_split(data_spec)
-
-    train_bundle = create_aao_whichmut_nt_dataset(
-        train_df,
-        neutral_model,
-        mode=mode,
-        nickname=f"{nickname}_train",
-    )
-    val_bundle = create_aao_whichmut_nt_dataset(
-        val_df,
-        neutral_model,
-        mode=mode,
-        nickname=f"{nickname}_val",
-    )
-    return train_bundle, val_bundle
 
 
 # ---------------------------------------------------------------------------
@@ -6052,7 +3579,7 @@ class _DMSDatasetAdapter(torch.utils.data.Dataset):
     """
 
     row_filter_digest: Optional[str] = None
-    """Never row-filtered; part of the ``CacheableDataset`` protocol (#1672)."""
+    """Never row-filtered; part of the ``CacheableDataset`` protocol."""
 
     def __init__(
         self,
@@ -6102,81 +3629,6 @@ class _DMSDatasetAdapter(torch.utils.data.Dataset):
         return self._max_aa_seq_len
 
 
-def create_dms_dataset(
-    wt_aa_sequence: str,
-    dms_df: pd.DataFrame,
-    nickname: str = "unnamed_dms",
-) -> DatasetBundle:
-    """Create dataset for DMSFunctionalScoreHead.
-
-    Uses the same tensor-storage + index-lookup pattern as the eager
-    ``DMSDataset``: one shared WT tensor referenced by all items, no
-    per-sample dict allocation at init. Init time matches eager exactly.
-
-    Args:
-        wt_aa_sequence: Wild-type amino acid sequence.
-        dms_df: DataFrame with columns: position, wt_aa, mut_aa, func_score.
-        nickname: Human-readable identifier.
-
-    Returns:
-        DatasetBundle with dataset, collator, and worker_init_fn.
-
-    Raises:
-        ValueError: If required columns missing or DataFrame is empty.
-    """
-    # Validate required columns
-    required_cols = ["position", "wt_aa", "mut_aa", "func_score"]
-    missing = [col for col in required_cols if col not in dms_df.columns]
-    if missing:
-        raise ValueError(
-            f"DMS DataFrame missing required columns: {missing}. "
-            f"Got columns: {list(dms_df.columns)}"
-        )
-    if len(dms_df) == 0:
-        raise ValueError("DMS DataFrame is empty")
-
-    # Tokenize WT sequence once — shared across all samples
-    seq_len = len(wt_aa_sequence)
-    aa_parents_idxs = _tokenize_aa_sequences([wt_aa_sequence], seq_len)[0]
-    mask = torch.ones(seq_len, dtype=torch.bool)
-
-    # Parse measurements into tensors (same as eager DMSDataset._parse_dms_measurements)
-    dms_positions = torch.tensor(dms_df["position"].values, dtype=torch.long)
-    dms_wt_aa_idxs = torch.tensor(
-        [AA_STR_TO_IDX[aa] for aa in dms_df["wt_aa"]], dtype=torch.long
-    )
-    dms_mut_aa_idxs = torch.tensor(
-        [AA_STR_TO_IDX[aa] for aa in dms_df["mut_aa"]], dtype=torch.long
-    )
-    dms_func_scores = torch.tensor(dms_df["func_score"].values, dtype=torch.float32)
-
-    dataset = _DMSDatasetAdapter(
-        aa_parents_idxs=aa_parents_idxs,
-        mask=mask,
-        dms_positions=dms_positions,
-        dms_wt_aa_idxs=dms_wt_aa_idxs,
-        dms_mut_aa_idxs=dms_mut_aa_idxs,
-        dms_func_scores=dms_func_scores,
-        wt_aa_sequence=wt_aa_sequence,
-        nickname=nickname,
-    )
-
-    collator = TransformCollator(
-        tensor_specs={
-            "aa_parents_idxs": (AA_AMBIG_IDX, "codon"),
-            "mask": (False, "codon"),
-            "dms_position": (0, "scalar"),
-            "dms_wt_aa_idx": (0, "scalar"),
-            "dms_mut_aa_idx": (0, "scalar"),
-            "dms_func_score": (0.0, "scalar"),
-        }
-    )
-
-    return DatasetBundle(
-        dataset=dataset,
-        collator=collator,
-        worker_init_fn=make_worker_init_fn(),
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -6184,167 +3636,8 @@ def create_dms_dataset(
 # ---------------------------------------------------------------------------
 
 
-def create_hermes_dataset(
-    hermes_model_dir: str,
-    chain_filter: Optional[List[str]] = None,
-    pdb_ids: Optional[List[str]] = None,
-    nickname: Optional[str] = None,
-) -> DatasetBundle:
-    """Create dataset for StructuralGuidanceHead using precomputed mode.
-
-    Loads all HERMES structures at init and builds precomputed sample dicts
-    with variable-length tensors. ``pdb_id`` strings are stored on the dataset
-    instance (not in sample dicts, since they are not tensors).
-
-    Uses ``HERMESDataset`` internally for structure loading and chain handling,
-    then extracts the data into ``TransformDataset`` precomputed samples.
-
-    Args:
-        hermes_model_dir: Path to HERMES model directory or .tar.gz archive.
-        chain_filter: Optional list of chain IDs (e.g., ["H", "L"]).
-        pdb_ids: Optional list of specific PDB IDs to load.
-        nickname: Human-readable identifier.
-
-    Returns:
-        DatasetBundle with precomputed dataset, collator, and worker_init_fn.
-
-    Raises:
-        FileNotFoundError: If HERMES model directory/archive not found.
-        ValueError: If no valid structures loaded.
-    """
-    # Use the eager HERMESDataset for loading (it handles chain segmentation,
-    # reordering, normalization, etc.). We extract the pre-stacked tensors
-    # and repackage them as variable-length precomputed samples.
-    eager = HERMESDataset(
-        hermes_model_dir=hermes_model_dir,
-        chain_filter=chain_filter,
-        pdb_ids=pdb_ids,
-        nickname=nickname,
-    )
-
-    # Extract variable-length tensors from the pre-stacked eager dataset.
-    # The eager dataset pads to dataset-max; we un-pad to variable-length
-    # using the mask (True = valid position).
-    num_structures = len(eager)
-    samples: List[Dict[str, torch.Tensor]] = []
-
-    for i in range(num_structures):
-        item = eager[i]
-        # item has: aa_parents_idxs [max_L], structure_embeddings [max_L, 256],
-        #           mask [max_L], pdb_id (str)
-        # Extract tensors from eager dataset item
-        aa_idxs = torch.as_tensor(item["aa_parents_idxs"])
-        structure_embs = torch.as_tensor(item["structure_embeddings"])
-        mask_tensor = torch.as_tensor(item["mask"])
-
-        # Find actual sequence length (before padding). For multi-chain with
-        # separators, we need the full length including separator positions.
-        padding_positions = (aa_idxs == AA_PADDING_TOKEN).nonzero(as_tuple=True)[0]
-        if len(padding_positions) > 0:
-            seq_len = int(padding_positions[0].item())
-        else:
-            seq_len = len(aa_idxs)
-
-        # Validate consistency between tensors
-        if structure_embs.shape[0] < seq_len:
-            raise ValueError(
-                f"Structure {i}: structure_embeddings length ({structure_embs.shape[0]}) "
-                f"< computed seq_len ({seq_len})"
-            )
-        if mask_tensor.shape[0] < seq_len:
-            raise ValueError(
-                f"Structure {i}: mask length ({mask_tensor.shape[0]}) < seq_len ({seq_len})"
-            )
-
-        samples.append(
-            {
-                "aa_parents_idxs": aa_idxs[:seq_len],
-                "structure_embeddings": structure_embs[:seq_len],
-                "mask": mask_tensor[:seq_len],
-            }
-        )
-
-    dataset = TransformDataset(
-        precomputed_samples=samples,
-        nickname=eager.nickname,
-    )
-    # Store pdb_ids on the dataset instance for diagnostics
-    dataset.pdb_ids = eager._pdb_ids  # type: ignore[attr-defined]
-
-    collator = TransformCollator(
-        tensor_specs={
-            "aa_parents_idxs": (AA_AMBIG_IDX, "codon"),
-            "structure_embeddings": (0.0, "codon"),
-            "mask": (False, "codon"),
-        }
-    )
-
-    return DatasetBundle(
-        dataset=dataset,
-        collator=collator,
-        worker_init_fn=make_worker_init_fn(),
-    )
 
 
-def load_structural_train_val(
-    hermes_path: str,
-    train_fraction: float = 0.8,
-) -> Tuple[DatasetBundle, DatasetBundle]:
-    """Load structural (HERMES) train/val datasets via the unified pipeline.
-
-    Creates a single dataset from all structures, then splits into train/val
-    using the same deterministic random split as the eager version (seed=42).
-    Both bundles share the same collator configuration.
-
-    No neutral model required since structural data doesn't involve
-    evolutionary modeling.
-
-    Args:
-        hermes_path: Path to HERMES embeddings directory or model nickname.
-        train_fraction: Fraction for training set (default: 0.8).
-
-    Returns:
-        Tuple of (train_bundle, val_bundle).
-
-    Raises:
-        FileNotFoundError: If HERMES model/directory not found.
-        ValueError: If no valid structures loaded.
-    """
-    from dasm2.data.structural_embedding_registry import (
-        resolve_structural_embedding_path,
-    )
-
-    resolved_path = str(resolve_structural_embedding_path(hermes_path))
-
-    full_bundle = create_hermes_dataset(
-        hermes_model_dir=resolved_path,
-        chain_filter=["H", "L"],
-    )
-
-    num_samples = len(full_bundle.dataset)  # type: ignore[arg-type]
-    num_train = int(num_samples * train_fraction)
-
-    generator = torch.Generator().manual_seed(42)
-    indices = torch.randperm(num_samples, generator=generator).tolist()
-
-    train_indices = indices[:num_train]
-    val_indices = indices[num_train:]
-
-    train_subset = Subset(full_bundle.dataset, train_indices)
-    val_subset = Subset(full_bundle.dataset, val_indices)
-
-    train_bundle = DatasetBundle(
-        dataset=train_subset,
-        collator=full_bundle.collator,
-        worker_init_fn=full_bundle.worker_init_fn,
-    )
-    val_bundle = DatasetBundle(
-        dataset=val_subset,
-        collator=full_bundle.collator,
-        worker_init_fn=full_bundle.worker_init_fn,
-    )
-
-    return train_bundle, val_bundle
 
 
 # ---------------------------------------------------------------------------
@@ -6373,50 +3666,3 @@ class AAHDatasets:
         self.aao = aao
 
 
-def load_aah_datasets(
-    whichmut_path: str,
-    aao_path: str,
-    neutral_model: "RatesCSPNeutralModel",
-    context_free_model: Optional["AbstractNeutralModel"] = None,
-    mode: Mode = "precomputed",
-) -> AAHDatasets:
-    """Load datasets for AAH (Amino Acid Hybrid) head.
-
-    The aao_path dataset type is determined by the neutral model configuration:
-    - If ``context_free_model`` is provided: uses AA-only path
-    - If ``context_free_model`` is None: uses NT path (codon-marginalized rates)
-
-    Args:
-        whichmut_path: Path to Whichmut training data.
-        aao_path: Path to AAO training data.
-        neutral_model: Neutral mutation model for codon-level rate calculations.
-        context_free_model: Model providing ``neutral_aa_rates`` for AA-only data.
-        mode: ``"precomputed"`` or ``"streaming"``.
-
-    Returns:
-        AAHDatasets with Whichmut and AAO dataset pairs.
-    """
-    wm_train, wm_val = load_whichmut_train_val(whichmut_path, neutral_model, mode=mode)
-
-    if context_free_model is not None:
-        if not hasattr(context_free_model, "neutral_aa_rates"):
-            raise TypeError(
-                f"context_free_model must expose neutral_aa_rates, "
-                f"but {type(context_free_model).__name__} does not"
-            )
-        aa_train, aa_val = load_aao_from_aa_sequences_train_val(
-            aao_path,
-            context_free_model.neutral_aa_rates,  # type: ignore[attr-defined]
-            mode=mode,
-        )
-    else:
-        aa_train, aa_val = load_aaowhichmut_train_val(
-            aao_path,
-            neutral_model,
-            mode=mode,
-        )
-
-    return AAHDatasets(
-        whichmut=DatasetPair(train=wm_train, val=wm_val),
-        aao=DatasetPair(train=aa_train, val=aa_val),
-    )

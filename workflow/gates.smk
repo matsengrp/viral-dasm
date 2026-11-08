@@ -27,6 +27,17 @@ as though it were a decision.
 GATE_DIR = f"{ARTIFACT_ROOT}/gates"
 CONFIG_DIR = f"{ARTIFACT_ROOT}/configs"
 
+#: Every vendored source file, as an input to the rules that execute it.
+#:
+#: Without this the DAG has no edge from the code to the gates: deleting a
+#: module leaves every output newer than every declared input, so ``snakemake
+#: gates`` answers "nothing to be done" and a prune looks safe because nothing
+#: ran. Issue #4 deletes 91 files, and this is what makes each batch checkable.
+DASM2_SOURCES = sorted(
+    str(path.relative_to(workflow.basedir))
+    for path in (Path(workflow.basedir) / "dasm2").rglob("*.py")
+)
+
 #: The env every training and scoring rule needs.
 #:
 #: ``DASM2_PARQUET_CACHE_BUDGET_GB`` because the library's 2 GB default caps
@@ -91,6 +102,7 @@ rule fast_test:
     """
     input:
         config=f"{CONFIG_DIR}/fast_test_fast.yaml",
+        sources=DASM2_SOURCES,
     output:
         done=touch(f"{GATE_DIR}/fast_test.done"),
     params:
@@ -118,6 +130,7 @@ rule gate1_score_reference:
     input:
         config=f"{CONFIG_DIR}/{CANARY_MODEL}_canary.yaml",
         corpus_guard=f"{ARTIFACT_ROOT}/corpus_guard/full_depth.json",
+        sources=DASM2_SOURCES,
     output:
         report=f"{GATE_DIR}/gate1_{{model}}.json",
     log:

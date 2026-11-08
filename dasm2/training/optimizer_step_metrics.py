@@ -1,6 +1,6 @@
 """Per-eval-window optimizer-step metrics: gradient norm + clip-fire rate.
 
-Issue #678 §7 added these to make the effect of class-weighted CE visible
+These make the effect of class-weighted CE visible
 in the training-time JSONL: weighting inflates per-position gradient
 variance (~1.2× at α=0.5, ~2.4× at α=1.0), so the existing fixed
 ``gradient_clip_val = 1.0`` will fire more often. The two metrics surfaced

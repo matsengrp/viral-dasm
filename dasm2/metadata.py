@@ -16,8 +16,8 @@ from dasm2.data.neutral_rates_source import NeutralRatesSource
 # Single source of truth for the on-disk serialization version. The default
 # field on `BaseTrainingMetadata` and the gate in
 # `dasm2.serialization.checkpoints.load_model_components` must reference this
-# constant — bumping it in one place without the other is precisely the bug
-# fixed in #609 (the SF refactor changed the layout but didn't bump v3).
+# constant: bumping it in one place without the other has caused a layout
+# change to ship under an unchanged version stamp.
 CURRENT_SERIALIZATION_VERSION = 5
 
 
@@ -97,7 +97,7 @@ class TrainingMetadataInfo(BaseModel):
     under a mode this version doesn't know (e.g. ``"fp8"``) still loads.
 
     ``None`` means "not recorded" for either field — every checkpoint written
-    before issue #1027 is in that state, and the resume validators treat it
+    before they were recorded is in that state, and the resume validators treat it
     as unknown and skip their check rather than assuming a value. Note that
     "not recorded" and "recorded as off" are therefore distinguishable:
     ``mixed_precision`` is ``"no"``, never ``None``, when a run records it.
@@ -120,9 +120,10 @@ class SourceLaunchInfo(BaseModel):
     ``load_checkpoint`` is handed a *fabricated* ``SingleGPUBackend``, so
     reading these facts off its backend at write time would rewrite a
     world-size-4 bf16 checkpoint's metadata to world size 1 and ``"no"`` on
-    any load-mutate-save workflow — the round-trip defect class of issue #974
-    through a different door. Such a Trainer carries the parsed values here
-    instead and ``export_metadata`` prefers them (issue #1027).
+    any load-mutate-save workflow — the same round-trip defect class the
+    model-derived ``heads``/``tasks`` view guards against, through a
+    different door. Such a Trainer carries the parsed values here
+    instead and ``export_metadata`` prefers them.
 
     Presence of this object is what marks a Trainer as carrying: ``None`` on
     the Trainer means "the backend is live, read the facts off it", while a
@@ -168,19 +169,19 @@ class BaseTrainingMetadata(BaseModel):
 
     Serialization version history:
         1: Original format (nn.TransformerEncoderLayer key names)
-        2: TransformerBlock key names (PR #379): self_attn → self_attention,
+        2: TransformerBlock key names: self_attn → self_attention,
            linear1/2 → feed_forward.linear1/2
-        3: Position-aware norm names (#444): norm1 → post_attn_norm,
+        3: Position-aware norm names: norm1 → post_attn_norm,
            norm2 → post_ffn_norm. Note that v3 is layout-ambiguous:
            checkpoints stamped with v3 may carry *either* the old per-head
-           ``prediction_heads.{Head}.prediction_layer.*`` keys (pre-#513)
-           or the new shared ``sf_projection.projection.*`` keys (post-#513,
-           because the SF refactor never bumped the version stamp).
-        4: Shared SF projection (#513, version stamp added in #616):
+           ``prediction_heads.{Head}.prediction_layer.*`` keys or the new
+           shared ``sf_projection.projection.*`` keys, because the SF
+           refactor never bumped the version stamp.
+        4: Shared SF projection:
            prediction_heads.{Head}.prediction_layer.* moved to
            sf_projection.projection.*. v4 is the first version that
-           *guarantees* the post-#513 layout.
-        5: Task/loss separation (#621): per-task ``LossConfig`` is owned by
+           *guarantees* the shared-projection layout.
+        5: Task/loss separation: per-task ``LossConfig`` is owned by
            the new ``training_config.tasks: [...]`` block; head_configs are
            deduplicated; loss-owned parameters live under
            ``state_dict["task_losses.<key>.*"]`` (was ``prediction_heads.<head>.*``).

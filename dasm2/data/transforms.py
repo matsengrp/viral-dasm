@@ -22,14 +22,6 @@ import torch
 
 from dasm2.codon_table import NUM_AA
 from dasm2.constants import SMALL_PROBABILITY
-from dasm2.data._neutral_matrix_exp import (
-    check_codon_pref_compatible,
-    check_multihit_compatible,
-    compute_neutral_codon_probs_matrix_exp_per_pcp,
-    finalize_matrix_exp_log_probs,
-    is_matrix_exp_mode_enabled,
-    parent_sense_idxs_of_codon64_idxs,
-)
 from dasm2.molevol.aao_neutral_rates import marginalize_codon_to_aao_rates
 from dasm2.molevol.codon_neutral_rates import (
     NUM_CODON_INDICES,
@@ -288,7 +280,7 @@ class ComputeMutIndicator:
         single_nt_only: If True, exclude multi-nucleotide codon mutations
             (2+ nt changes). The Whichmut neutral rate tensor only has entries
             for single-nt transitions; multi-hit mutations produce zero-rate
-            numerators with no useful gradient. See issue #403.
+            numerators with no useful gradient.
     """
 
     parent_key: str
@@ -427,7 +419,7 @@ class ComputeNeutralCodonProbs:
         multihit_model: Optional multihit correction model. Deep-copied and
             prepared at factory time; pickle-safe for multiprocessing.
         codon_pref_log: Optional log-space codon preference vector, shape
-            (64,) (issue #747). Fallback default used only if the sample
+            (64,). Fallback default used only if the sample
             dict has no ``"codon_pref_log"`` key. In production,
             ``TransformDataset`` injects the live value from its
             shared-memory ``_codon_pref_log`` tensor into the sample dict
@@ -437,12 +429,11 @@ class ComputeNeutralCodonProbs:
             outside a ``TransformDataset`` (e.g. in isolation in tests).
             A between-cycle refit (``CodonStrengthOptimizer``) mutates the
             shared tensor in place, which streaming/Parquet workers pick up
-            on their next ``__getitem__`` call (DESIGN.md D6; issue #1039).
+            on their next ``__getitem__`` call (DESIGN.md D6).
         tandem: Optional fixed tandem term, the neutral model's ``tandem``
-            (issue #1683). The branch-length objective reads the same object
+            The branch-length objective reads the same object
             off the bundle's neutral model, so both see one neutral.
-            Construction raises if it is active alongside ``multihit_model``
-            (issue #1753).
+            Construction raises if it is active alongside ``multihit_model``.
     """
 
     multihit_model: Optional["HitClassModel"] = None
@@ -450,25 +441,11 @@ class ComputeNeutralCodonProbs:
     tandem: Optional[TandemTerm] = None
 
     def __post_init__(self) -> None:
-        # Fail at construction, not inside a DataLoader worker (issue #1753).
+        # Fail at construction, not inside a DataLoader worker.
         check_tandem_multihit_compatible(self.multihit_model, self.tandem)
 
     def __call__(self, sample: Dict[str, Any]) -> Dict[str, Any]:
         codon_pref_log = sample.get("codon_pref_log", self.codon_pref_log)
-        if is_matrix_exp_mode_enabled():
-            # Pilot-only escape hatch for issue #654: route per-sample
-            # neutral through GY94 matrix-exp instead of product-of-three.
-            check_multihit_compatible(self.multihit_model)
-            check_codon_pref_compatible(codon_pref_log)
-            if self.tandem is not None:
-                raise ValueError(
-                    "The tandem term (issue #1683) is applied only on the "
-                    "product-of-three neutral, not in matrix-exp mode."
-                )
-            sample["log_neutral_codon_probs"] = (
-                _per_sample_log_neutral_codon_probs_matrix_exp(sample)
-            )
-            return sample
         codon_probs = neutral_codon_probs_with_padding(
             sample["codon_parents_idxs"],
             sample["loss_mask"],
@@ -483,47 +460,6 @@ class ComputeNeutralCodonProbs:
         codon_probs = torch.nan_to_num(codon_probs, nan=SMALL_PROBABILITY)
         sample["log_neutral_codon_probs"] = torch.log(codon_probs)
         return sample
-
-
-def _per_sample_log_neutral_codon_probs_matrix_exp(
-    sample: Dict[str, Any],
-) -> "torch.Tensor":
-    """Compute log_neutral_codon_probs for a single sample via GY94 matrix-exp.
-
-    Mirrors the per-sample bookkeeping (truncation, padding, masking,
-    nan_to_num, log) of ``neutral_codon_probs_with_padding`` but
-    routes through ``exp(Q_codon · branch_length)`` per PCP.
-    """
-    codon_idxs = sample["codon_parents_idxs"]
-    target_len = codon_idxs.shape[0]
-    nt_rates = sample["nt_rates"]
-    nt_csps = sample["nt_csps"]
-    bl = float(sample["branch_length"].item())
-    mask = sample["loss_mask"]
-
-    aa_length = nt_rates.shape[0] // 3
-    if aa_length == 0:
-        return torch.full((target_len, 64), math.log(SMALL_PROBABILITY))
-
-    truncated_codon_idxs = codon_idxs[:aa_length]
-    truncated_mask = mask[:aa_length]
-    clamped = torch.clamp(truncated_codon_idxs, 0, 63)
-    parent_nt_idxs = unflatten_codon_idxs(clamped).reshape(-1)
-
-    sense_idxs = parent_sense_idxs_of_codon64_idxs(clamped)
-    sense_idxs = torch.where(
-        truncated_mask, sense_idxs, torch.full_like(sense_idxs, -1)
-    )
-
-    probs = compute_neutral_codon_probs_matrix_exp_per_pcp(
-        parent_nt_idxs_flat=parent_nt_idxs,
-        parent_sense_idxs_per_codon=sense_idxs,
-        nt_rates=nt_rates,
-        nt_csps=nt_csps,
-        branch_length=bl,
-    )
-
-    return finalize_matrix_exp_log_probs(probs, truncated_mask, target_len)
 
 
 @dataclass(frozen=True)
@@ -747,7 +683,7 @@ def _apply_censored_entries(
 # RuntimeError out of the `bool()`.
 @dataclass(frozen=True, eq=False)
 class CensorMaskedMutations:
-    """Censor UShER-masked mutations, per clade, in both halves of the loss (#1079).
+    """Censor UShER-masked mutations, per clade, in both halves of the loss.
 
     UShER masking *deletes* mutations from the MAT rather than marking sites
     ambiguous, so the child inherits the ancestral state: a masked site is
@@ -943,13 +879,13 @@ class CensorMaskedMutations:
 # wants anyway.
 @dataclass(frozen=True, eq=False)
 class CensorReferenceReversions:
-    """Censor parent -> reference reversions in both halves of the loss (#1099).
+    """Censor parent -> reference reversions in both halves of the loss.
 
     Reference bias inflates the observed rate of **every** reversion to the
     reference, not only the ones the UShER team curated: read mapping, gap
     filling and consensus calling all fail toward the reference allele, so any
     parent -> reference transition is over-represented relative to its true rate.
-    That is the same defect #1079 fixes for UShER-masked mutations, from a
+    That is the same defect censoring fixes for UShER-masked mutations, from a
     different cause, so it gets the same treatment -- an observation whose rate is
     artifactually amplified should not have its *absence* charged to selection.
 

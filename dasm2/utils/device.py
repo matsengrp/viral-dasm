@@ -328,7 +328,7 @@ def get_current_rss_mb() -> Optional[float]:
     process-lifetime high-water mark that can only rise. Diagnosing whether a
     loop accumulates memory needs the instantaneous value: a high-water mark
     cannot show memory being released, so a flat ``ru_maxrss`` and a falling
-    RSS look identical through it (issue #988).
+    RSS look identical through it.
 
     Reads ``/proc/self/statm`` rather than taking a ``psutil`` dependency for
     two integers. That file is Linux-only, which is where the GPU fleet runs.
@@ -363,7 +363,7 @@ def mem_available_bytes() -> Optional[int]:
 
     ``MemAvailable`` (not ``MemFree``) counts reclaimable page cache, which is
     what a new allocation can actually get. Sizes the DataLoader prefetch
-    guard (issue #1272).
+    guard.
     """
     return _meminfo_bytes("MemAvailable")
 
@@ -371,7 +371,7 @@ def mem_available_bytes() -> Optional[int]:
 def mem_total_bytes() -> Optional[int]:
     """The host's ``MemTotal`` in bytes, or None if unreadable.
 
-    Sizes the Parquet row-group cache (issue #1272).
+    Sizes the Parquet row-group cache.
     """
     return _meminfo_bytes("MemTotal")
 
@@ -403,7 +403,7 @@ def get_process_tree_rss_mb() -> Optional[float]:
     was harmless while the memory-sensitive sweeps ran at ``num_workers=0``,
     but the streaming fetch path forks up to ``MAX_FETCH_WORKERS`` DataLoader
     workers, so a self-only reading now omits a real term of the host footprint
-    the #988 success criteria are written against. ``RUSAGE_CHILDREN`` is not a
+    a host-footprint reading is written against. ``RUSAGE_CHILDREN`` is not a
     substitute: it reports the largest single *reaped* child, and persistent
     DataLoader workers are only reaped at loader teardown.
 

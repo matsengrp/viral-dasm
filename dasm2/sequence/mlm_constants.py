@@ -5,10 +5,10 @@ MLM training. This vocabulary lives alongside (not in place of) the existing
 22-token ``TOKEN_STR_SORTED`` (``dasm2/sequence/constants.py``) — existing DASM
 checkpoints and heads are built against those exact indices and must not
 shift. Follows the same append-a-new-alphabet-module pattern already used for
-``dasm2/sequence/tdi_constants.py``'s ``TDI_MASK_TOKEN``/``TDI_MASK_IDX``.
+the 3Di constants that left with the structural-token support.
 
-See issue #884 / #851 for the full design rationale (why MASK, PAD, and
-ambiguous/`X` must be three distinct tokens for an MLM objective).
+MASK, PAD, and ambiguous/`X` must be three distinct tokens for an MLM
+objective.
 """
 
 from typing import Tuple

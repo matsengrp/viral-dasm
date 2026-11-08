@@ -7,9 +7,7 @@ import torch
 import torch.nn as nn
 
 from dasm2.config import EncoderConfig, HeadConfig
-from dasm2.models.netam_loader import load_netam_data, map_netam_state_dict
 from dasm2.positional_encoding import PositionalEncoding
-from dasm2.sequence.tdi_constants import TDI_PAD_IDX
 
 from .attention import (
     EntmaxMultiheadAttention,
@@ -123,15 +121,6 @@ class TransformerEncoder(nn.Module):
             config.num_segment_types, self.d_model
         )
 
-        # Optional 3Di structural embedding
-        if config.num_tdi_tokens is not None:
-            # Tdi embedding width matches AA embedding (d_aa for concat-pos, d_model for standard)
-            self.tdi_embedding: Optional[nn.Embedding] = nn.Embedding(
-                config.num_tdi_tokens, self.d_aa, padding_idx=TDI_PAD_IDX
-            )
-        else:
-            self.tdi_embedding = None
-
         # Distance encoding for maturation stage conditioning.
         # Created before the pipeline so modules can be passed as references.
         self.distance_encoding_mode = config.distance_encoding_mode
@@ -139,7 +128,7 @@ class TransformerEncoder(nn.Module):
         if self.distance_encoding_mode == "continuous":
             # bias=False so distance_proj actually conditions on log(d)
             # rather than learning a position-independent global bias
-            # (issue #199, Exp 3).
+            # than a bias.
             self.distance_proj = nn.Linear(1, self.d_model, bias=False)
             # Zero-init so the projection starts as a no-op: a model warm-started
             # from a no-distance checkpoint is then *identical* to its base at
@@ -147,7 +136,7 @@ class TransformerEncoder(nn.Module):
             # model's optimum. The random Kaiming default would instead inject a
             # large constant embedding shift (~|log d| per dim), biasing that
             # optimization. Gradients still flow (d/dW = dL/dout · log d ≠ 0), so
-            # the projection learns normally from zero. See issue #199 frozen-BL.
+            # the projection learns normally from zero.
             nn.init.zeros_(self.distance_proj.weight)
             self.distance_noise_std = config.distance_noise_std
         elif self.distance_encoding_mode == "binned":
@@ -186,7 +175,6 @@ class TransformerEncoder(nn.Module):
                 positional_embedding=self.positional_embedding,
                 sinusoidal_pe=self.sinusoidal_pe,
                 segment_embedding=self.segment_embedding,
-                tdi_embedding=self.tdi_embedding,
                 per_segment_positions=config.per_segment_positions,
                 **_distance_kwargs,
             )
@@ -196,7 +184,6 @@ class TransformerEncoder(nn.Module):
                 d_model=self.d_model,
                 pos_encoder=self.pos_encoder,
                 segment_embedding=self.segment_embedding,
-                tdi_embedding=self.tdi_embedding,
                 per_segment_positions=config.per_segment_positions,
                 **_distance_kwargs,
             )
@@ -346,7 +333,7 @@ class TransformerEncoder(nn.Module):
 
         Args:
             batch: Input batch containing ``token_ids``, ``masks``, and
-                optionally ``tdi_token_ids``, ``layout``, and ``distance``.
+                optionally ``layout`` and ``distance``.
 
         Returns:
             Transformer representations of shape ``[batch_size, seq_len, d_model]``.
@@ -375,12 +362,6 @@ class TransformerEncoder(nn.Module):
         num_layers = len(self.transformer_encoder.layers)
         vocab_size = self.amino_acid_embedding.num_embeddings
         num_segment_types = get_num_segment_types(self.segment_embedding)
-        num_tdi_tokens = (
-            self.tdi_embedding.num_embeddings
-            if self.tdi_embedding is not None
-            else None
-        )
-
         # Distance encoding config — read from runtime state
         mode = self.distance_encoding_mode
         distance_noise_std = 0.0
@@ -414,7 +395,6 @@ class TransformerEncoder(nn.Module):
             entmax_alpha=self._config.entmax_alpha,
             flash_attention=self._config.flash_attention,
             flash_deterministic=self._config.flash_deterministic,
-            num_tdi_tokens=num_tdi_tokens,
             distance_encoding_mode=mode,
             distance_noise_std=distance_noise_std,
             num_distance_bins=num_distance_bins,
@@ -458,42 +438,3 @@ class TransformerCoreModel(CoreModel):
             sf_projection=sf_projection,
         )
 
-    @classmethod
-    def of_crepe_path(cls, crepe_path: str) -> "TransformerCoreModel":
-        """Create DASM2 TransformerCoreModel by loading netam crepe weights.
-
-        Args:
-            crepe_path: Path to netam crepe model directory
-
-        Returns:
-            TransformerCoreModel with loaded netam weights and compatible architecture
-        """
-        # Load netam data without creating model (breaks circular dependency)
-        model_config, netam_checkpoint_dict = load_netam_data(crepe_path)
-
-        assert isinstance(model_config.encoder, EncoderConfig), (
-            "netam models must use EncoderConfig"
-        )
-
-        # Build SF projection from config (preserves wiggle_beta from netam
-        # model class, e.g. TransformerBinarySelectionModelWiggleAct → 0.3).
-        sf_proj = None
-        if model_config.sf_projection is not None:
-            sf_proj = SelectionFactorProjection(
-                input_dim=model_config.encoder.d_model,
-                wiggle_beta=model_config.sf_projection.wiggle_beta,
-                link=model_config.sf_projection.link,
-            )
-
-        # Create DASM2 model
-        model = cls(model_config.encoder, model_config.heads, sf_projection=sf_proj)
-
-        # Map and load netam state dict (netam checkpoints contain weights directly)
-        mapped_state_dict = map_netam_state_dict(
-            netam_checkpoint_dict, model_config.encoder
-        )
-        model.load_state_dict(
-            mapped_state_dict, strict=False
-        )  # Allow missing prediction head weights
-
-        return model

@@ -9,7 +9,7 @@ This directory is a **fork** of the `dasm2` package, taken once from
 | source commit | `68e41df5c2b66198fb0d992181ede39788fa160e` |
 | commit date | 2026-10-30 |
 | taken on | 2026-11-06 |
-| what was taken | the 207 modules `import dasm2.train_command` loads, plus `model_catalog.yaml` |
+| what was taken | the 207 modules `import dasm2.train_command` loads |
 | size at import | 207 files, 79,490 lines |
 
 ## Why a fork and not a dependency
@@ -34,30 +34,258 @@ upstream and a diff against the source commit is meaningful. That means
 resolve inside this repository, and no entry in `pyproject.toml`'s
 dependency list may pull a `dasm2` in.
 
-## What was dropped on the way in, and what is still to drop
+## What was dropped
 
-Dropped already: everything `import dasm2.train_command` does not reach —
+Two cuts, for different reasons.
+
+**On the way in:** everything `import dasm2.train_command` does not reach —
 118 of the package's 325 modules, including the analysis dashboards, the
-other CLI commands, and the test fixtures.
+other CLI commands, and the test fixtures. That left 218 files and 83,937
+lines.
 
-Still carried, and still to go: the closure is inflated by eager registry
-imports that load every head, dataset and loss, so most of what remains is
-reachable but never run. The prune is deliberately *after* the gates, not
-before — once Gate 1 scores the reference checkpoint to six decimal places,
-every deletion can be checked rather than reasoned about.
+**After the gates (#4):** what the import closure reaches but never runs.
+The closure is inflated by eager registry imports that load every head,
+dataset, loss and encoder so their factories populate, so most of it was
+reachable without being executed. That cut removed a further 111 files and
+left **107 files and 46,088 lines**; a second cut inside
+`data/evolutionary_dataset.py`, recorded below, brought the tree to
+**107 files and 43,543 lines**; a third, recorded below, brought it to
+**100 files and 40,637 lines**. It came *after* Gate 1 deliberately:
+once the reference checkpoint scores to seven significant figures, each
+deletion is checked rather than argued.
 
-Also still here: five hardcoded `/fh/fast/...` cluster paths, in `config.py`,
-`data/discovery.py` and `data/local.py`. All of them are group-shared
-directories rather than anyone's home, and viral-dasm reaches none of them —
-`config.yaml` names every path this pipeline reads, so `dasm2`'s own
-artifact-root and registry defaults are never consulted. They go with the
-code that consults them.
+By feature area, it removed the other encoders (ESM2, MPNN light-attention,
+site-masked, MLM, identity); the datasets this pipeline has no input for
+(HERMES structures, antibody binding, ProteinGym and Tsuboyama DMS, MLM
+corruption, MPNN features); the neutral-model family and the molevol serving
+it; branch-length optimization; and the heads and losses the paper does not
+train. Three registries now state what this repository can build rather than
+what `dasm2` could: one encoder, two heads (`SelectionFactorHead` for
+`dasm-85k` and `dasm-293k`, `PerSiteParentChildHead` for `ci-484k`), one loss.
+
+It also removed 3Di structural tokens entirely. That one came last and by a
+different route: `_load_whichmut_head_data` was typed `neutral_model: None`
+once the neutral models were gone, so every non-Parquet arm could only
+raise, and `use_tdi` was hardcoded `False` at its only call site. With no
+loader left to supply tokens, the encoder's `num_tdi_tokens` embedding, the
+`tdi_token_ids` batch key, the two `TrainingConfig` fields and their path
+into checkpoint metadata had nothing to do. The embedding is the only part
+that could have moved the state dict, and it could not: the reference has
+`num_tdi_tokens` unset, so the branch never built a parameter for it, which
+is why Gate 1's key-set assertion is what certifies the cut.
+
+`model_catalog.yaml` went with `neutral/` -- it holds only Thrifty and S5F
+models. Two things still named it, and both were inert rather than stale:
+`TrainingConfig.tdi_tokens_name` resolved a tokens directory through the
+catalog using resolution code that had already been deleted, so the key had
+become settable and silent; and `data/segment_handlers.py`'s uncalled
+`add_neutral_model_outputs_to_pcp_df` carried it in a docstring example.
+
+### What the measurement got wrong
+
+The cut list came from a `sys.setprofile` trace of three runs
+(`scripts/trace_executed_modules.py`, `scripts/prune_candidates.py`). A file
+counts as having run only if a named `def` in it executed. That rule has a
+known failure mode in each direction, and both fired:
+
+* **Dead by the trace, alive in fact.** Nine modules had to be restored
+  because live code calls into them on paths the traced runs never took —
+  `losses/capability.py`, `molevol/{tensor_ops,neutral_evolution,...}.py`,
+  `neutral/base.py` among them. The trace said 128 files were candidates; the
+  cut is 107. The gap is the measurement's error bar.
+* **Alive by the trace, dead in fact.** `data/functional/codon_neighbor.py`
+  executed one function, `_build_preferred_codons()`, at import — reached
+  only through a chain that was itself being deleted.
+
+So the trace is evidence, not a work order, and the gates are what decide.
+
+### Checkpoint migrations are gone
+
+`models/key_migration.py` rewrote state-dict keys for two older `dasm2`
+layouts: the `TransformerEncoderLayer` → `TransformerBlock` rename, and the
+three shared-SF heads whose `prediction_layer` moved into `sf_projection`.
+Both ran only for a key that did not already match the model being
+loaded into, and all 64 keys of the `dasm-85k` reference checkpoint match as
+written, so neither ever fired here. The rewrites were also not idempotent —
+applied to a current key, the block migration yields
+`feed_forward.feed_forward.linear1` — so carrying them would have advertised
+support for layouts this repository has never read. `load_checkpoint` now
+rejects a key that names no parameter of the model.
+
+### Hardcoded cluster paths
+
+Three hardcoded `/fh/fast/...` cluster paths remain, in `config.py` and
+`data/local.py`; `data/discovery.py`'s went with four of its five manifest
+descriptors. All are group-shared directories rather than anyone's home, and
+viral-dasm reaches none of them — `config.yaml` names every path this
+pipeline reads, so `dasm2`'s own artifact-root and registry defaults are
+never consulted.
 
 ## The comment flags
 
 `dasm2`'s comments carry a great deal of detail about work that is not this
 paper: results, measurements and design arguments from other projects, and
-1,522 references to private `dasm2-experiments` issue numbers. Generic
-explanation stays. Anything that reports a result or an argument from
-elsewhere is collected in `dasm2/COMMENT-FLAGS.md` for a decision before
-this repository goes public.
+references to private `dasm2-experiments` issue numbers. Generic explanation
+stays. Anything that reports a result or an argument from elsewhere is
+collected in `dasm2/COMMENT-FLAGS.md` for a decision before this repository
+goes public.
+
+The prune took out 568 of them on its own — 1,235 flags before, **667**
+after — which is why it came before the comment review rather than after.
+What is left is in files this pipeline actually runs, so each one needs
+reading rather than deleting with its module.
+
+### The fourth cut: the comments themselves (#4)
+
+The review is done, and the count is **1,235 → 66**.
+
+**Every reference to another project's issue tracker is gone** — 286 across
+53 files, plus two in this document. Where the comment was only a pointer, it
+went; where the issue held the reason, the reason is now written in the
+comment. `#1234` was a dead link for every reader of this repository.
+
+Three of them were worse than dead links, because they were *runtime* strings
+that told a reader to run something this repository does not contain:
+
+| raised by | told the reader to run |
+|---|---|
+| `_assert_supported_serialization_version` | `pixi run python scripts/migrate_checkpoint_to_v5.py` |
+| `_assert_unambiguous_sf_projection` | `experiments/compara-training/patch_checkpoint_wiggle.py` |
+| the inert-row guard in `evolutionary_dataset.py` | two corpus-builder scripts, by name |
+
+Each now states the condition and a remedy available here. The second also
+carried a thirty-line docstring reconstructing when that script's incidents
+happened in another project, down to merge dates and a worked example.
+
+Measurements from other projects went the same way: a Thrifty lookup table's
+size and its per-step NCCL cost, a dated observation from a four-dataset
+training run, a host filled to ~738 GB, a count of clamped sites on a Compara
+corpus, a 7x data-load slowdown, a ~100x speedup, a 340 GB/cycle leak. In each
+case the engineering reason is kept and the number is dropped, because the
+number is what does not transfer.
+
+A smaller class is more insidious: comments that explained the code through a
+class this fork had already deleted. `CoreModel.__init__` and
+`Trainer.export_metadata` both justified tracking the freeze switch separately
+from `requires_grad` by appealing to `ESM2Encoder`, which is referenced seven
+times in the tree and defined nowhere. The reason is sound and is kept; it is
+now stated without the example a reader cannot look up.
+
+**What the 66 remaining flags are.** None is a private issue reference. They
+divide in two, and neither is a leak:
+
+- Scanner false positives — "naive buffer/row-group ratio", "measured at
+  insert", "improved by more than min_delta".
+- The *names* of code still in the tree: `ESM2Tokenizer`,
+  `AntibodySegmentHandler`, `MPNN_WHICHMUT_HEAD_TYPES`. ESM2 is a published
+  model and a handler is named for what it handles; naming them is not a
+  disclosure. These resolve by deleting the code, not by renaming it, and that
+  is the next cut rather than this one.
+
+Measured rather than asserted: comparing the non-comment, non-string token
+stream of every changed file against the previous commit, 52 of 53 were
+byte-identical in code. The one that differed was
+`serialization/checkpoints.py`, by exactly its dead block and that block's
+now-unused `Final` import.
+
+## What is left that the trace calls dead
+
+`data/prune/delete_candidates.txt` still lists 23 files and 6,630 lines, and
+most of that list is the measurement's known false positive rather than work
+remaining: a module whose contribution is a class, an enum or a `Protocol`
+has no named `def` to execute, so it reads as dead however load-bearing it
+is. `positional_encoding.py` is the clearest case — deleting it is an
+`ImportError`, and it still appears on the list.
+
+Three things on it are real and are deliberately not in this cut:
+
+* **`models/core/attention.py`** (1,356 lines) is the flash-attention
+  decision, which belongs with the training-run scheduling in #1 rather than
+  here.
+Both have since been cut; see "The third cut" below.
+
+## The second cut: the dataset factories (#4)
+
+`data/evolutionary_dataset.py` went from 6,224 lines to 3,687 — 41 top-level
+definitions, the DASM and AAO loss families and the DMS, HERMES, MPNN and
+structural factories. viral-DASM builds a whichmut dataset from a Parquet
+corpus and nothing else.
+
+The cut set is a reachability closure, not the trace's word. The trace seeds
+it; a static walk of the call graph adds anything a live definition names,
+and anything another module imports *executably*. That last qualifier is why
+the round was safe: both `BranchLengthDatasetBundle` importers sit under
+`if TYPE_CHECKING:`, and every apparent `create_evolutionary_dataset` importer
+was a `>>>` line in a docstring. Neither executes, so neither keeps a
+definition alive.
+
+Two things recorded here because they were predicted wrongly first:
+
+* The closure found **2,522 lines**, where a trace-only count of the same file
+  had said 3,529. The closure is the stricter instrument — it keeps whatever a
+  live definition so much as names, string annotations included — and the
+  smaller number is the one to trust.
+* The cut **frees no module**. It was expected to orphan
+  `molevol/{neutral_evolution,codon_preference,aao_neutral_rates,tandem}.py`
+  and `neutral/codon_boundary.py`; all of them are still imported by
+  `data/transforms.py` and `neutral/base.py`, which are live, and
+  `mutation_matrices.py` is reached by a relative import an earlier grep
+  pattern missed. Re-tracing after the cut leaves
+  `data/prune/delete_candidates.txt` byte-identical, which is the same fact
+  measured a second way.
+
+## The third cut: single-entry modules and the manifest registry (#4)
+
+Three modules were reached from a live module's import line and nothing else,
+which is the shape of a file that wants replacing by the one name its caller
+uses rather than deleting whole.
+
+* **`training/checkpoint_selection.py`** (567 lines) exported thirteen public
+  names, of which exactly one was consumed anywhere: the string `"periodic"`.
+  Upstream it shared that marker between the hook that writes step-cadence
+  checkpoints and the readers that later pick a final checkpoint out of a
+  finished run's directory. This fork has no such reader -- it names the
+  checkpoint it wants -- so `CheckpointSaveHook.PERIODIC_TAG` owns the marker.
+* **`losses/q_scale_defaults.py`** (21 lines) held six scalars and no code,
+  imported by nothing. They are fitted values from BCR somatic-hypermutation
+  work: a triple "calibrated by held-out LL maximisation under fixed
+  pre-trained Thrifty rates" and an "S5F-HH fit on the pooled 30k Tang+SHMOOF
+  out-of-frame subset". Dead and leaking, so deleted rather than edited.
+* **`losses/dms_matrix.py`** (283 lines) was reachable only so
+  `training/metric_providers.py` could name `DMSMatrixCalibrationLoss` in an
+  `excluded_loss_classes` tuple. No factory branch builds that loss here, so
+  the exclusion could never fire.
+
+**The manifest registry** -- `data/{yaml_registry,discovery,manifests,
+registry_schema}.py` and the parts of `data/registry.py` that consulted them,
+about 2,040 lines -- was live but vacuous. `registered_nickname_or_none` sits
+on the Parquet load path and feeds the seam check, and returned `None` on every
+call, because this repository names every input by path.
+
+It was not inert, though. With a developer's `~/.config/dasm2/config.yaml`
+present it scanned that clone's manifests and found 185 entries, so what the
+code did depended on a file outside the repository. That is a reproducibility
+defect in its own right, and `README.md` promised the opposite.
+
+The seam stamp is what makes removing it provably safe, and it was captured
+before any edit rather than asserted after:
+
+| | before | after |
+|---|---|---|
+| nickname | `path_b2c98048` | `path_b2c98048` |
+| `row_preprocessing_inputs` | `4f53cda1...b945` | `4f53cda1...b945` |
+| `row_preprocessing_version` | `1` | `1` |
+
+That hash is sha256 over an empty naughty list, and `seam_identity`'s own
+docstring already named `None` as the right answer for "the viral PCP corpora,
+whose naughty list is vacuously empty". The cut makes it the only answer rather
+than one the code reaches by querying a registry that happens to be empty.
+Every Parquet file stamped before the cut still verifies.
+
+Naughty clonal families are a BCR concept with no viral counterpart, so
+`preprocess_rows_for_split` and `filter_naughty_clonal_families` went with the
+registry that fed them. One behaviour changed deliberately: a corpus arriving
+without an `in_train` column is now an error, where upstream derived the split
+from a registry's `holdout_samples`. A split that lives outside the corpus does
+not travel with it to a reader bringing their own GISAID access.
+

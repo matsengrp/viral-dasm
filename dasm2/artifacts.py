@@ -39,7 +39,7 @@ class CacheableDataset(Protocol):
 
     Datasets must have a nickname attribute for cache key generation, and a
     row_filter_digest that tells apart datasets built from one data spec with
-    different row filters (issue #1672).
+    different row filters.
     """
 
     nickname: str
@@ -144,7 +144,7 @@ def _build_cache_filename(
             (``ParquetBackend.row_filter_digest``). The nickname comes from
             the data spec alone, so without it two equal-sized shards of one
             spec shared a cache entry and the second was served the first's
-            branch lengths (issue #1672). Omitted from the name when None, so
+            branch lengths. Omitted from the name when None, so
             unfiltered datasets keep their filenames. It goes before the
             nickname so that the filename's suffix,
             ``{dataset_nickname}_{split}_{artifact_type}.zip``, which
@@ -171,7 +171,7 @@ def _is_cacheable_dataset(dataset: Any) -> bool:
 
     The check uses ``hasattr`` rather than ``isinstance``: from Python 3.12,
     ``isinstance`` against a runtime-checkable Protocol skips ``__getattr__``,
-    so it rejects delegating wrappers such as ``ESM2DatasetWrapper`` (#1903).
+    so it rejects delegating wrappers such as ``ESM2DatasetWrapper``.
 
     Args:
         dataset: Dataset to check (should implement CacheableDataset protocol)
@@ -502,7 +502,7 @@ class LenientBranchLengthArtifact(BranchLengthArtifact):
 
     Validates only what changes the branch-length objective: the
     neutral_model config and, for every head both configs train, the loss
-    ``normalization`` (``DASMLossConfig``'s endpoint kernel, issue #1238).
+    ``normalization`` (``DASMLossConfig``'s endpoint kernel).
     This allows reuse across training configurations that differ only in
     fields that leave the fitted lengths' meaning unchanged, such as hook
     configs.

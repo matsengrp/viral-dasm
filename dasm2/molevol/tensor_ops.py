@@ -193,8 +193,8 @@ def set_parent_codon_log_prob(
     never falls below log1mexp(-1e-4) ~= -9.21. That is the floor in practice:
     with the default ``min_log_prob`` of -80 the second clamp never binds, and
     it only matters if a caller passes a value above -9.21. Where the floor
-    binds, the row sums to slightly more than one. Issue #1267 (PR #1320)
-    found it binding at 119 of 147M Compara v10 test sites.
+    binds, the row sums to slightly more than one; in practice it binds on a
+    vanishing fraction of sites.
 
     Uses scatter_ with a [..., 1] index to set exactly one element per row,
     avoiding allocation of [..., 64] boolean masks.

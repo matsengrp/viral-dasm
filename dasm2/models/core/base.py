@@ -19,7 +19,6 @@ from dasm2.models.core.sf_projection import (
 from dasm2.sequence.constants import AA_AMBIG_IDX, AA_SEPARATOR_IDX
 from dasm2.sequence.layout import layout_of_aa_idxs
 from dasm2.sequence.masking import split_predictions_by_sequences
-from dasm2.sequence.tdi_constants import TDI_PAD_IDX, tdi_str_to_idxs
 from dasm2.tokenizers import AA_TOKENIZER
 from dasm2.utils.tensor import zap_predictions_along_diagonal
 
@@ -60,12 +59,11 @@ class CoreModel(nn.Module):
         self.task_losses: Optional[nn.ModuleDict] = None
         # Tracks whether *this* generic freeze switch was engaged, as
         # opposed to inspecting ``requires_grad`` directly. The two are not
-        # interchangeable: some encoders freeze themselves at construction
-        # time independent of this switch (e.g. ``ESM2Encoder`` honors
-        # ``ESM2EncoderConfig.freeze_parameters``, which defaults to
-        # ``True``), so a bare ``all(not p.requires_grad ...)`` check can't
-        # tell "this run asked for head-only fine-tuning" apart from "this
-        # encoder always freezes itself" (issue #1076).
+        # interchangeable: an encoder may freeze itself at construction
+        # time independent of this switch, so a bare
+        # ``all(not p.requires_grad ...)`` check cannot tell "this run asked
+        # for head-only fine-tuning" apart from "this encoder always freezes
+        # itself".
         self._encoder_frozen_via_freeze_call = False
 
     def _validate_sf_projection(self) -> None:
@@ -108,8 +106,6 @@ class CoreModel(nn.Module):
         }
         if "layout" in batch:
             encoder_input["layout"] = batch["layout"]
-        if "tdi_token_ids" in batch:
-            encoder_input["tdi_token_ids"] = batch["tdi_token_ids"]
         if "distance" in batch:
             encoder_input["distance"] = batch["distance"]
         return encoder_input
@@ -272,7 +268,7 @@ class CoreModel(nn.Module):
                 )
             heads_dict[head_config.head_type] = head_config
 
-        # Function-local: dasm2.heads.factory imports dasm2.models (#1294).
+        # Function-local: dasm2.heads.factory imports dasm2.models.
         from dasm2.heads.factory import create_head
 
         # Construct heads from configs
@@ -351,7 +347,7 @@ class CoreModel(nn.Module):
             # Head exists - return existing instance (config ignored)
             return cast(PredictionHead, self.prediction_heads[head_type.value])
 
-        from dasm2.heads.factory import create_head  # function-local: see #1294
+        from dasm2.heads.factory import create_head  # function-local: breaks an import cycle
 
         head = create_head(head_config)
         self.prediction_heads[head_type.value] = head
@@ -391,7 +387,6 @@ class CoreModel(nn.Module):
         by an encoder that freezes its own parameters for reasons unrelated
         to this switch (see the note in ``__init__``). Consulted by
         ``Trainer.export_metadata`` to decide ``TrainingConfig.freeze_encoder``
-        (issue #1076).
         """
         return self._encoder_frozen_via_freeze_call
 
@@ -465,26 +460,19 @@ class CoreModel(nn.Module):
     def _build_inference_batch(
         self,
         aa_sequence: str,
-        tdi_tokens: Optional[str] = None,
     ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
         """Build a batch dict for single-sequence inference.
 
         Tokenizes the input, constructs the mask, and adds layout tensors
-        when the encoder uses segment embeddings. Optionally tokenizes and
-        pads 3Di structural tokens when ``tdi_tokens`` is provided.
+        when the encoder uses segment embeddings.
 
         Args:
             aa_sequence: Unified sequence string ("SEQ1^SEQ2" or single).
-            tdi_tokens: Optional 3Di structural token string. Must have the
-                same length as ``aa_sequence`` (including ``^`` separators).
 
         Returns:
             (batch, tokens_1d) where ``batch`` is ready for ``forward()``
             and ``tokens_1d`` is the [seq_len] token tensor used for
             post-processing (splitting by segments).
-
-        Raises:
-            ValueError: If ``tdi_tokens`` length doesn't match ``aa_sequence``.
         """
         tokens = AA_TOKENIZER.tokenize([aa_sequence]).to(self.device)  # [1, seq_len]
         tokens_1d = tokens.squeeze(0)  # [seq_len]
@@ -516,27 +504,6 @@ class CoreModel(nn.Module):
                         f"configuration."
                     )
             batch["layout"] = layout_of_aa_idxs(tokens, num_segments).to(self.device)
-
-        # Optional 3Di structural tokens
-        if tdi_tokens is not None:
-            if len(tdi_tokens) != len(aa_sequence):
-                raise ValueError(
-                    f"3Di token length ({len(tdi_tokens)}) != "
-                    f"AA sequence length ({len(aa_sequence)})"
-                )
-            tdi_idxs = tdi_str_to_idxs(tdi_tokens)
-            padded_len = tokens.shape[1]
-            if len(tdi_idxs) > padded_len:
-                raise ValueError(
-                    f"3Di token length ({len(tdi_idxs)}) exceeds padded sequence "
-                    f"length ({padded_len}). Tokenizer should only pad, never truncate."
-                )
-            if len(tdi_idxs) < padded_len:
-                padding = torch.full(
-                    (padded_len - len(tdi_idxs),), TDI_PAD_IDX, dtype=torch.long
-                )
-                tdi_idxs = torch.cat([tdi_idxs, padding])
-            batch["tdi_token_ids"] = tdi_idxs.unsqueeze(0).to(self.device)
 
         return batch, tokens_1d
 
@@ -576,7 +543,6 @@ class CoreModel(nn.Module):
         self,
         aa_sequence: str,
         head_type: HeadType = HeadType.SELECTION_FACTOR_HEAD,
-        tdi_tokens: Optional[str] = None,
         distance: Optional[float] = None,
         raw: bool = False,
     ) -> List[torch.Tensor]:
@@ -588,12 +554,10 @@ class CoreModel(nn.Module):
         Args:
             aa_sequence: Unified sequence string ("SEQ1^SEQ2" or single sequence)
             head_type: HeadType enum for head to use (default: HeadType.SELECTION_FACTOR_HEAD)
-            tdi_tokens: Optional 3Di structural token string. Required when the
-                encoder is configured with ``num_tdi_tokens``.
             distance: Maturation distance (sum of IQ-TREE branch lengths from
                 naive ancestor to parent). Required when the encoder has
                 distance_encoding_mode != "none"; ``None`` raises ``ValueError``
-                in that case. There is no safe silent default — see issue #199.
+                in that case. There is no safe silent default.
             raw: If True, return un-zapped selection factors (before gauge
                 enforcement). Default False returns zapped SF where the parent
                 amino acid entry is 1.0 (log SF = 0).
@@ -605,13 +569,10 @@ class CoreModel(nn.Module):
             Each tensor has shape [seq_len, 20] with separator positions excluded.
 
         Raises:
-            ValueError: If model doesn't have the specified head, or if the
-                encoder requires tdi_tokens but none were provided.
+            ValueError: If model doesn't have the specified head.
         """
         self.require_head(head_type)
-        batch, tokens_1d = self._build_inference_batch(
-            aa_sequence, tdi_tokens=tdi_tokens
-        )
+        batch, tokens_1d = self._build_inference_batch(aa_sequence)
 
         self._add_inference_distance(batch, distance)
         return self._run_inference(batch, tokens_1d, head_type, raw=raw)
@@ -623,7 +584,7 @@ class CoreModel(nn.Module):
 
         Raises:
             ValueError: If the encoder is distance-aware and ``distance`` is
-                None. There is no safe default — see issue #199.
+                None. There is no safe default.
         """
         encoder_distance_mode = getattr(self.encoder, "distance_encoding_mode", "none")
         if encoder_distance_mode == "none":
@@ -633,7 +594,7 @@ class CoreModel(nn.Module):
                 "Encoder is configured with distance_encoding_mode="
                 f"{encoder_distance_mode!r}; selection_factors_of_aa_str() "
                 "requires an explicit `distance=` argument. There is no "
-                "safe default — see issue #199."
+                "safe default."
             )
         batch["distance"] = torch.tensor(
             [distance], dtype=torch.float32, device=self.device

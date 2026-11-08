@@ -102,7 +102,7 @@ class ComputeBackend(ABC):
         ``"no"``, ``"fp16"``, or ``"bf16"``. Recorded in checkpoint metadata
         so that resuming at a different precision than the run was trained
         at can be rejected instead of silently changing the numerics
-        (issue #1027). Returns ``"no"`` rather than ``None`` when disabled,
+        Returns ``"no"`` rather than ``None`` when disabled,
         so "off" and "not recorded" stay distinguishable on disk.
 
         This is *not* ``TrainingConfig.use_mixed_precision``, the trainer's
@@ -178,7 +178,7 @@ class ComputeBackend(ABC):
         ``set_epoch``), which prevents the prior cycle's loaders — and their
         persistent worker processes — from being garbage-collected. Releasing
         those references here lets the loaders die and their workers shut down,
-        avoiding a per-cycle worker leak (issue #724 follow-up).
+        avoiding a per-cycle worker leak.
 
         Single-GPU holds no such references, so this is a no-op there.
         Implementations must release ONLY the dataloaders, never the prepared
@@ -407,15 +407,15 @@ class AccelerateBackend(ComputeBackend):
         # Without this, PartialState falls through to DistributedType.NO and
         # collective ops like gather become no-ops.
         #
-        # broadcast_buffers=False: QDASM/Hybrid with q_variant=global_13mer
-        # registers a 1.34 GB read-only Thrifty lookup table as a non-persistent
-        # buffer. Default broadcast_buffers=True would sync this from rank 0 on
-        # every forward pass, hanging DDP init (initial sync) and adding ~30ms+
-        # of NCCL traffic per step. All ranks load the table from the same file
-        # so the broadcast is redundant. Models with mutable buffers (e.g.,
-        # BatchNorm running stats) should use SyncBatchNorm or restore the flag.
+        # broadcast_buffers=False: a model may register a large read-only
+        # lookup table as a non-persistent buffer. Default
+        # broadcast_buffers=True syncs every buffer from rank 0 on every
+        # forward pass, which for a table all ranks already load from the same
+        # file is pure redundant NCCL traffic, and enough of it to hang DDP
+        # init. Models with mutable buffers (e.g. BatchNorm running stats)
+        # should use SyncBatchNorm or restore the flag.
         #
-        # find_unused_parameters=True was tried here (issue #1096) to let
+        # find_unused_parameters=True was tried here to let
         # OverfitGuardHook freeze a co-trained task's parameters
         # (requires_grad=False) mid-training under DDP without DDP raising
         # "parameters were not used in producing loss" on the next backward.
@@ -439,14 +439,14 @@ class AccelerateBackend(ComputeBackend):
         ddp_kwargs = DistributedDataParallelKwargs(broadcast_buffers=False)
         # Widen the NCCL/process-group collective timeout to 8h. Two reasons,
         # the first of which sets the floor:
-        #   * QDASM/Hybrid re-optimize branch lengths solo on rank 0 between
-        #     cycles (and at cycle end); on the 4-dataset combo this pass runs
-        #     for hours while ranks 1..N block at the next collective. The
-        #     default ~10-min timeout aborts those ranks mid-BL-opt and loses
-        #     the cycle's work (observed on the 4ds QDASM-v4 run, 2026-05-08).
+        #   * Branch lengths are re-optimized solo on rank 0 between cycles
+        #     (and at cycle end); on a large corpus this pass runs for hours
+        #     while ranks 1..N block at the next collective. The default
+        #     ~10-min timeout aborts those ranks mid-BL-opt and loses the
+        #     cycle's work.
         #   * A legitimately slow micro-batch on one rank — e.g. a heavy padded
         #     forward in the long-sequence band — must not be aborted mid-step
-        #     by a collective timeout (issue #724).
+        #     by a collective timeout.
         # 8h comfortably covers the longest BL-opt pass and subsumes the
         # per-step case. Diagnostics still surface a true stall via the per-step
         # faulthandler watchdog (DASM2_STEP_WATCHDOG_SECONDS).
@@ -539,8 +539,8 @@ class AccelerateBackend(ComputeBackend):
         self,
         dataloader: torch.utils.data.DataLoader,
     ) -> torch.utils.data.DataLoader:
-        # A variable-size batch sampler (e.g. TokenBudgetBatchSampler, issue
-        # #724) has no fixed ``batch_size`` attribute. Accelerate's
+        # A variable-size batch sampler (e.g. TokenBudgetBatchSampler) has
+        # no fixed ``batch_size`` attribute. Accelerate's
         # ``BatchSamplerShard`` refuses to shard such a sampler unless
         # ``even_batches=False`` — with no per-batch row count it cannot pad the
         # trailing batch to equalize counts across ranks.
@@ -549,7 +549,7 @@ class AccelerateBackend(ComputeBackend):
         # to False: it lives on the shared, run-long ``Accelerator``, so a
         # one-way flip would leak into every later loader. In joint training one
         # task can use token-budget batching while another falls back to
-        # fixed-size on the same accelerator (issue #724 review finding #7) —
+        # fixed-size on the same accelerator —
         # without restoring the flag, that fixed-size loader would silently lose
         # its trailing-batch padding. ``True`` matches Accelerate's default.
         batch_sampler = getattr(dataloader, "batch_sampler", None)
@@ -570,7 +570,7 @@ class AccelerateBackend(ComputeBackend):
         # Because the accelerator is created once and lives for the whole run,
         # those references outlive each training cycle, so a persistent-worker
         # loader's iterator is never collected and its workers never shut down
-        # — a per-cycle worker leak (issue #724 follow-up).
+        # — a per-cycle worker leak.
         #
         # Drop the references for exactly the loaders handed back. We do NOT
         # use ``Accelerator.free_memory()``/``clear()``: in Accelerate 1.10.1
@@ -579,16 +579,16 @@ class AccelerateBackend(ComputeBackend):
         # reuses across cycles.
         #
         # Fail loudly if the internal we depend on has disappeared: a silent
-        # no-op here would resurrect the ~340 GB/cycle worker leak with nothing
-        # to flag it (issue #724 review). An *empty* list is fine (nothing
+        # no-op here would resurrect the worker leak with nothing to flag
+        # it. An *empty* list is fine (nothing
         # prepared yet); a *missing* attribute means Accelerate restructured it.
         if not hasattr(self._accelerator, "_dataloaders"):
             import accelerate
 
             raise RuntimeError(
                 "Accelerator no longer exposes '_dataloaders'; the per-cycle "
-                "DataLoader release (issue #724) relies on this internal to "
-                "prevent a ~340 GB/cycle worker leak in multi-cycle training. "
+                "DataLoader release relies on this internal to prevent a "
+                "large per-cycle worker leak in multi-cycle training. "
                 f"The installed accelerate ({accelerate.__version__}) appears "
                 "to have restructured it — update release_dataloaders() to "
                 "match before running multi-cycle training."

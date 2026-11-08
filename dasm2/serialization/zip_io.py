@@ -37,9 +37,7 @@ def _make_yaml_safe(obj: Any) -> Any:
     elif isinstance(obj, (list, tuple)):
         # Tuples must become lists, not just recurse element-wise: yaml.dump's
         # default Dumper serializes a bare tuple as a `!!python/tuple` node,
-        # which yaml.safe_load (the reader) cannot construct (issue #501
-        # follow-up -- multihit_log_factors is the first Tuple-typed config
-        # field ever round-tripped through this path).
+        # which yaml.safe_load (the reader) cannot construct.
         return [_make_yaml_safe(item) for item in obj]
     elif isinstance(obj, Enum):
         return obj.value

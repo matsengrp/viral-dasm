@@ -88,14 +88,14 @@ def create_trainer(
             ``step_budget.max_train_steps``) and for the step-based loop entry
             points ``multi_cycle_train`` / ``multi_cycle_train_joint``.
         source_task_configs: Task descriptors for :meth:`Trainer.export_metadata`
-            to emit when ``tasks`` is empty (issue #974). Only meaningful for
+            to emit when ``tasks`` is empty. Only meaningful for
             the task-less checkpoint-handling paths; see :class:`Trainer`.
         combine_gradient_hooks: Top-level (not per-task) hooks controlling how
             multiple tasks' gradients on shared parameters are combined
-            before the optimizer step (issue #1144). None/empty (the
+            before the optimizer step. None/empty (the
             default) reproduces today's plain-sum combination exactly.
         head_optimizer_config: Optional config for a second optimizer scoped
-            to exactly one head's own parameters (issue #1220) — e.g.
+            to exactly one head's own parameters — e.g.
             slowing ``BindingClassificationHead``'s own convergence in
             joint training without touching the shared encoder or any
             other head. Requires ``head_optimizer_head_type``. Only that

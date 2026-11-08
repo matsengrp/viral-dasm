@@ -50,15 +50,14 @@ from dasm2.data.local import resolve_path_with_fallback
 from dasm2.data.segment_handlers import (
     detect_compatible_handler,
 )
-from dasm2.data.yaml_registry import get_registry
 from dasm2.heads.types import HeadType
 from dasm2.sequence.constants import NUM_BASES
 
 if TYPE_CHECKING:
     from dasm2.data.segment_handlers import SegmentHandler
 
-# Head types categorized by their data requirements.  After #621 Task #4
-# the architecture-determined sets stay head-keyed (one loss per head
+# Head types categorized by their data requirements. The
+# architecture-determined sets stay head-keyed (one loss per head
 # shape); the loss-keyed dispatch (``EVOLUTIONARY_LOSS_TYPES``,
 # ``WHICHMUT_LOSS_TYPES``) lives in ``dasm2/losses/types.py``.
 
@@ -140,152 +139,41 @@ def get_artifacts_dir() -> Path:
 
 
 def resolve_data_path(data_spec: str) -> Path:
-    """Resolve dataset specification to file path.
+    """Resolve a dataset specification to a file path.
 
-    Resolution order:
-    1. Direct file path (absolute or relative)
-    2. Registered nickname from unified manifest index (all data types)
+    Upstream this fell back to a manifest index when the spec was a
+    registered nickname rather than a path. This repository names every
+    input explicitly in ``config.yaml`` -- that is the whole bargain it
+    offers a reader who brings their own GISAID access -- so there is no
+    manifest to consult and the fallback is not vendored. A spec that is
+    not a path that exists is an error here, not a nickname to look up.
 
     Args:
-        data_spec: File path or registered dataset nickname
+        data_spec: Path to a dataset file.
 
     Returns:
-        Resolved Path to dataset file
+        Resolved Path to the dataset file.
 
     Raises:
-        ValueError: If data_spec is empty or whitespace-only
-        FileNotFoundError: If path doesn't exist or nickname not registered
+        ValueError: If data_spec is empty or whitespace-only.
+        FileNotFoundError: If the path does not exist.
     """
-    from dasm2.data.discovery import get_manifest_index
-
-    def _registry_lookup(spec: str) -> Optional[Path]:
-        index = get_manifest_index()
-        manifest = index.get_optional(spec)
-        if manifest is not None:
-            desc = index.descriptors[manifest.discriminator]
-            if desc.data_path_resolver is not None:
-                return desc.data_path_resolver(manifest.config)
-        return None
-
     return resolve_path_with_fallback(
         spec=data_spec,
-        registry_lookup=_registry_lookup,
+        registry_lookup=lambda _spec: None,
         item_type="Dataset",
-        list_available=list_available_datasets,
+        list_available=list,
     )
 
 
-def list_available_datasets() -> List[str]:
-    """List all available dataset nicknames across all manifest types.
-
-    Returns:
-        Sorted list of all available dataset nicknames
-    """
-    from dasm2.data.discovery import get_manifest_index
-
-    return get_manifest_index().list_names()
 
 
-def _require_holdout_samples(dataset_nickname: str) -> List[str]:
-    """Require and return holdout sample IDs for a dataset from YAML registry.
-
-    This function enforces that holdout samples are defined. Use this when
-    holdout samples are required (e.g., for train/val splitting).
-
-    Args:
-        dataset_nickname: Dataset nickname
-
-    Returns:
-        List of sample IDs for validation holdout
-
-    Raises:
-        ValueError: If dataset not found or has no holdouts defined
-    """
-    registry = get_registry()
-    if dataset_nickname not in registry:
-        raise ValueError(
-            f"No holdout samples defined for dataset '{dataset_nickname}'. "
-            f"Dataset not found in YAML registry."
-        )
-
-    config = registry.get(dataset_nickname)
-    if not config.holdout_samples:
-        raise ValueError(
-            f"No holdout samples defined for dataset '{dataset_nickname}'. "
-            f"Add holdout_samples to the dataset's YAML file."
-        )
-
-    return config.holdout_samples
 
 
-def _lookup_naughty_clonal_families(
-    dataset_nickname: str,
-) -> Optional[List[Tuple[str, str]]]:
-    """Look up a dataset's naughty clonal families in the YAML registry.
-
-    Returns ``None`` — not ``[]`` — for an unregistered nickname, so callers
-    must state their own not-found contract: filtering treats it as "nothing
-    to drop", while :func:`seam_identity` refuses it outright.
-
-    Args:
-        dataset_nickname: Dataset nickname
-
-    Returns:
-        List of (sample_id, family) tuples to filter, or None if no dataset
-        by that nickname is registered.
-    """
-    registry = get_registry()
-    if dataset_nickname not in registry:
-        return None
-
-    config = registry.get(dataset_nickname)
-    return config.naughty_clonal_families
 
 
-def _get_naughty_clonal_families(dataset_nickname: str) -> List[Tuple[str, str]]:
-    """Get naughty clonal families for a dataset from YAML registry.
-
-    Args:
-        dataset_nickname: Dataset nickname
-
-    Returns:
-        List of (sample_id, family) tuples to filter, empty if none defined
-        or if the nickname is unregistered
-    """
-    families = _lookup_naughty_clonal_families(dataset_nickname)
-    return [] if families is None else families
 
 
-def get_anarci_config(data_spec: str) -> Dict[str, Dict[str, str]]:
-    """Get ANARCI annotation paths for a dataset from YAML registry.
-
-    Returns ANARCI paths in the format expected by load_anarci_dicts:
-    {scheme_name: {segment_name: path_string}}.
-
-    Args:
-        data_spec: Dataset nickname or file path. For multinames (e.g., "a+b"),
-            returns empty dict since ANARCI configs are per-dataset.
-
-    Returns:
-        Nested dict {scheme: {segment: path}} or empty dict if not configured
-    """
-    # Multinames don't have a single ANARCI config
-    if "+" in data_spec:
-        return {}
-
-    registry = get_registry()
-    if data_spec not in registry:
-        return {}
-
-    config = registry.get(data_spec)
-    result: Dict[str, Dict[str, str]] = {}
-
-    for scheme, segments in config.anarci.items():
-        result[scheme] = {}
-        for segment, verified_path in segments.items():
-            result[scheme][segment] = str(verified_path.path)
-
-    return result
 
 
 def _generate_nickname_from_path(file_path: str) -> str:
@@ -306,23 +194,23 @@ def _generate_nickname_from_path(file_path: str) -> str:
 
 
 def _determine_nickname_from_spec_and_path(data_spec: str, csv_path: Path) -> str:
-    """Determine nickname from data_spec and its resolved path.
+    """Derive a nickname for a dataset from the path it resolved to.
 
-    Uses data_spec as nickname if it's registered, otherwise generates
-    hash-based nickname from resolved path.
+    Upstream this returned ``data_spec`` unchanged when it named a registered
+    dataset, and fell back to a path hash otherwise. No dataset is registered
+    here, so only the fallback remains -- every corpus gets a ``path_<hash>``
+    nickname, which is what the seam stamp and the log lines already carry.
 
     Args:
-        data_spec: Original specification (may be nickname or path)
-        csv_path: Already-resolved path corresponding to data_spec
+        data_spec: Original specification. Unused; kept so the call sites read
+            the same as upstream's and a future registry would slot back in.
+        csv_path: Already-resolved path corresponding to data_spec.
 
     Returns:
-        Dataset nickname (registered name or hash-based)
+        Hash-based dataset nickname.
     """
-    registry = get_registry()
-    if data_spec in registry:
-        return data_spec
-    else:
-        return _generate_nickname_from_path(str(csv_path))
+    del data_spec
+    return _generate_nickname_from_path(str(csv_path))
 
 
 def determine_nickname_from_data_spec(data_spec: str) -> str:
@@ -424,7 +312,7 @@ def drop_index_artifact_columns(df: pd.DataFrame) -> pd.DataFrame:
 
     PCP CSVs are written with their index, so every one read without
     ``index_col`` gains such a column, and a Parquet file built from that
-    frame keeps it. They are never meant as data (issue #1182).
+    frame keeps it. They are never meant as data.
     """
     artifacts = [
         column
@@ -607,90 +495,6 @@ def is_pickle_data_spec(data_spec: str) -> bool:
     return component_is_pickle_flags[0] if component_is_pickle_flags else False
 
 
-def filter_naughty_clonal_families(
-    df: pd.DataFrame,
-    dataset_nickname: str,
-) -> pd.DataFrame:
-    """Filter out known problematic (sample_id, family) pairs.
-
-    Public (issue #1125) because ``dasm2.data.mlm`` is now a second caller:
-    the MLM loader bypasses ``_load_component_dataframes`` (its
-    ``detect_compatible_handler(cols, ("parent", "child"))`` requires
-    parent columns MLM's child-only data lacks), but it still needs the
-    *identical* row filtering DASM applies before splitting, so that both
-    paths feed ``group_kfold_in_train`` the same per-``sample_id`` row
-    counts. Nothing here is parent-aware — only ``sample_id``/``family``
-    and the nickname are read — so the filter was only ever *bundled* into
-    the component pipeline, not coupled to it. MLM reaches it through
-    ``preprocess_rows_for_split`` rather than calling it directly.
-
-    Handles type mismatches between YAML (strings) and DataFrame columns
-    (which may be int64, float64, etc.) by casting DataFrame columns to
-    strings for comparison.
-
-    Args:
-        df: DataFrame to filter
-        dataset_nickname: Dataset nickname for lookup
-
-    Returns:
-        Filtered DataFrame with naughty families removed
-
-    Raises:
-        ValueError: If naughty families defined but sample_id/family columns missing.
-
-    Warns:
-        UserWarning: If none of the naughty families are found in the data.
-    """
-    naughty_families = _get_naughty_clonal_families(dataset_nickname)
-
-    if not naughty_families:
-        return df
-
-    required_cols = {"sample_id", "family"}
-    missing_cols = required_cols - set(df.columns)
-    if missing_cols:
-        raise ValueError(
-            f"Cannot filter naughty clonal families for '{dataset_nickname}': "
-            f"missing required columns {sorted(missing_cols)}. "
-            f"DataFrame has columns: {sorted(df.columns)}"
-        )
-
-    print(
-        f"Filtering out problematic (sample_id, family) pairs for {dataset_nickname}: "
-        f"{naughty_families}"
-    )
-
-    # Cast columns to strings for reliable comparison
-    sample_id_str = df["sample_id"].astype(str)
-    family_str = df["family"].astype(str)
-
-    initial_len = len(df)
-    total_removed = 0
-
-    for sample_id, family in naughty_families:
-        # Compare as strings
-        mask = (sample_id_str == str(sample_id)) & (family_str == str(family))
-        match_count = mask.sum()
-        if match_count > 0:
-            df = df[~mask]
-            total_removed += match_count
-
-    # Warn if none of the naughty families were found (may be expected for subsets)
-    if total_removed == 0:
-        warnings.warn(
-            f"None of the naughty families {naughty_families} were found in dataset "
-            f"'{dataset_nickname}'. This may be expected for downsampled datasets, "
-            f"or may indicate a configuration error.",
-            UserWarning,
-            stacklevel=2,
-        )
-    else:
-        print(
-            f"Removed {total_removed} rows ({total_removed / initial_len:.2%}) "
-            f"from {dataset_nickname}"
-        )
-
-    return df
 
 
 def _apply_segment_specific_preprocessing(
@@ -734,41 +538,6 @@ quietly.
 """
 
 
-def preprocess_rows_for_split(
-    df: pd.DataFrame,
-    nickname: str,
-) -> pd.DataFrame:
-    """Apply the *row-dropping* preprocessing that must precede any CV split.
-
-    This is the single parity seam (issue #1125) between the DASM/whichmut
-    load path (``_preprocess_component`` below) and the MLM load path
-    (``dasm2.data.mlm.load_mlm_train_val``). ``group_kfold_in_train`` hands
-    each group to the lightest fold so far, keyed on per-group *row counts*
-    (sklearn's ``GroupKFold`` greedy packing), so any step that drops rows
-    changes the realized ``sample_id -> fold`` map. Two loaders that drop
-    different rows before splitting therefore produce different folds even
-    with the same ``CvSplitConfig`` — which is exactly the mis-pairing this
-    seam exists to prevent.
-
-    Today that is just ``filter_naughty_clonal_families``. The other half of
-    ``_preprocess_component``, ``_apply_segment_specific_preprocessing``,
-    deliberately lives outside this seam: it only adds ``v_family`` columns
-    and validates ``v_gene`` families, never drops rows, so it cannot
-    perturb ``GroupKFold``'s counts (and it needs a segment handler MLM's
-    child-only data cannot resolve).
-
-    Any *future* row-dropping preprocessing belongs here, not in
-    ``_preprocess_component`` directly, or the two paths will silently
-    re-diverge.
-
-    Args:
-        df: Loaded DataFrame
-        nickname: Dataset nickname (for naughty family lookup)
-
-    Returns:
-        DataFrame with row-dropping preprocessing applied
-    """
-    return filter_naughty_clonal_families(df, nickname)
 
 
 def seam_identity(nickname: Optional[str]) -> Dict[str, str]:
@@ -779,7 +548,7 @@ def seam_identity(nickname: Optional[str]) -> Dict[str, str]:
     into a Parquet file at write time and recomputing it at load time is what
     lets the Parquet CV path (which splits rows *as stored*, never calling
     :func:`preprocess_rows_for_split`) prove it is splitting the row set the
-    CSV and MLM paths split -- see issue #1131.
+    CSV and MLM paths split.
 
     Args:
         nickname: Registered dataset nickname whose manifest drives the seam,
@@ -799,17 +568,14 @@ def seam_identity(nickname: Optional[str]) -> Dict[str, str]:
             was empty (Constitution IV). ``None`` is the explicit way to ask
             for the vacuous identity.
     """
-    naughty: List[Tuple[str, str]] = []
     if nickname is not None:
-        looked_up = _lookup_naughty_clonal_families(nickname)
-        if looked_up is None:
-            raise ValueError(
-                f"Cannot compute the row-preprocessing seam identity for "
-                f"'{nickname}': no dataset by that nickname is registered. "
-                f"Expected a nickname present in the YAML registry (or None "
-                f"for data with no manifest), got '{nickname}'."
-            )
-        naughty = looked_up
+        raise ValueError(
+            f"Cannot compute the row-preprocessing seam identity for "
+            f"'{nickname}': this repository has no manifest registry to look "
+            f"a nickname up in, so None -- the vacuous identity -- is the only "
+            f"answer it can give. See registered_nickname_or_none."
+        )
+    naughty: List[Tuple[str, str]] = []
 
     payload = json.dumps(sorted([sample, family] for sample, family in naughty))
     return {
@@ -819,19 +585,22 @@ def seam_identity(nickname: Optional[str]) -> Dict[str, str]:
 
 
 def registered_nickname_or_none(nickname: Optional[str]) -> Optional[str]:
-    """``nickname`` if a manifest backs it, else ``None``.
+    """Always ``None``: no dataset in this repository is manifest-backed.
 
-    :func:`seam_identity` refuses an unregistered nickname by design, so both
-    the write side (``scripts/write_parquet.py``) and the load side
-    (``evolutionary_dataset._resolve_parquet_paths_and_schema``) need the same
-    "vacuous identity for data no manifest drives" decision. Keeping it in one
-    place stops the two sides from disagreeing about which specs are
-    manifest-backed, which would make a file fail to verify against the very
-    identity it was stamped with.
+    Upstream this asked a YAML registry whether a manifest drove the
+    nickname, because :func:`seam_identity` refuses an unregistered one by
+    design and the write and load sides had to agree on which specs were
+    manifest-backed. Here the answer is the same for every spec -- the
+    corpora are named by path in ``config.yaml`` and no manifest exists --
+    so the function is kept as the one place that records the decision,
+    rather than being inlined at its two call sites where the next reader
+    would have to rediscover it.
+
+    Keeping it also keeps the stamp stable: ``seam_identity(None)`` hashes
+    an empty naughty list, which is what every Parquet file this pipeline
+    reads was stamped with.
     """
-    if nickname is None:
-        return None
-    return nickname if nickname in get_registry() else None
+    return None
 
 
 def _seam_problem_lines(
@@ -925,7 +694,7 @@ def verify_parquet_seam_stamp(
     # self-declares. Without this, a file stamped vacuously -- built from a
     # bare CSV path before that path was registered -- verifies against its
     # own empty naughty list forever, even after the manifest it is now loaded
-    # under grows a real one (PR #1139 review).
+    # under grows a real one.
     loaded_identity = (
         seam_identity(component_nickname) if component_nickname is not None else None
     )
@@ -935,8 +704,8 @@ def verify_parquet_seam_stamp(
             problems.append(
                 (
                     path,
-                    "no seam stamp (written by a writer that predates issue "
-                    "#1131, or by no known writer)",
+                    "no seam stamp (written by a writer that predates "
+                    "stamping, or by no known writer)",
                 )
             )
             rows_comparable = False
@@ -973,7 +742,7 @@ def verify_parquet_seam_stamp(
             # partially-copied stamp can carry one key without the other, and
             # indexing the missing one raised ``KeyError`` in both strict and
             # warn modes instead of the ``ValueError`` with rebuild
-            # instructions this function promises (PR #1139 review).
+            # instructions this function promises.
             if key not in meta:
                 problems.append((path, f"stamp is missing '{key}'"))
             elif meta[key] != expected[key]:
@@ -1055,8 +824,8 @@ def verify_parquet_seam_stamp(
 
     if subsampled_from is not None:
         # "Rebuild with write_parquet.py" is actively wrong advice here: it
-        # would produce the full dataset, not this subsample (PR #1139
-        # review). A subsample has no correct rebuild -- it is the wrong input
+        # would produce the full dataset, not this subsample. A subsample
+        # has no correct rebuild -- it is the wrong input
         # for a row-count-driven split, whatever it was built from.
         remedy = (
             f"\nA subsample holds a random subset of the rows in "
@@ -1102,23 +871,26 @@ def _preprocess_component(
     nickname: str,
     segment_handler: "SegmentHandler",
 ) -> pd.DataFrame:
-    """Apply all preprocessing to loaded DataFrame.
+    """Apply all preprocessing to a loaded DataFrame.
 
-    Applies segment-specific preprocessing followed by the shared
-    row-dropping preprocessing (``preprocess_rows_for_split``, currently
-    naughty family filtering).
+    Upstream this also ran a row-dropping pass, ``preprocess_rows_for_split``,
+    whose only step was dropping rows belonging to a manifest's naughty clonal
+    families. That list came from a YAML registry this fork does not have, and
+    the concept is a BCR one with no viral counterpart, so the pass is gone and
+    the seam it defined is vacuous -- which is exactly what ``seam_identity``
+    stamps and ``verify_parquet_seam_stamp`` checks.
 
     Args:
-        df: Loaded DataFrame
-        nickname: Dataset nickname (for naughty family lookup)
-        segment_handler: Detected segment handler
+        df: Loaded DataFrame.
+        nickname: Dataset nickname. Unused now the row-dropping pass is gone;
+            kept so the seam's two sides keep naming the same thing.
+        segment_handler: Detected segment handler.
 
     Returns:
-        Preprocessed DataFrame
+        Preprocessed DataFrame.
     """
-    df = _apply_segment_specific_preprocessing(df, segment_handler)
-    df = preprocess_rows_for_split(df, nickname)
-    return df
+    del nickname
+    return _apply_segment_specific_preprocessing(df, segment_handler)
 
 
 def _load_component_dataframes(
@@ -1238,39 +1010,16 @@ def add_train_val_markers(
         print(f"Using pre-existing train/val split: {num_train} train, {num_val} val")
         return sequences_df
 
-    sequences_df["in_train"] = True
-
-    holdout_samples = _require_holdout_samples(dataset_nickname)
-
-    if "sample_id" not in sequences_df.columns:
-        raise ValueError(
-            f"Dataset '{dataset_nickname}' has holdout samples defined but "
-            f"sequences_df lacks required 'sample_id' column for holdout-based splitting."
-        )
-
-    # Cast sample_id column to strings for reliable comparison
-    sample_id_str = sequences_df["sample_id"].astype(str)
-    holdout_set = {str(s) for s in holdout_samples}
-
-    # Check that at least some holdout samples exist in the data
-    unique_samples_str = set(sample_id_str.unique())
-    matching_holdouts = holdout_set & unique_samples_str
-    if not matching_holdouts:
-        raise ValueError(
-            f"None of the holdout samples for '{dataset_nickname}' were found in data. "
-            f"Holdouts: {sorted(holdout_set)[:10]}{'...' if len(holdout_set) > 10 else ''}. "
-            f"Available samples (first 10): {sorted(unique_samples_str)[:10]}"
-        )
-
-    # Mark holdout rows
-    holdout_mask = sample_id_str.isin(holdout_set)
-    sequences_df.loc[holdout_mask, "in_train"] = False
-
-    holdout_row_count = holdout_mask.sum()
-    print(f"Holdout samples for {dataset_nickname}: {holdout_samples}")
-    print(f"This represents {holdout_row_count / len(sequences_df):.2%} of the data.")
-
-    return sequences_df
+    # Everything past here derived the split from a YAML registry's
+    # `holdout_samples`. This fork has no registry, and a split that lived
+    # outside the corpus would not travel with it to another reader, so a
+    # frame that arrives without `in_train` is an error rather than something
+    # to reconstruct.
+    raise ValueError(
+        f"Dataset '{dataset_nickname}' has no 'in_train' column. The split is "
+        f"a property of the corpus and is written by the corpus-building "
+        f"pipeline; it cannot be derived here."
+    )
 
 
 def load_dataframe_with_split_markers(
@@ -1348,8 +1097,8 @@ def validate_precomputed_columns(df: pd.DataFrame) -> None:
     """
     if not has_precomputed_neutral_columns(df):
         raise ValueError(
-            "DataFrame lacks precomputed neutral outputs (nt_rates/nt_csps columns). "
-            "Use load_evolutionary_train_val() with a neutral model instead."
+            "DataFrame lacks precomputed neutral outputs (nt_rates/nt_csps "
+            "columns), which this fork's Parquet corpora always carry."
         )
 
     for col in df.columns:

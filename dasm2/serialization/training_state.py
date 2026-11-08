@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import torch
 
-# Legacy field renames (pre-issue-#578 schema).
+# Legacy field renames (pre-step-based-training schema).
 #
 # Callers construct TrainingState exclusively via ``TrainingState.from_dict``,
 # so every serialized dict is normalized through ``_migrate_training_state_dict``
@@ -44,20 +44,19 @@ def _migrate_training_state_dict(d: Dict[str, Any]) -> Dict[str, Any]:
     out.setdefault("eval_count", 0)
     out.setdefault("data_passes", 0.0)
     out.setdefault("loader_cycle", int(out["data_passes"]))
-    # issue #1220: absent in every checkpoint saved before head_optimizer
-    # existed, and in any run that never configured one.
+    # Absent in every checkpoint saved before head_optimizer existed, and
+    # in any run that never configured one.
     out.setdefault("head_optimizer_state_dict", None)
     out.setdefault("head_learning_rate", None)
-    # issue #1220: absent in every checkpoint saved before head_scheduler
-    # existed, and in any run whose head_optimizer (if any) pairs with a
+    # Absent in every checkpoint saved before head_scheduler existed, and
+    # in any run whose head_optimizer (if any) pairs with a
     # non-reduce_on_plateau main scheduler (see Trainer._create_head_scheduler).
     out.setdefault("head_scheduler_state_dict", None)
-    # issue #1220 (PR #1223 review): absent in every checkpoint saved before
-    # this field existed.
+    # Absent in every checkpoint saved before this field existed.
     out.setdefault("head_optimizer_head_type", None)
-    # Saves before issue #1272 built every token-budget sampler with seed 0.
+    # Older saves built every token-budget sampler with seed 0.
     out.setdefault("data_seed", 0)
-    # issue #525: absent in every checkpoint saved before mid-pass resume;
+    # Absent in every checkpoint saved before mid-pass resume existed;
     # Trainer._build_train_iters then restarts the saved pass with a warning.
     out.setdefault("train_iter_draws", None)
     out.setdefault("pass_start_rng_states", None)
@@ -89,7 +88,7 @@ class TrainingState:
     """Complete mutable training state for checkpoint resume.
 
     Captures everything needed to resume training at the optimizer step where
-    it was saved, including mid-cycle, mid-task and mid-pass (issue #525).
+    it was saved, including mid-cycle, mid-task and mid-pass.
 
     The resumed run's weights match an uninterrupted run's when each train
     loader's batch order is reproduced by its epoch and the pass-start RNG
@@ -134,14 +133,14 @@ class TrainingState:
         optimizer_state_dict -> trainer.optimizer.state_dict()
         scheduler_state_dict -> trainer.scheduler.state_dict()
         rng_states -> torch/cuda/numpy/python RNG states
-        head_optimizer_state_dict -> trainer.head_optimizer.state_dict() (issue #1220, None if unset)
+        head_optimizer_state_dict -> trainer.head_optimizer.state_dict() (None if unset)
         head_learning_rate -> trainer.head_learning_rate (None if unset)
-        head_scheduler_state_dict -> trainer.head_scheduler.state_dict() (issue #1220, None if unset)
-        head_optimizer_head_type -> trainer.head_optimizer_head_type.value (issue #1220, None if unset)
+        head_scheduler_state_dict -> trainer.head_scheduler.state_dict() (None if unset)
+        head_optimizer_head_type -> trainer.head_optimizer_head_type.value (None if unset)
         learning_rate -> trainer.learning_rate (initial LR for the cycle-boundary reset)
-        train_iter_draws -> trainer._train_iter_draws (issue #525, None on older checkpoints)
-        pass_start_rng_states -> trainer._pass_start_rng_states (issue #525)
-        rank_pass_positions -> every rank's loader_cycle / draws / resets under DDP (issue #525)
+        train_iter_draws -> trainer._train_iter_draws (None on older checkpoints)
+        pass_start_rng_states -> trainer._pass_start_rng_states
+        rank_pass_positions -> every rank's loader_cycle / draws / resets under DDP
 
     Construct exclusively via :meth:`from_dict` when deserializing so legacy
     schemas get migrated. The dataclass constructor is reserved for code that
@@ -163,26 +162,25 @@ class TrainingState:
     best_model_state: Optional[Dict[str, Any]]
     rng_states: Dict[str, Any]
     learning_rate: float
-    # issue #1220: state for an optional second optimizer scoped to one
-    # head's own parameters. None on every run that doesn't configure one,
+    # State for an optional second optimizer scoped to one head's own
+    # parameters. None on every run that doesn't configure one,
     # and on every checkpoint saved before this field existed (see
     # _migrate_training_state_dict above).
     head_optimizer_state_dict: Optional[Dict[str, Any]] = None
     head_learning_rate: Optional[float] = None
-    # issue #1220: state for head_optimizer's own plateau scheduler. None
+    # State for head_optimizer's own plateau scheduler. None
     # whenever head_optimizer is unset, or the main scheduler isn't
     # reduce_on_plateau (see Trainer._create_head_scheduler), or on any
     # checkpoint saved before this field existed.
     head_scheduler_state_dict: Optional[Dict[str, Any]] = None
-    # issue #1220 (PR #1223 review): which head head_optimizer_state_dict
-    # belongs to, as HeadType.value. None whenever head_optimizer is unset,
+    # Which head head_optimizer_state_dict belongs to, as HeadType.value. None whenever head_optimizer is unset,
     # and on any checkpoint saved before this field existed. Checked before
     # load_state_dict in Trainer.restore_training_state so restoring into a
     # trainer configured for a *different* head — whose parameters can
     # legitimately have the same shapes as the checkpoint's head — fails
     # loudly instead of silently applying the wrong optimizer state.
     head_optimizer_head_type: Optional[str] = None
-    # issue #525: the position inside the current data pass. One count per
+    # The position inside the current data pass. One count per
     # train loader of the micro-batches its live iterator has yielded, plus
     # the RNG state just before those iterators were built (the global
     # streams, and under "loader_generators" each loader's Accelerate
@@ -193,7 +191,7 @@ class TrainingState:
     # fields existed (see _migrate_training_state_dict above).
     train_iter_draws: Optional[List[int]] = None
     pass_start_rng_states: Optional[Dict[str, Any]] = None
-    # issue #525: under DDP, every rank's own position, in rank order, as
+    # Under DDP, every rank's own position, in rank order, as
     # {"loader_cycle", "train_iter_draws", "reset_iterators", "rng_states"}.
     # Ranks' passes and RNG streams drift apart (a token-budget pass can deal
     # them unequal batch counts), so rank 0's are not theirs. None on a
@@ -245,9 +243,9 @@ class TrainingState:
         RNG state tensors (torch's and CUDA's alike) must always be CPU
         ``torch.ByteTensor``s -- that's true regardless of which device the
         model/optimizer are restored to. But callers load
-        ``training_state.pth`` with ``map_location=<model device>`` (issue
-        #516: ``resume_training(..., backend=SingleGPUBackend("cuda"))``),
-        which moves every
+        ``training_state.pth`` with ``map_location=<model device>`` (e.g.
+        ``resume_training(..., backend=SingleGPUBackend("cuda"))``), which
+        moves every
         tensor in the pickle -- RNG state included -- onto that device.
         ``torch.random.set_rng_state``/``torch.cuda.set_rng_state_all`` then
         raise ``TypeError: RNG state must be a torch.ByteTensor`` on a CUDA
@@ -259,8 +257,8 @@ class TrainingState:
         different rates, and under token-budget batching ranks start passes
         at different steps), so ``Trainer.save_resumable`` gathers every
         rank's streams into ``rank_pass_positions`` and
-        ``Trainer.restore_training_state`` hands each rank its own (issue
-        #525). A checkpoint saved before that holds only rank 0's streams
+        ``Trainer.restore_training_state`` hands each rank its own. A
+        checkpoint saved before that holds only rank 0's streams
         (``rng_states``), and every rank restores those, as ``set_seed(seed)``
         does at launch; a rank whose stream had drifted then draws different
         dropout masks than it would have uninterrupted.
@@ -279,7 +277,7 @@ class TrainingState:
             # ``set_rng_state_all`` enumerates the list and writes device ``i``
             # per entry, so a longer list than this host has devices addresses
             # a nonexistent ordinal and dies with an opaque torch error.
-            # Name both counts instead (issue #1027).
+            # Name both counts instead.
             saved = list(rng_states["cuda"])
             visible = torch.cuda.device_count()
             if len(saved) != visible:

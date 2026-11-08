@@ -17,13 +17,13 @@ Variants:
   positional embedding table is ``d_pos``-wide; the two are concatenated.
   Optionally adds sinusoidal PE across all ``d_model`` dimensions on top.
 
-Both pipelines handle optional tdi (3Di structural) embedding, segment
-embedding, and distance encoding at the correct points in the pipeline.
+Both pipelines handle segment embedding and distance encoding at the
+correct points in the pipeline.
 Both also support resetting positional encoding at segment boundaries (see
 :func:`dasm2.sequence.layout.per_segment_positions_of_layout`), gated by
 ``EncoderConfig.per_segment_positions``.
 
-Distance encoding (issue #199) is off by default
+Distance encoding is off by default
 (``distance_encoding_mode="none"``), in which case both pipelines behave
 exactly as they did before it was added. When enabled, ordering differs by
 pipeline: in ``StandardEmbeddingPipeline`` distance is applied **before**
@@ -62,7 +62,7 @@ def _distance_content_mask(
     True positions. Naming follows the existing mask convention in the
     codebase (e.g. ``token_inclusive_mask``, ``loss_mask``) — this is the unconditional, distance-specific variant.
 
-    Behavior across input shapes (issue #199):
+    Behavior across input shapes:
 
     - Heavy-only input: no separator → mask is True on all heavy tokens,
       False on trailing padding. Distance is added to every heavy
@@ -73,9 +73,9 @@ def _distance_content_mask(
       layout-gate design no longer applies.)
     - Paired ``HEAVY^LIGHT`` input: mask is True on both heavy and light
       content, False on the separator and padding. Distance is added to
-      both chains. Per Erick (issue #199, 2026-04-28) distance is
-      conceptually a maturation-stage scalar, applied uniformly to chain
-      content rather than a chain-specific quantity.
+      both chains: distance is conceptually a maturation-stage scalar,
+      applied uniformly to chain content rather than a chain-specific
+      quantity.
     """
     token_ids = batch["token_ids"]
     is_content = (token_ids != AA_AMBIG_IDX) & (token_ids != AA_SEPARATOR_IDX)
@@ -99,7 +99,7 @@ class EmbeddingResult(NamedTuple):
 
 
 # ---------------------------------------------------------------------------
-# Distance encoding helpers (analogous to _apply_tdi_embedding)
+# Distance encoding helpers
 # ---------------------------------------------------------------------------
 
 
@@ -124,7 +124,7 @@ def _apply_continuous_distance(
 
     The broadcast is masked to chain-content tokens (any amino acid),
     skipping separator and padding tokens. See ``_distance_content_mask``
-    for the per-input-shape behavior. Issue #199.
+    for the per-input-shape behavior.
 
     Args:
         embeddings: Current embeddings ``[B, L, d_model]``.
@@ -153,7 +153,7 @@ def _apply_binned_distance(
 ) -> torch.Tensor:
     """Quantize log(distance), look up embedding, add at chain-content positions.
 
-    Content-masked like ``_apply_continuous_distance`` — see issue #199.
+    Content-masked like ``_apply_continuous_distance``.
 
     Args:
         embeddings: Current embeddings ``[B, L, d_model]``.
@@ -265,52 +265,16 @@ def _per_segment_positions_of_batch(batch: Dict[str, torch.Tensor]) -> torch.Ten
     return per_segment_positions_of_layout(batch["layout"])
 
 
-def _apply_tdi_embedding(
-    embeddings: torch.Tensor,
-    tdi_embedding: Optional[nn.Embedding],
-    batch: Dict[str, torch.Tensor],
-) -> torch.Tensor:
-    """Apply optional 3Di structural embedding additively.
-
-    Fail-fast: raises if tdi_embedding is configured but ``tdi_token_ids``
-    is missing from batch.
-
-    Args:
-        embeddings: Current embedding tensor to add tdi to.
-        tdi_embedding: Optional 3Di embedding layer.
-        batch: Input batch, must contain ``tdi_token_ids`` if tdi_embedding is set.
-
-    Returns:
-        Embeddings with tdi added (or unchanged if tdi_embedding is None).
-    """
-    if tdi_embedding is None:
-        return embeddings
-    if "tdi_token_ids" not in batch:
-        raise ValueError(
-            "Encoder has num_tdi_tokens configured but batch is missing "
-            "'tdi_token_ids'. Ensure your dataset provides 3Di token indices."
-        )
-    tdi_ids = batch["tdi_token_ids"]
-    # Truncate TDI tokens to match the batch sequence length. Multi-structure
-    # datasets with pad_shorter_tokens=True store TDI tokens at max_aa_seq_len,
-    # but the collator may produce shorter batches when all sequences in a batch
-    # come from a shorter-sequence structure.
-    seq_len = embeddings.shape[1]
-    if tdi_ids.shape[1] > seq_len:
-        tdi_ids = tdi_ids[:, :seq_len]
-    return embeddings + tdi_embedding(tdi_ids)  # type: ignore[no-any-return]
-
-
 class StandardEmbeddingPipeline:
-    """Standard embedding pipeline: AA embed + tdi + segment + distance + PE.
+    """Standard embedding pipeline: AA embed + segment + distance + PE.
 
     Ordering depends on distance mode:
 
-    - For ``"none"``, ``"continuous"``, ``"binned"``: AA embed → tdi
-      (additive) → segment → **distance broadcast** → sinusoidal PE
+    - For ``"none"``, ``"continuous"``, ``"binned"``: AA embed → segment
+      → **distance broadcast** → sinusoidal PE
       (includes dropout). Distance is added before PE so it shares the
       AA dropout mask.
-    - For ``"context_token"``: AA embed → tdi → segment → sinusoidal PE
+    - For ``"context_token"``: AA embed → segment → sinusoidal PE
       (drops AAs at chain positions 0..L-1) → **prepend distance token**
       (run through a dedicated ``embed_dropout`` matched to the PE rate) →
       done. The context token receives no PE component, so AAs keep their
@@ -321,7 +285,6 @@ class StandardEmbeddingPipeline:
         d_model: Model dimension (for sqrt scaling).
         pos_encoder: Optional sinusoidal positional encoding (None for rotary).
         segment_embedding: Optional segment embedding layer.
-        tdi_embedding: Optional 3Di structural token embedding layer.
         per_segment_positions: If True, gather sinusoidal PE at per-segment
             reset positions (derived from ``layout``) instead of absolute
             positions.
@@ -348,7 +311,6 @@ class StandardEmbeddingPipeline:
         d_model: int,
         pos_encoder: Optional[PositionalEncoding] = None,
         segment_embedding: Optional[nn.Embedding] = None,
-        tdi_embedding: Optional[nn.Embedding] = None,
         per_segment_positions: bool = False,
         *,
         distance_encoding_mode: str = "none",
@@ -366,7 +328,6 @@ class StandardEmbeddingPipeline:
         self.d_model = d_model
         self.pos_encoder = pos_encoder
         self.segment_embedding = segment_embedding
-        self.tdi_embedding = tdi_embedding
         self.per_segment_positions = per_segment_positions
         # Distance encoding state (references to modules owned by TransformerEncoder)
         self._distance_mode = distance_encoding_mode
@@ -393,7 +354,6 @@ class StandardEmbeddingPipeline:
 
         Args:
             batch: Must contain ``token_ids`` and ``masks``. May contain
-                ``tdi_token_ids`` (required if tdi_embedding is configured),
                 ``layout`` (required if segment_embedding is configured or
                 per_segment_positions is set), and ``distance`` (required if
                 distance_encoding_mode is not ``"none"``).
@@ -404,7 +364,6 @@ class StandardEmbeddingPipeline:
             is False except in ``"context_token"`` mode.
 
         Raises:
-            ValueError: If tdi_embedding is configured but ``tdi_token_ids``
                 is missing, per_segment_positions is set but ``layout`` is
                 missing, or distance encoding is enabled but ``distance`` is
                 missing from batch.
@@ -413,7 +372,6 @@ class StandardEmbeddingPipeline:
         masks = batch["masks"]
 
         embeddings = self.amino_acid_embedding(token_ids) * math.sqrt(self.d_model)
-        embeddings = _apply_tdi_embedding(embeddings, self.tdi_embedding, batch)
         embeddings = apply_segment_embedding(self.segment_embedding, embeddings, batch)
 
         mode = self._distance_mode
@@ -517,7 +475,6 @@ class ConcatPosEmbeddingPipeline:
         positional_embedding: Optional learned positional embedding table.
         sinusoidal_pe: Optional sinusoidal PE across full d_model.
         segment_embedding: Optional segment embedding layer.
-        tdi_embedding: Optional 3Di structural token embedding layer.
         per_segment_positions: If True, index the learned positional embedding
             (and any sinusoidal overlay) at per-segment reset positions derived
             from ``layout`` instead of absolute positions.
@@ -543,7 +500,6 @@ class ConcatPosEmbeddingPipeline:
         positional_embedding: Optional[nn.Embedding] = None,
         sinusoidal_pe: Optional[PositionalEncoding] = None,
         segment_embedding: Optional[nn.Embedding] = None,
-        tdi_embedding: Optional[nn.Embedding] = None,
         per_segment_positions: bool = False,
         *,
         distance_encoding_mode: str = "none",
@@ -563,7 +519,6 @@ class ConcatPosEmbeddingPipeline:
         self.positional_embedding = positional_embedding
         self.sinusoidal_pe = sinusoidal_pe
         self.segment_embedding = segment_embedding
-        self.tdi_embedding = tdi_embedding
         self.per_segment_positions = per_segment_positions
         # Distance encoding state
         self._distance_mode = distance_encoding_mode
@@ -583,7 +538,7 @@ class ConcatPosEmbeddingPipeline:
     def __call__(self, batch: Dict[str, torch.Tensor]) -> EmbeddingResult:
         """Build split-subspace embeddings from token IDs.
 
-        Ordering: AA embed(d_aa) → tdi(additive, d_aa only) → concat with
+        Ordering: AA embed(d_aa) → concat with
         pos_embed(d_pos) → sinusoidal PE(d_model) → distance → segment(d_model).
 
         Args:
@@ -597,7 +552,6 @@ class ConcatPosEmbeddingPipeline:
 
         # AA subspace: scale by sqrt(d_aa), then optional 3Di in AA subspace
         aa_emb = self.amino_acid_embedding(token_ids) * math.sqrt(self.d_aa)
-        aa_emb = _apply_tdi_embedding(aa_emb, self.tdi_embedding, batch)
 
         # Per-segment reset positions ([batch, seq]) or absolute positions
         # ([seq], broadcast over batch). Computed once and shared by the learned
@@ -608,7 +562,7 @@ class ConcatPosEmbeddingPipeline:
             positions = torch.arange(token_ids.size(1), device=token_ids.device)
 
         if self.positional_embedding is not None:
-            # Positional subspace: no sqrt scaling (experimental — see #340)
+            # Positional subspace: no sqrt scaling (experimental)
             pos_emb = self.positional_embedding(positions)  # [..., seq, d_pos]
             if not self.per_segment_positions:
                 pos_emb = pos_emb.unsqueeze(0).expand(token_ids.size(0), -1, -1)

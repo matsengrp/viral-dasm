@@ -4,7 +4,7 @@ import dataclasses
 import importlib.util
 import zipfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Final, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import torch
 
@@ -15,10 +15,6 @@ from dasm2.metadata import (
     SourceLaunchInfo,
 )
 from dasm2.models.factory import needs_sf_projection
-from dasm2.models.key_migration import (
-    migrate_sf_projection_keys,
-    migrate_transformer_block_keys,
-)
 from dasm2.serialization.training_state import TrainingState
 from dasm2.serialization.zip_io import (
     model_archive_exists,
@@ -34,15 +30,6 @@ if TYPE_CHECKING:
     from dasm2.training.compute_backend import ComputeBackend
     from dasm2.training.task import Task
     from dasm2.training.trainer import Trainer
-
-# Patch script for checkpoints with an ambiguous sf_projection (see
-# _assert_unambiguous_sf_projection below). Also referenced by
-# scripts/detect_wiggle_regression.py's mirror check (#969) — single source
-# of truth so a future rename only needs one edit.
-WIGGLE_PATCH_SCRIPT_PATH: Final = (
-    "experiments/compara-training/patch_checkpoint_wiggle.py"
-)
-
 
 @dataclasses.dataclass(frozen=True)
 class ResumeResult:
@@ -225,21 +212,10 @@ def migrate_legacy_state_dict(
 ) -> Dict[str, Any]:
     """Migrate legacy DASM2 checkpoint keys to current model layout.
 
-    Two rename passes are applied per key when needed:
-      - TransformerBlock rename (#379, #444): self_attn → self_attention,
-        linear1/2 → feed_forward.linear1/2, norm1/2 → post_attn_norm/post_ffn_norm.
-      - Shared SF projection rename (#513):
-        prediction_heads.{Head}.prediction_layer.* → sf_projection.projection.*.
-
-    .. deprecated::
-        Post-#621 Task #7 the production loader rejects pre-v5 checkpoints
-        outright. This helper survives only to support
-        ``scripts/migrate_checkpoint_to_v5.py``: re-applying these renames as
-        part of an offline migration so the resulting v5 checkpoint can be
-        loaded normally.
-
-    Compares checkpoint keys against the model's expected keys to decide
-    whether migration is needed.
+    In this fork the only surviving migration is dropping a legacy
+    ``encoder.distance_proj.bias`` tensor. Upstream also renamed keys for two
+    older layouts; those passes are not vendored (see the comment below), so
+    every remaining key must already name a parameter of the model.
 
     Raises:
         ValueError: If migration produces duplicate keys or keys not expected
@@ -252,8 +228,9 @@ def migrate_legacy_state_dict(
     if set(state_dict.keys()) == expected_keys:
         return state_dict
 
-    # Issue #199, Exp 3: distance_proj is now bias-free. Drop the legacy bias
-    # tensor when loading a pre-Exp-3 checkpoint into a current model.
+    # `distance_proj` is bias-free in the current model. Drop the bias tensor
+    # a checkpoint written before that change still carries, so it does not
+    # trip the "names no parameter" check below.
     if (
         "encoder.distance_proj.bias" in state_dict
         and "encoder.distance_proj.bias" not in expected_keys
@@ -262,246 +239,24 @@ def migrate_legacy_state_dict(
             k: v for k, v in state_dict.items() if k != "encoder.distance_proj.bias"
         }
 
-    # Rename keys that don't already match the model; validate all mappings
-    migrated: Dict[str, Any] = {}
-    for key, value in state_dict.items():
-        new_key = key
-        if new_key not in expected_keys:
-            new_key = migrate_transformer_block_keys(new_key)
-        if new_key not in expected_keys:
-            new_key = migrate_sf_projection_keys(new_key)
-        if new_key in migrated:
+    # Every key must already name a parameter of the model being loaded into.
+    #
+    # Upstream renamed keys here for two older layouts: a transformer-block
+    # rename, and three shared-SF heads whose `prediction_layer` moved into
+    # `sf_projection`. Both ran only for a key that did not already match, and
+    # the checkpoints this repository loads predate neither -- all 64 keys of
+    # the `dasm-85k` reference match as written. The rewrites were also not
+    # idempotent: applied to a current key, the block rename produces
+    # `feed_forward.feed_forward.linear1`. Carrying them would have claimed
+    # support for formats this repository has never read (#4).
+    for key in state_dict:
+        if key not in expected_keys:
             raise ValueError(
-                f"Key collision during migration: '{key}' -> '{new_key}' "
-                f"already present in migrated dict"
+                f"Checkpoint key '{key}' names no parameter of this model. "
+                "This fork loads the checkpoint layout its own code writes; "
+                "it carries no migrations for older `dasm2` layouts."
             )
-        if new_key not in expected_keys:
-            raise ValueError(
-                f"Migration produced unexpected key '{new_key}' (from '{key}'). "
-                f"This checkpoint may require a different migration path."
-            )
-        migrated[new_key] = value
-    return migrated
-
-
-# Sentinel for "not yet set" — distinct from None, which is a valid domain
-# value (wiggle_beta=null means explicitly wiggle-free).
-_UNSET: Final = object()
-
-# The wiggle_beta default that DASMEvolHead carried pre-#513. Recorded as a
-# named constant because the M4 branch injects it explicitly to avoid a hidden
-# dependency on SelectionFactorProjection's post-#513 default staying aligned.
-_PRE_513_DASM_EVOL_HEAD_DEFAULT_WIGGLE_BETA: Final = 0.3
-
-# Historical set of head config classes that existed pre-#513 with shared SF.
-# Intentionally an independent frozen literal, not derived from
-# `_SF_HEAD_PREFIXES` in `dasm2/models/key_migration.py` — that constant
-# records the historical state_dict key prefixes, a different historical
-# assertion that happens to refer to the same three heads today. Coupling the
-# two would create an implicit contract that may not survive future refactors.
-# Do not add new entries.
-_SF_HEAD_TYPES = frozenset({"DASMEvolHead", "WhichmutHead", "AAOWhichmutHead"})
-
-# Historical set of pre-#513 SF heads whose configs had **no** `wiggle_beta`
-# field — these heads were always wiggle-free by construction. Kept as a
-# literal frozenset rather than `_SF_HEAD_TYPES - {"DASMEvolHead"}` because
-# the membership records a separate historical fact (which heads lacked the
-# field), not a present-day set relationship.
-#
-# After #513, the shared `SelectionFactorProjection` defaults
-# `wiggle_beta=0.3`, which would silently apply wiggle to these heads' weights
-# at inference. The migration treats their pre-#513 intent as `wiggle_beta=null`.
-_NO_WIGGLE_HEAD_TYPES = frozenset({"WhichmutHead", "AAOWhichmutHead"})
-
-# Heads that carried a `max_aa_seq_len` field during their early context-free
-# baseline phase but are now truly context-free (a single scalar / a 20x20
-# table) and reject the field. The migration strips it so legacy
-# compara-training checkpoints load. Recorded as a literal frozenset (not
-# derived from any other constant) because it records a separate historical
-# fact: which heads had this transient field.
-_CONTEXT_FREE_HEADS_NO_LEN = frozenset({"SingleValueHead", "SingleMatrixHead"})
-
-
-def _infer_sf_projection_from_heads(
-    heads: List[Dict[str, Any]],
-) -> Optional[Dict[str, Any]]:
-    """Infer the post-#513 sf_projection block from pre-#513 head configs.
-
-    Returns the dict to use for ``model["sf_projection"]``, or ``None`` if
-    the metadata has no SF-consuming head and no injection is needed.
-
-    Raises:
-        ValueError: If two SF heads carry conflicting ``wiggle_beta`` values.
-    """
-    explicit_wiggle_beta: Any = _UNSET
-    has_no_wiggle_head = False
-    has_dasm_evol_head = False
-
-    for head in heads:
-        head_type = head.get("head_type")
-        if head_type in _NO_WIGGLE_HEAD_TYPES:
-            has_no_wiggle_head = True
-        if head_type == "DASMEvolHead":
-            has_dasm_evol_head = True
-        if head_type in _SF_HEAD_TYPES and "wiggle_beta" in head:
-            head_value = head["wiggle_beta"]
-            if (
-                explicit_wiggle_beta is not _UNSET
-                and head_value != explicit_wiggle_beta
-            ):
-                raise ValueError(
-                    "Conflicting wiggle_beta values across SF heads in pre-#513 "
-                    f"checkpoint metadata: {explicit_wiggle_beta!r} vs "
-                    f"{head_value!r}. All SF heads were expected to share a "
-                    "single value."
-                )
-            explicit_wiggle_beta = head_value
-
-    if explicit_wiggle_beta is not _UNSET:
-        return {"wiggle_beta": explicit_wiggle_beta}
-    if has_no_wiggle_head:
-        return {"wiggle_beta": None}
-    if has_dasm_evol_head:
-        # Pre-#513 DASMEvolHead with wiggle_beta omitted — the head's pre-#513
-        # default was 0.3 (netam-compatible). Inject explicitly so the migration's
-        # intent doesn't depend on _create_sf_projection's auto-create default
-        # staying aligned with the historical head default.
-        return {"wiggle_beta": _PRE_513_DASM_EVOL_HEAD_DEFAULT_WIGGLE_BETA}
-    return None
-
-
-# Head types that legitimately retain a `wiggle_beta` field on their head
-# config post-#621 (QDASM/Hybrid head-side activation parameter). The strip
-# below must not touch these, otherwise a pre-v5 checkpoint with an explicit
-# `wiggle_beta=0.5` would have the field popped and Pydantic would refill
-# the default `0.3` on load — silent data loss on resume.
-_WIGGLE_BETA_HEAD_TYPES = frozenset({"QDASMEvolHead", "HybridEvolHead"})
-
-
-def _migrate_metadata(metadata: Dict[str, Any]) -> None:
-    """Apply in-place metadata migrations for old checkpoint formats.
-
-    .. deprecated::
-        Post-#621 Task #7 the production loader rejects pre-v5 checkpoints
-        outright. This helper survives only to support
-        ``scripts/migrate_checkpoint_to_v5.py`` and the legacy-migration
-        tests under ``tests/serialization/`` and
-        ``tests/training/test_legacy_checkpoint_migration.py``.
-
-    Issue #513: `wiggle_beta` moved from head configs to `sf_projection`.
-    Issue #586: pre-#513 checkpoints must reconstruct with the same wiggle
-    setting they were trained with. After #699 the auto-create default is
-    `wiggle_beta=None` (wiggle-free), so DASMEvolHead checkpoints need
-    explicit injection of `wiggle_beta=0.3` to preserve their trained
-    behavior — without it the auto-create path would silently drop wiggle.
-
-    Pre-#513:
-        - `DASMEvolHead` had a `wiggle_beta` field on its config (default 0.3,
-          can be set to `null` for no-wiggle trainings).
-        - `WhichmutHead` and `AAOWhichmutHead` had no `wiggle_beta` field;
-          they were always wiggle-free by construction.
-
-    Migration:
-        - If any `DASMEvolHead` config has an explicit `wiggle_beta`, that
-          value wins. (Multiple SF heads with conflicting values raise.)
-        - Otherwise, if the metadata only carries `WhichmutHead` /
-          `AAOWhichmutHead`, inject `wiggle_beta: null` to preserve their
-          original wiggle-free behavior.
-        - Strip `wiggle_beta` from SF-collapsed head configs so
-          `TrainingConfig` deserialization doesn't reject the extra field.
-          QDASM/Hybrid retain `wiggle_beta` as a head-side field post-#621.
-        - Skip injection entirely if `sf_projection` is already present
-          (post-#513 passthrough).
-
-    Issue #578: epoch -> step training-loop migration. ``epochs`` was
-    removed from ``TrainingConfig`` and replaced by ``max_train_steps`` /
-    ``eval_every_steps``. Old checkpoints carry the integer epoch count;
-    we lift it to ``max_train_steps`` (and pin ``eval_every_steps`` to
-    the same value) so the new validators accept it.
-
-    Issue #578 also removed the ``num_workers`` DataLoader knob from
-    ``TrainingConfig``. Late-pre-#578 checkpoints carry it as an extra
-    top-level field; we strip it unconditionally since it has no
-    architectural implication and only affected DataLoader parallelism
-    at training time.
-
-    Issue #199: distance encoding moved from the head to the encoder. Old
-    ``DASMEvolHead`` configs may carry ``distance_embed_dim``,
-    ``num_distance_bins``, and ``use_distance``; these were never read by the
-    head's forward, so the head loop drops them.
-    """
-    tc = metadata.get("training_config")
-    if tc is None:
-        return
-    model = tc.get("model")
-    if model is None:
-        return
-    heads = model.get("heads", [])
-
-    inferred = _infer_sf_projection_from_heads(heads)
-
-    for head in heads:
-        if head.get("head_type") not in _WIGGLE_BETA_HEAD_TYPES:
-            head.pop("wiggle_beta", None)
-        # Issue #199: distance encoding moved from head to encoder. Drop the
-        # legacy head-level distance fields the current head config rejects.
-        head.pop("distance_embed_dim", None)
-        head.pop("num_distance_bins", None)
-        head.pop("use_distance", None)
-
-    if "epochs" in tc:
-        epochs = tc.pop("epochs")
-        tc.setdefault("max_train_steps", int(epochs))
-        tc.setdefault("eval_every_steps", int(epochs))
-
-    # `num_workers` (DataLoader parallelism) was removed from TrainingConfig
-    # in the same #578 step-based-training migration. Strip silently — no
-    # architectural implication, training-time-only knob.
-    tc.pop("num_workers", None)
-
-    for head in heads:
-        if head.get("head_type") in _CONTEXT_FREE_HEADS_NO_LEN:
-            head.pop("max_aa_seq_len", None)
-
-    if "sf_projection" in model:
-        return
-
-    if inferred is not None:
-        model["sf_projection"] = inferred
-
-
-def _deduplicate_heads(training_config: Any) -> None:
-    """Remove duplicate head configs by head_type (in-place).
-
-    .. deprecated::
-        Post-#621 Task #7 the production loader rejects pre-v5 checkpoints.
-        This helper is retained for the migration script and its tests.
-
-    Some pre-v4 checkpoints (e.g., AAHWhichmutHead) were trained with
-    multi-dataset configs that list the same head type multiple times even
-    though the model only has one head instance. v4 metadata deduplicates
-    head_configs at ``export_metadata`` time so this is no longer needed
-    on the load path.
-    """
-    import warnings
-
-    seen: set[str] = set()
-    unique_heads = []
-    duplicates: list[str] = []
-    for head_config in training_config.model.heads:
-        head_type_str = head_config.head_type.value
-        if head_type_str not in seen:
-            unique_heads.append(head_config)
-            seen.add(head_type_str)
-        else:
-            duplicates.append(head_type_str)
-    if duplicates:
-        warnings.warn(
-            f"Checkpoint metadata contained duplicate head types: {duplicates}. "
-            "Keeping first occurrence of each.",
-            stacklevel=2,
-        )
-    training_config.model.heads = unique_heads
+    return dict(state_dict)
 
 
 def _attach_task_losses_for_inference(model: "CoreModel", training_config: Any) -> None:
@@ -546,36 +301,33 @@ def _attach_task_losses_for_inference(model: "CoreModel", training_config: Any) 
 def _assert_supported_serialization_version(
     metadata: Dict[str, Any], filepath: Path
 ) -> None:
-    """Reject pre-v5 checkpoints with a helpful pointer to the migration script.
+    """Reject any checkpoint not written in the current serialization layout.
 
-    Post-#621 (Task #7) the loader assumes the checkpoint metadata is in the
-    v5 layout (per-task ``LossConfig``, deduplicated ``model.heads``,
-    head_types using post-collapse names) and the state_dict uses the
-    post-collapse key naming (``task_losses.<key>.*`` rather than the legacy
+    The loader assumes v5 metadata (per-task ``LossConfig``, deduplicated
+    ``model.heads``, post-collapse head type names) and a v5 state_dict
+    (``task_losses.<key>.*`` rather than
     ``prediction_heads.<head>.{scale,logit_bias}``). The on-disk
-    ``serialization_version`` is stamped to 5 to mark this layout.
+    ``serialization_version`` records that layout.
 
-    Older checkpoints (v1-v4) need to run through
-    ``scripts/migrate_checkpoint_to_v5.py`` before they can be loaded; this
-    function emits a one-line error pointing the user at that script.
+    Upstream shipped an offline migration for its older checkpoints. It is
+    not vendored here: this repository reads the checkpoints its own code
+    writes, so an older one is refused rather than silently reinterpreted.
     """
     sv = metadata.get("serialization_version")
     if sv is None:
         raise ValueError(
             f"Checkpoint metadata missing 'serialization_version' field: "
-            f"{filepath}. Run "
-            f"`pixi run python scripts/migrate_checkpoint_to_v5.py --apply "
-            f"--paths {filepath}` to migrate it to the current "
-            f"(v{CURRENT_SERIALIZATION_VERSION}) layout."
+            f"{filepath}. This repository reads only the current "
+            f"(v{CURRENT_SERIALIZATION_VERSION}) layout, which stamps that "
+            f"field; it carries no migration for older checkpoints."
         )
     if sv < CURRENT_SERIALIZATION_VERSION:
         raise ValueError(
             f"Checkpoint at {filepath} has serialization_version={sv}, "
-            f"but the current loader requires v{CURRENT_SERIALIZATION_VERSION} "
-            f"(post-#621 Task #7: per-task LossConfig schema and "
-            f"task_losses state-dict layout). Run "
-            f"`pixi run python scripts/migrate_checkpoint_to_v5.py --apply "
-            f"--paths {filepath}` to migrate the checkpoint in place."
+            f"but the loader requires v{CURRENT_SERIALIZATION_VERSION} "
+            f"(per-task LossConfig schema and task_losses state-dict "
+            f"layout). This repository carries no migration for older "
+            f"checkpoints."
         )
 
 
@@ -584,42 +336,24 @@ def _assert_unambiguous_sf_projection(
 ) -> None:
     """Reject a checkpoint whose stored ``sf_projection`` is ambiguous.
 
-    Since PR #895 (closing #877), ``export_metadata`` derives
-    ``sf_projection`` from the live model instance — and
-    ``CoreModel._validate_sf_projection`` forbids an SF-consuming head with
-    a null projection — so any checkpoint written through the real
-    ``Trainer.save_checkpoint``/``export_metadata`` path on post-#895 code
-    always stores an explicit, non-null ``sf_projection`` whenever an
-    SF-consuming head is present. Before #895, ``export_metadata`` never
-    passed ``sf_projection`` at all, so it *unconditionally* stored
-    ``null`` for every checkpoint saved by that code, regardless of the
-    model's actual ``wiggle_beta``. A stored ``sf_projection: null``
-    alongside an SF-consuming head therefore ordinarily means the
-    checkpoint was saved by code from before #895 merged (2026-07-20) —
-    which includes any active experiment branch that hadn't rebased past
-    that date, not just checkpoints that are chronologically old. A stale
-    or dirty clone that had rebased past #895 but not picked up the fix,
-    or metadata copied verbatim from such a checkpoint (as
-    ``experiments/2026-07-10-sim-anchor/scripts/null_control.py`` does when
-    re-saving a mutated copy of a base checkpoint), are secondary,
-    unconfirmed ways to reach the same shape. Worked example: the
-    sim-anchor truth model was saved 2026-07-11 — nine days *before* #895
-    merged — so it is an ordinary pre-#895 checkpoint; its unresolvable
-    ``commit_sha`` and ``dirty`` status are incidental to running from an
-    active experiment clone, not evidence of clone staleness relative to
-    #895. In every case the true ``wiggle_beta`` is unknowable from the
-    metadata alone (#896) — reconstructing it anyway would silently apply
-    whatever wiggle default the *loading* commit happens to have, rather
-    than what the checkpoint actually trained with. This mechanism is
-    exactly what produced the incidents behind #896, #964's Phase 0, and
-    the PR #934 review.
+    ``export_metadata`` derives ``sf_projection`` from the live model, and
+    ``CoreModel._validate_sf_projection`` forbids an SF-consuming head with a
+    null projection, so a checkpoint written by this code always stores an
+    explicit, non-null ``sf_projection`` whenever an SF-consuming head is
+    present. A stored ``sf_projection: null`` beside an SF-consuming head
+    therefore means the checkpoint came from an older writer that omitted the
+    field, and its true ``wiggle_beta`` is not recoverable from the metadata.
+
+    Refusing is the point. Reconstructing the value would silently apply
+    whatever wiggle default the *loading* commit happens to carry, which need
+    not be what the checkpoint trained with -- a wrong number that loads
+    cleanly is worse than a refusal.
 
     Args:
         training_config: Parsed ``TrainingConfig`` for the checkpoint.
         filepath: Path to the checkpoint, for the error message.
         resumable: Whether this checkpoint carries a ``training_state.pth``
-            member — ``patch_checkpoint_wiggle.py`` refuses to touch such
-            checkpoints, so they have no metadata-patch remedy.
+            member, which narrows the available remedies.
 
     Raises:
         ValueError: If ``training_config.model.sf_projection`` is ``None``
@@ -633,32 +367,27 @@ def _assert_unambiguous_sf_projection(
 
     if resumable:
         remedy = (
-            f"This checkpoint carries a training_state.pth member, which "
-            f"{WIGGLE_PATCH_SCRIPT_PATH} explicitly refuses to touch (its "
-            f"docstring: it does not attempt to preserve that member) — there "
-            f"is no metadata-patch remedy available here. Retrain from "
-            f"scratch, or resume from an earlier, unambiguous checkpoint in "
-            f"the same run."
+            "This checkpoint also carries a training_state.pth member, so "
+            "rewriting its metadata would leave the optimizer state "
+            "describing a model it no longer matches. Retrain, or resume "
+            "from an earlier checkpoint in the same run that stores an "
+            "explicit sf_projection."
         )
     else:
         remedy = (
-            f"Run `python {WIGGLE_PATCH_SCRIPT_PATH} {filepath} "
-            f"--wiggle-beta <value>` to patch the metadata in place with the "
-            f"known value (see #896), or retrain."
+            "If the value this checkpoint trained with is known from outside "
+            "the file, rewrite the stored training_config with an explicit "
+            "sf_projection before loading it. Otherwise retrain."
         )
 
     raise ValueError(
         f"Checkpoint at {filepath} has an SF-consuming head but no explicit "
         f"sf_projection in its stored training_config (sf_projection: null). "
-        f"This checkpoint was ordinarily written by code from before #895 "
-        f"merged (2026-07-20), which stored sf_projection: null "
-        f"unconditionally; a stale/dirty clone that hadn't picked up #895, "
-        f"or metadata copied verbatim from such a checkpoint, are secondary, "
-        f"unconfirmed possibilities. In every case its true wiggle_beta is "
-        f"unknowable from the metadata alone. Reconstructing it would "
-        f"silently use whatever wiggle_beta default the current commit "
-        f"happens to have, which may not match how this checkpoint was "
-        f"trained. {remedy}"
+        f"It was written by an older writer that omitted the field, so its "
+        f"true wiggle_beta is unknowable from the metadata alone. "
+        f"Reconstructing it would silently use whatever wiggle_beta default "
+        f"the current commit happens to have, which may not match how this "
+        f"checkpoint was trained. {remedy}"
     )
 
 
@@ -693,7 +422,7 @@ def load_checkpoint(
             of the ``model_path`` recorded in the checkpoint's
             ``training_config.neutral_model``. The recorded path is absolute
             under whichever host's artifact root wrote it, so it is often
-            missing elsewhere (#1473). The caller vouches that this is the
+            missing elsewhere. The caller vouches that this is the
             same neutral; nothing here can check it. Re-saving the returned
             Trainer records this path.
 
@@ -711,13 +440,8 @@ def load_checkpoint(
 
     Examples:
         >>> from pathlib import Path
-        >>> from dasm2.analysis.oe_plots import OEPlotter
-        >>> from dasm2.data.evolutionary_dataset import create_evolutionary_dataset
         >>> trainer = load_checkpoint(Path("checkpoints/8m_final.zip"))
-        >>> # Trainer ready for OE plotting
-        >>> bundle = create_evolutionary_dataset("v1jaffe", trainer.neutral_model)
-        >>> plotter = OEPlotter(trainer, bundle)
-        >>> predictions_df = plotter.oe_plot_df
+        >>> trainer.model.eval()
     """
     from dasm2.config import TrainingConfig
 
@@ -746,12 +470,12 @@ def load_checkpoint(
         )
 
     # World size and backend precision mode the checkpoint was trained at,
-    # both None for anything written before issue #1027 recorded them.
+    # both None for anything written before these were recorded.
     # Carried through so re-saving this trainer doesn't overwrite them with
     # the fabricated SingleGPUBackend's 1/"no" — including the None case,
     # which must stay None rather than become a fact the source never stated.
     source_training_metadata = metadata.get("training_metadata", {})
-    # Where training's rates came from (issue #1299); None for checkpoints
+    # Where training's rates came from; None for checkpoints
     # that predate the field. Evaluation checks it against the eval file, and
     # a re-save carries it through, since this Trainer has no datasets.
     recorded_rates_source = metadata.get("neutral_rates_source")
@@ -799,7 +523,6 @@ def _build_inference_trainer(
     """
     # Local imports: serialization -> training is a circular dependency
     # (training.trainer imports serialization.checkpoints.save_model at module level).
-    from dasm2.config import create_neutral_model_from_config
     from dasm2.models.factory import create_model_from_config
     from dasm2.training.compute_backend import SingleGPUBackend
     from dasm2.training.trainer import Trainer
@@ -822,12 +545,11 @@ def _build_inference_trainer(
     if state_dict is not None:
         model.load_state_dict(state_dict)
 
-    # Create neutral model from config (if present)
-    neutral_model = (
-        create_neutral_model_from_config(training_config.neutral_model)
-        if training_config.neutral_model is not None
-        else None
-    )
+    # Always None here: `TrainingConfig.neutral_model` is typed `None` in this
+    # fork, so the branch that built one is unreachable and its constructor went
+    # with the prune. This corpus carries `nt_rates`/`nt_csps` in the Parquet,
+    # which is why no neutral model is loaded at all.
+    neutral_model = None
 
     # Initialize Trainer with all components (empty tasks for evaluation only)
     cache_dir_str = str(cache_dir) if cache_dir is not None else ".dasm2_cache"
@@ -835,11 +557,11 @@ def _build_inference_trainer(
     # even possible here — a ``Task`` bundles the dataset it trains on
     # (DESIGN D5) and a checkpoint carries no datasets. The parsed
     # ``TaskConfig`` list therefore rides along in ``source_task_configs``
-    # so a re-save doesn't drop the ``tasks: [...]`` block (issue #974); see
+    # so a re-save doesn't drop the ``tasks: [...]`` block; see
     # ``Trainer.__init__`` for why that fallback is needed.
     # ``source_launch_info`` rides along for the same reason: the backend
     # below is fabricated, so its world size of 1 and precision mode of "no"
-    # would overwrite the recorded launch facts on any re-save (issue #1027).
+    # would overwrite the recorded launch facts on any re-save.
     return Trainer(
         model=model,
         neutral_model=neutral_model,
@@ -1039,9 +761,9 @@ def load_model_only(
 
     model = create_model_from_config(training_config.model, device=device)
 
-    # The state_dict carries ``task_losses.<key>.*`` entries (e.g. the
-    # contrastive loss's ``logit_bias``); they need real submodules to land on,
-    # exactly as in ``load_checkpoint``.
+    # The state_dict carries ``task_losses.<key>.*`` entries for any loss
+    # that owns parameters; they need real submodules to land on, exactly as
+    # in ``load_checkpoint``.
     _attach_task_losses_for_inference(model, training_config)
 
     model.load_state_dict(state_dict)
@@ -1065,9 +787,9 @@ def resume_training(
     size other than the one the checkpoint was trained at is *not* supported
     and is rejected upstream by ``_validate_resume_world_size_matches`` —
     the restored LR schedule was annealed for the original effective batch
-    size, and rescaling it is a separate design question (issue #1027).
+    size, and rescaling it is a separate design question.
 
-    Rebuilds ``head_optimizer`` (issue #1220) from the checkpoint's own
+    Rebuilds ``head_optimizer`` from the checkpoint's own
     ``training_config.head_optimizer``/``head_optimizer_head_type`` the same
     way it rebuilds the main optimizer — this run's own tasks/backend are
     the only inputs that come from the caller; every optimizer/scheduler
@@ -1076,7 +798,7 @@ def resume_training(
     backend, mirroring ``create_trainer``'s own guard.
 
     The trainer's ``checkpoint_id`` stays ``None``, so the resume reads and
-    writes the same branch-length cache names as the run it resumes (#1876).
+    writes the same branch-length cache names as the run it resumes.
 
     Returns a :class:`ResumeResult` dataclass. Pass the fields to
     :meth:`Trainer.multi_cycle_train` (or ``multi_cycle_train_joint``) to
@@ -1105,8 +827,7 @@ def resume_training(
             as ``create_trainer`` does for a fresh run. Threading the backend
             in *without* that wrap would be worse than the old hard-wired
             ``SingleGPUBackend``: every rank would train an independent model
-            on its own data shard with no gradient all-reduce, silently
-            (issue #1027).
+            on its own data shard with no gradient all-reduce, silently.
 
     Returns:
         :class:`ResumeResult` with ``trainer``, ``start_cycle``,
@@ -1120,7 +841,7 @@ def resume_training(
         FileNotFoundError: If checkpoint file doesn't exist
     """
     # Local imports: serialization -> training is a circular dependency
-    from dasm2.config import TrainingConfig, create_neutral_model_from_config
+    from dasm2.config import TrainingConfig
     from dasm2.models.factory import create_model_from_config
     from dasm2.training.compute_backend import SingleGPUBackend
     from dasm2.training.head_optimizer_state import (
@@ -1181,23 +902,18 @@ def resume_training(
     # requires_grad-filtered parameters below, and before the DDP wrap in
     # backend.prepare_model_and_optimizer — flipping requires_grad after
     # the wrap deadlocks DDP's reducer, which registers every
-    # requires-grad parameter at construction time (issue #1076).
+    # requires-grad parameter at construction time.
     if training_config.freeze_encoder:
         model.freeze_encoder()
 
-    # Create neutral model
-    neutral_model = (
-        create_neutral_model_from_config(training_config.neutral_model)
-        if training_config.neutral_model is not None
-        else None
-    )
+    # Always None -- see `_build_inference_trainer` above.
+    neutral_model = None
 
     config_name = metadata.get("config_name")
 
     # head_optimizer_module is resolved before backend.prepare_model_and_optimizer
     # below, while ``model`` is still the plain (unwrapped) CoreModel — mirrors
-    # create_trainer (issue #1220; PR #1223 review: resume_training() didn't
-    # thread head_optimizer through at all until now).
+    # create_trainer.
     head_optimizer_module = (
         model.require_head(training_config.head_optimizer_head_type)
         if training_config.head_optimizer_head_type is not None

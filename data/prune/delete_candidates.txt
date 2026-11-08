@@ -1,0 +1,27 @@
+# lines  path  <- live modules that import it (blank: none)
+# 23 files, 6,630 lines
+# regenerate: python scripts/prune_candidates.py <traces> --write
+
+   444  dasm2/data/manifests.py  dasm2/data/discovery.py
+   512  dasm2/data/registry_schema.py  dasm2/data/discovery.py dasm2/data/yaml_registry.py
+   276  dasm2/data/token_budget_sampler.py  dasm2/training/trainer.py
+   102  dasm2/heads/per_site_parent_child.py  dasm2/heads/factory.py
+   146  dasm2/heads/types.py  dasm2/artifacts.py dasm2/config.py dasm2/data/registry.py dasm2/heads/factory.py dasm2/models/core/base.py dasm2/models/factory.py dasm2/train_command.py dasm2/training/factory.py dasm2/training/task.py dasm2/training/trainer.py
+   283  dasm2/losses/dms_matrix.py  dasm2/training/metric_providers.py
+    24  dasm2/losses/loss_utils.py  dasm2/losses/whichmut_loss.py
+  1356  dasm2/models/core/attention.py  dasm2/models/core/transformer.py dasm2/models/core/transformer_block.py dasm2/train_command.py
+    44  dasm2/molevol/aao_neutral_rates.py  dasm2/data/transforms.py
+   464  dasm2/molevol/codon_preference.py
+   108  dasm2/molevol/mutation_matrices.py  dasm2/molevol/codon_conversion.py
+   436  dasm2/molevol/neutral_evolution.py  dasm2/data/transforms.py
+   144  dasm2/molevol/tandem.py  dasm2/data/transforms.py
+   246  dasm2/molevol/tensor_ops.py  dasm2/models/core/sf_projection.py dasm2/molevol/codon_conversion.py dasm2/neutral/hit_class.py
+   358  dasm2/neutral/base.py  dasm2/data/neutral_rates_source.py dasm2/data/transforms.py dasm2/training/factory.py dasm2/training/trainer.py
+   190  dasm2/neutral/codon_boundary.py  dasm2/data/transforms.py
+    74  dasm2/positional_encoding.py  dasm2/models/core/embeddings.py dasm2/models/core/transformer.py
+   247  dasm2/tensors_of_seqs.py  dasm2/data/transforms.py
+   567  dasm2/training/checkpoint_selection.py  dasm2/training/hooks/checkpoints.py
+   192  dasm2/training/head_optimizer_state.py  dasm2/serialization/checkpoints.py dasm2/training/factory.py dasm2/training/trainer.py
+   162  dasm2/training/hooks/base.py  dasm2/train_command.py dasm2/training/factory.py dasm2/training/hooks/checkpoints.py dasm2/training/task.py dasm2/training/trainer.py
+    34  dasm2/training/hooks/factory.py  dasm2/train_command.py
+   221  dasm2/training/log_reader.py  dasm2/training/logging.py

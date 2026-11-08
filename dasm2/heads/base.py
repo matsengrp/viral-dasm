@@ -1,6 +1,6 @@
 """Base classes for prediction heads.
 
-After #621 Task #4, heads own only the forward pass; loss math lives on
+Heads own only the forward pass; loss math lives on
 ``Loss`` modules in ``dasm2/losses/`` (and is registered on the trainer
 via the per-task ``Task.loss``). The ``compute_loss`` ABC is gone;
 ``SharedSelectionFactorHead`` is now a thin identity-forward
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 
 class Capability(Enum):
-    """An output space a prediction head can produce (issue #738).
+    """An output space a prediction head can produce.
 
     Validation metric groups are gated on the head's declared
     capabilities rather than on the concrete loss class: a metric is a
@@ -60,7 +60,7 @@ class PredictionHead(nn.Module, ABC):
     # False for heads that operate on raw encoder output.
     consumes_shared_sf: ClassVar[bool] = False
 
-    # Output spaces this head produces (issue #738). Drives which
+    # Output spaces this head produces. Drives which
     # capability-gated validation metric groups are emitted for tasks
     # using this head; see ``dasm2/training/metric_providers.py``. Empty
     # by default — heads opt in by listing the capabilities their forward
@@ -78,14 +78,14 @@ class PredictionHead(nn.Module, ABC):
     # scoring adapter) instead of a plain CoreModel, regardless of encoder
     # type — a single unmasked forward pass is semantically wrong for a head
     # whose logits are raw reconstruction targets, not gauge-anchored
-    # selection factors. Set by MLMHead (issue #923); mirrors
+    # selection factors. Set by MLMHead; mirrors
     # consumes_shared_sf's pattern of driving model-construction dispatch
     # off a ClassVar rather than a data-loader head-type set.
     requires_masked_marginal_scoring: ClassVar[bool] = False
 
     # When True, models/factory.py builds a SiteMaskedCoreModel, which
     # predicts each site's fitness vector from a pass with that site masked
-    # (issue #1550). Set by SiteMaskedSelectionFactorHead.
+    #. Set by SiteMaskedSelectionFactorHead.
     requires_site_masked_core_model: ClassVar[bool] = False
 
     def __init__(self) -> None:

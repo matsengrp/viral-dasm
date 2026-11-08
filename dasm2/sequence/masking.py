@@ -288,7 +288,7 @@ def filter_pcps_with_only_masked_mutations(
 
 
 # ---------------------------------------------------------------------------
-# UShER censor tables (#1079)
+# UShER censor tables
 # ---------------------------------------------------------------------------
 #
 # The functions above express a *codon-granular, clade-independent* mask, which
@@ -299,18 +299,18 @@ def filter_pcps_with_only_masked_mutations(
 # single-direction granularity, per clade, which is why this is a table of
 # coordinates rather than a boolean mask over positions.
 #
-# Produced by mat-pcp's `censor_table` rule (matsengrp/mat-pcp#144) as
+# Produced by mat-pcp's `censor_table` rule as
 # `pcps/{gene}/censored_mutations.csv` plus a `.clades.txt` roster sidecar.
 #
 # The coordinate table is the *more general* representation, though, so the codon
 # mask is expressible in it rather than being a parallel mechanism: a global codon
 # site is a clade-independent site mask, which is exactly what
-# `CensorSpec.site_nt_indices` already means. `with_global_codon_sites` (#1083)
+# `CensorSpec.site_nt_indices` already means. `with_global_codon_sites`
 # does that merge, so both mask files reach the loss through one code path.
 
 CENSOR_TABLE_COLUMNS = ("clade", "nt_site", "nt_index", "from_nt", "to_nt")
 
-# mat-pcp's `pcps/{gene}/masked_nt_sites.csv` (mat-pcp#153) -- the *clade-
+# mat-pcp's `pcps/{gene}/masked_nt_sites.csv` -- the *clade-
 # independent* half of the same coordinate contract, at nucleotide granularity.
 # `censored_mutations.csv` carries the two clade-specific reasons of
 # `masking.compute_exclusions`' five; this file carries the three global ones
@@ -334,7 +334,7 @@ MASKED_NT_SITES_COLUMNS = ("nt_site", "nt_index", "reason")
 # agreeing is load-bearing, so a test pins it.
 
 
-# The censoring ablation's arms (#1079). "both" is the only coherent objective;
+# The censoring ablation's arms. "both" is the only coherent objective;
 # the two single-half modes exist to demonstrate that the halves do different
 # things, since each on its own still trains and produces a plausible curve.
 #
@@ -441,7 +441,7 @@ def empty_censor_spec() -> CensorSpec:
 def censored_codon_sites(spec: CensorSpec) -> Set[int]:
     """1-indexed codon sites this clade censors at least one candidate in.
 
-    The site class the fitness comparison splits on (#1079). A model-external
+    The site class the fitness comparison splits on. A model-external
     metric is computed separately over these sites and over the rest, because
     the two are where censoring predicts an effect and where it predicts at most
     an indirect one.
@@ -630,7 +630,7 @@ def load_censor_table(
 
 
 def parse_masked_nt_sites_file(table_path: str | Path) -> List[int]:
-    """Load a gene's clade-independent nucleotide mask (mat-pcp#153).
+    """Load a gene's clade-independent nucleotide mask.
 
     The nucleotide-granular replacement for
     :func:`parse_problematic_sites_file`'s ``{gene}_codon_sites_to_mask.txt``.
@@ -732,8 +732,8 @@ def with_global_codon_sites(
 ) -> Dict[str, CensorSpec]:
     """Return ``table`` with every candidate at ``codon_sites`` censored in every clade.
 
-    The second of mat-pcp's two mask files, folded into the first's representation
-    (#1083). ``{gene}_codon_sites_to_mask.txt`` marks codon sites where *every*
+    The second of mat-pcp's two mask files, folded into the first's
+    representation. ``{gene}_codon_sites_to_mask.txt`` marks codon sites where *every*
     clade excludes every nucleotide -- the ProblematicSites VCF, the config's
     ``sites_to_exclude``, and ``site_include_range``. Those are artifact lists, so
     the claim they support is not that these sites mutate often but that
@@ -839,7 +839,7 @@ def with_global_nt_sites(
     v12 production genes that is a **2.85x over-mask**: 121 nucleotide sites
     become 345 masked nucleotides. On S it is 18 against 51.
 
-    Reading ``pcps/{gene}/masked_nt_sites.csv`` instead (mat-pcp#153) censors
+    Reading ``pcps/{gene}/masked_nt_sites.csv`` instead censors
     exactly the flagged nucleotides. Nothing else changes: a clade-independent
     site mask is what :attr:`CensorSpec.site_nt_indices` already means, so the
     scatter in ``CensorMaskedMutations._censored_entries_mask``, the ``mode``
@@ -939,14 +939,14 @@ def _merge_global_nt_indices(
 def load_reference_base_idxs(
     fasta_path: Path, num_codons: Optional[int] = None
 ) -> Tensor:
-    """Base indices of a gene's reference sequence, for reversion censoring (#1099).
+    """Base indices of a gene's reference sequence, for reversion censoring.
 
     The input to :class:`~dasm2.data.transforms.CensorReferenceReversions`. Read
     from the aggregate manifest's ``founder_sequence``, which for v11 resolves to
     ``clade_founders/{gene}/19A.fa`` -- Wuhan-Hu-1, the reference every reversion
     in that rule reverts *to*. Resolved through the registry rather than as a raw
     path so a run against a different tree cannot silently pick up this tree's
-    file, the same reason ``global_mask_path`` takes that route (#1083).
+    file, the same reason ``global_mask_path`` takes that route.
 
     Args:
         fasta_path: Gene-local reference FASTA. Only the first record is read;
@@ -974,7 +974,7 @@ def load_reference_base_idxs(
         reference would make ``parent != reference`` true at that position while
         the destination base index ``4`` matches nothing in the ``(64, 9)``
         candidate tables -- so the rule would censor *nothing* there and report no
-        error. Silently censoring less is exactly the failure mode #1099's
+        error. Silently censoring less is exactly the failure mode this
         fail-fast guard exists to catch, and it is cheaper to catch it here.
     """
     # `read_fasta_first_sequence` already raises on a missing or empty record,

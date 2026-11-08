@@ -5,7 +5,7 @@ partitioned by whether the true child codon equals the parent codon
 (conserved) or differs from it (mutated). Intended to be accumulated across
 the validation epoch and reduced once at the end.
 
-Metrics produced (see issue #620):
+Metrics produced:
 - ``codon_acc_overall``: top-1 codon accuracy across all valid positions
 - ``codon_acc_conserved``: top-1 accuracy on positions with child == parent
 - ``codon_acc_mutated``: top-1 accuracy on positions with child != parent
@@ -60,7 +60,7 @@ class CodonPredictingLoss(Protocol):
 
     The codon :class:`~dasm2.training.metric_providers.MetricProvider`
     resolves its extractor by looking up ``predict_codons`` on the task's
-    loss (issue #738); a loss exposing it has its per-batch top-1 codon
+    loss; a loss exposing it has its per-batch top-1 codon
     predictions fed into a :class:`CodonPredictionMetrics` accumulator
     during validation. Codon eligibility is loss-intrinsic (not a head
     capability): ``DASMLoss``, ``QDASMLoss``, and ``HybridLoss`` implement
@@ -258,7 +258,7 @@ class CodonPredictionMetrics:
 # CodonPredictionMetrics also emits are degenerate in that regime (no
 # conserved positions; precision/recall = 1 by construction), so the whichmut
 # provider drops them. Reusing these exact field names keeps a whichmut run
-# consistent with DASM in the same dashboard panels (issue #738).
+# consistent with DASM in the same dashboard panels.
 _MUTATED_ACCURACY_KEYS = ("codon_acc_mutated", "aa_acc_mutated")
 
 

@@ -9,7 +9,9 @@ in the dependency list may drag a different one in.
 
 from __future__ import annotations
 
+import subprocess
 import sys
+import tempfile
 import tomllib
 from pathlib import Path
 
@@ -115,7 +117,6 @@ def test_arrow_pool_side_effect_precedes_pyarrow():
         "dasm2.losses.whichmut_losses",
         "dasm2.losses.factory",
         "dasm2.training.log_reader",
-        "dasm2.training.train_argv",
     ],
 )
 def test_training_path_imports(module):
@@ -123,6 +124,75 @@ def test_training_path_imports(module):
 
     A prune that removes one of these fails here rather than several minutes
     into a training run.
+
+    ``dasm2.training.train_argv`` was on this list and is not any more. It
+    built argv for ``dasm2/cli.py``, which this repository never vendored, so
+    #2's own scope table recorded it as carried-but-unused. The prune (#4)
+    removed it, which is what that note anticipated.
     """
     __import__(module)
     assert module in sys.modules
+
+
+def test_a_script_run_resolves_dasm2_inside_this_repository():
+    """`python scripts/<x>.py` must import the fork, not an installed copy.
+
+    `test_dasm2_resolves_inside_this_repository` above passes under pytest
+    because pytest puts the rootdir on `sys.path`. A script run does not: it
+    puts the *script's* directory there, so the repository root is absent and
+    `_EditableFinder` -- which sits after `PathFinder` in `sys.meta_path` --
+    resolves `dasm2` to whatever checkout the venv's editable install points
+    at. When this repository is a `git worktree` of that checkout, the gates
+    then exercise the other tree's code and pass against it.
+
+    `scripts/lib.py` puts the repository root on `sys.path` to prevent that.
+    This is the test that would have caught it: it reproduces a script run
+    exactly, from a working directory that is not the repository.
+    """
+    probe = (
+        "import sys;"
+        f" sys.path.insert(0, {str(REPO_ROOT / 'scripts')!r});"
+        " import lib;"
+        " import dasm2;"
+        " print(dasm2.__file__)"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=tempfile.gettempdir(),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    resolved = Path(result.stdout.strip()).resolve()
+    assert resolved.is_relative_to(REPO_ROOT), (
+        f"a script run resolved `dasm2` to {resolved}, outside {REPO_ROOT}"
+    )
+
+
+def test_no_dasm2_submodule_resolves_outside_this_repository():
+    """A module deleted here must not be served from another checkout.
+
+    The editable finder maps the *name* `dasm2` to the directory it was
+    installed from and resolves submodules against that, not against the
+    parent package's `__path__`. So deleting `dasm2/foo.py` here does not
+    make `import dasm2.foo` fail while that path still has one: `PathFinder`
+    finds nothing and the editable finder serves the other copy. The prune
+    deleted `positional_encoding.py` and the gates kept passing on the other
+    checkout's copy of it.
+    """
+    probe = (
+        "import sys;"
+        f" sys.path.insert(0, {str(REPO_ROOT / 'scripts')!r});"
+        " import lib;"
+        " import dasm2.train_command;"
+        " lib.assert_dasm2_is_this_repo();"
+        " print('ok')"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=tempfile.gettempdir(),
+        capture_output=True,
+        text=True,
+        check=False,  # the assertion below reports the guard's own message
+    )
+    assert result.returncode == 0, result.stderr.strip().splitlines()[-1:]
