@@ -407,13 +407,13 @@ class AccelerateBackend(ComputeBackend):
         # Without this, PartialState falls through to DistributedType.NO and
         # collective ops like gather become no-ops.
         #
-        # broadcast_buffers=False: QDASM/Hybrid with q_variant=global_13mer
-        # registers a 1.34 GB read-only Thrifty lookup table as a non-persistent
-        # buffer. Default broadcast_buffers=True would sync this from rank 0 on
-        # every forward pass, hanging DDP init (initial sync) and adding ~30ms+
-        # of NCCL traffic per step. All ranks load the table from the same file
-        # so the broadcast is redundant. Models with mutable buffers (e.g.,
-        # BatchNorm running stats) should use SyncBatchNorm or restore the flag.
+        # broadcast_buffers=False: a model may register a large read-only
+        # lookup table as a non-persistent buffer. Default
+        # broadcast_buffers=True syncs every buffer from rank 0 on every
+        # forward pass, which for a table all ranks already load from the same
+        # file is pure redundant NCCL traffic, and enough of it to hang DDP
+        # init. Models with mutable buffers (e.g. BatchNorm running stats)
+        # should use SyncBatchNorm or restore the flag.
         #
         # find_unused_parameters=True was tried here to let
         # OverfitGuardHook freeze a co-trained task's parameters
@@ -439,11 +439,11 @@ class AccelerateBackend(ComputeBackend):
         ddp_kwargs = DistributedDataParallelKwargs(broadcast_buffers=False)
         # Widen the NCCL/process-group collective timeout to 8h. Two reasons,
         # the first of which sets the floor:
-        #   * QDASM/Hybrid re-optimize branch lengths solo on rank 0 between
-        #     cycles (and at cycle end); on the 4-dataset combo this pass runs
-        #     for hours while ranks 1..N block at the next collective. The
-        #     default ~10-min timeout aborts those ranks mid-BL-opt and loses
-        #     the cycle's work (observed on the 4ds QDASM-v4 run, 2026-05-08).
+        #   * Branch lengths are re-optimized solo on rank 0 between cycles
+        #     (and at cycle end); on a large corpus this pass runs for hours
+        #     while ranks 1..N block at the next collective. The default
+        #     ~10-min timeout aborts those ranks mid-BL-opt and loses the
+        #     cycle's work.
         #   * A legitimately slow micro-batch on one rank — e.g. a heavy padded
         #     forward in the long-sequence band — must not be aborted mid-step
         #     by a collective timeout.

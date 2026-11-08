@@ -135,6 +135,59 @@ after — which is why it came before the comment review rather than after.
 What is left is in files this pipeline actually runs, so each one needs
 reading rather than deleting with its module.
 
+### The fourth cut: the comments themselves (#4)
+
+The review is done, and the count is **1,235 → 66**.
+
+**Every reference to another project's issue tracker is gone** — 286 across
+53 files, plus two in this document. Where the comment was only a pointer, it
+went; where the issue held the reason, the reason is now written in the
+comment. `#1234` was a dead link for every reader of this repository.
+
+Three of them were worse than dead links, because they were *runtime* strings
+that told a reader to run something this repository does not contain:
+
+| raised by | told the reader to run |
+|---|---|
+| `_assert_supported_serialization_version` | `pixi run python scripts/migrate_checkpoint_to_v5.py` |
+| `_assert_unambiguous_sf_projection` | `experiments/compara-training/patch_checkpoint_wiggle.py` |
+| the inert-row guard in `evolutionary_dataset.py` | two corpus-builder scripts, by name |
+
+Each now states the condition and a remedy available here. The second also
+carried a thirty-line docstring reconstructing when that script's incidents
+happened in another project, down to merge dates and a worked example.
+
+Measurements from other projects went the same way: a Thrifty lookup table's
+size and its per-step NCCL cost, a dated observation from a four-dataset
+training run, a host filled to ~738 GB, a count of clamped sites on a Compara
+corpus, a 7x data-load slowdown, a ~100x speedup, a 340 GB/cycle leak. In each
+case the engineering reason is kept and the number is dropped, because the
+number is what does not transfer.
+
+A smaller class is more insidious: comments that explained the code through a
+class this fork had already deleted. `CoreModel.__init__` and
+`Trainer.export_metadata` both justified tracking the freeze switch separately
+from `requires_grad` by appealing to `ESM2Encoder`, which is referenced seven
+times in the tree and defined nowhere. The reason is sound and is kept; it is
+now stated without the example a reader cannot look up.
+
+**What the 66 remaining flags are.** None is a private issue reference. They
+divide in two, and neither is a leak:
+
+- Scanner false positives — "naive buffer/row-group ratio", "measured at
+  insert", "improved by more than min_delta".
+- The *names* of code still in the tree: `ESM2Tokenizer`,
+  `AntibodySegmentHandler`, `MPNN_WHICHMUT_HEAD_TYPES`. ESM2 is a published
+  model and a handler is named for what it handles; naming them is not a
+  disclosure. These resolve by deleting the code, not by renaming it, and that
+  is the next cut rather than this one.
+
+Measured rather than asserted: comparing the non-comment, non-string token
+stream of every changed file against the previous commit, 52 of 53 were
+byte-identical in code. The one that differed was
+`serialization/checkpoints.py`, by exactly its dead block and that block's
+now-unused `Final` import.
+
 ## What is left that the trace calls dead
 
 `data/prune/delete_candidates.txt` still lists 23 files and 6,630 lines, and

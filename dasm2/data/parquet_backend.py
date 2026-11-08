@@ -1080,9 +1080,9 @@ class ParquetRowConverter:
         self.rates_cols = rates_cols
         self.csps_cols = csps_cols
         # Non-segmented per-row columns copied through verbatim (e.g. ``clade``,
-        # which per-clade censoring keys on). Opt-in rather than always-on: this
-        # converter is shared with the DASM/Compara path, whose Parquet files
-        # need not carry them.
+        # which per-clade censoring keys on). Opt-in rather than always-on:
+        # this converter is shared with corpora whose Parquet files need not
+        # carry them.
         self.scalar_cols = scalar_cols
         self.seq_col_pairs = [
             ("raw_parent", parent_cols),

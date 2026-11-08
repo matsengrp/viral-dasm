@@ -2848,9 +2848,9 @@ class Trainer:
 
                     # Data-load time for this window (the _draw_micro_batch loop above),
                     # measured separately from forward+backward so the forensics can
-                    # tell a slow data draw apart from slow compute — the cycle-1 slow
-                    # batches died with FLAT GPU memory, so whether the
-                    # time is host-side (data) or device-side (forward) is decisive.
+                    # tell a slow data draw apart from slow compute. When a
+                    # stall leaves GPU memory flat, whether the time is
+                    # host-side (data) or device-side (forward) is decisive.
                     data_load_ms = (time.perf_counter() - window_start_time) * 1000
 
                     # Long-batch forensics: flushed, per-rank, BEFORE the
@@ -4193,12 +4193,10 @@ class Trainer:
         head_configs: List[HeadConfig] = model_config.heads
         # Not a Trainer field: read off ``CoreModel``'s own tracking of
         # whether ``freeze_encoder()`` was called, rather than inspecting
-        # ``requires_grad`` directly. requires_grad alone can't distinguish
+        # ``requires_grad`` directly. requires_grad alone cannot distinguish
         # "this run asked for head-only fine-tuning" from "this encoder
-        # always freezes itself" -- e.g. ``ESM2Encoder`` honors
-        # ``ESM2EncoderConfig.freeze_parameters`` (default ``True``) at
-        # construction time regardless of this switch, so a default ESM2
-        # run would otherwise get ``freeze_encoder=True`` written into its
+        # always freezes itself": an encoder that freezes at construction
+        # time would otherwise get ``freeze_encoder=True`` written into its
         # checkpoint even though ``--freeze_encoder`` was never passed,
         # spuriously conflicting with a later ``--resume
         # --freeze_encoder=False``.

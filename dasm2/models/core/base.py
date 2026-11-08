@@ -59,12 +59,11 @@ class CoreModel(nn.Module):
         self.task_losses: Optional[nn.ModuleDict] = None
         # Tracks whether *this* generic freeze switch was engaged, as
         # opposed to inspecting ``requires_grad`` directly. The two are not
-        # interchangeable: some encoders freeze themselves at construction
-        # time independent of this switch (e.g. ``ESM2Encoder`` honors
-        # ``ESM2EncoderConfig.freeze_parameters``, which defaults to
-        # ``True``), so a bare ``all(not p.requires_grad ...)`` check can't
-        # tell "this run asked for head-only fine-tuning" apart from "this
-        # encoder always freezes itself".
+        # interchangeable: an encoder may freeze itself at construction
+        # time independent of this switch, so a bare
+        # ``all(not p.requires_grad ...)`` check cannot tell "this run asked
+        # for head-only fine-tuning" apart from "this encoder always freezes
+        # itself".
         self._encoder_frozen_via_freeze_call = False
 
     def _validate_sf_projection(self) -> None:

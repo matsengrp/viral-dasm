@@ -435,7 +435,7 @@ def _precompute_neutral_outputs_vectorized(
     neutral_model: "RatesCSPNeutralModel",
     segment_handler: SegmentHandler,
 ) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
-    """Precompute neutral model outputs using vectorized encoding (~100x faster).
+    """Precompute neutral model outputs using vectorized encoding.
 
     Collects all segments across all sequences, runs the neutral model in
     one batched call per segment index using ``compute_rates_and_csps_vectorized``,

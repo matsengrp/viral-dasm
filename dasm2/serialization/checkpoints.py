@@ -763,9 +763,9 @@ def load_model_only(
 
     model = create_model_from_config(training_config.model, device=device)
 
-    # The state_dict carries ``task_losses.<key>.*`` entries (e.g. the
-    # contrastive loss's ``logit_bias``); they need real submodules to land on,
-    # exactly as in ``load_checkpoint``.
+    # The state_dict carries ``task_losses.<key>.*`` entries for any loss
+    # that owns parameters; they need real submodules to land on, exactly as
+    # in ``load_checkpoint``.
     _attach_task_losses_for_inference(model, training_config)
 
     model.load_state_dict(state_dict)
