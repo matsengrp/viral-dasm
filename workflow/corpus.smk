@@ -17,6 +17,15 @@ wildcard. That is what pins lambda across the ladder: a per-corpus rebuild
 would let the neutral model move with the corpus, which is the one thing a
 depth contrast cannot afford.
 
+**Every rule declares the code it runs**: its entry-point script, that
+script's direct imports of repository code, and ``config.yaml`` wherever
+``scripts/lib.py`` is required, since ``lib`` reads and validates it at
+import. Direct imports only -- a glob over the vendored package would be complete
+and would also make a comment edit anywhere in the vendored package invalidate the
+corpora, and with them the training runs below. What covers the residual
+transitive risk is ``check_corpus``, which gates each corpus's row-order
+digest. ``tests/test_rule_inputs.py`` holds every rule to this.
+
 GISAID: every file under ``PARQUET_DIR``, ``NEUTRAL_DIR`` and ``ERA_MAP_DIR``
 is GISAID-derived and stays on the cluster.
 """
@@ -66,9 +75,7 @@ rule corpora:
 rule build_neutral:
     """Build the gene's three TabularRates archives: both eras plus pooled.
 
-    The builder and ``scov2_rates.py`` are declared inputs, not just implied by
-    the shell command. Snakemake's staleness check sees only what is declared,
-    and the gene-aware rate selection in ``scov2_rates.py`` is the
+    The gene-aware rate selection in ``scov2_rates.py`` is the
     correctness-critical part: a fix there has to invalidate these archives.
     """
     input:
@@ -99,7 +106,13 @@ rule verify_neutral:
     """
     input:
         script="scripts/verify_era_neutral_models.py",
+        # It rebuilds the expected rates through the builder's own
+        # `BUILD_VARIANTS`, `archive_name` and `build_inputs`, so a change to
+        # how the archives are named or assembled changes what this checks.
+        builder="scripts/build_era_neutral_models.py",
         rates_lib="dasm2/neutral/scov2_rates.py",
+        zip_io="dasm2/serialization/zip_io.py",
+        dasm2_init="dasm2/__init__.py",
         config="config.yaml",
         lib="scripts/lib.py",
         zips=NEUTRAL_ZIPS,
@@ -159,6 +172,11 @@ rule render_era_map:
     input:
         template=ERA_TEMPLATE,
         era_lib="scripts/write_era_config.py",
+        # `write_era_config` takes `archive_name` from the builder, so the
+        # paths this map names move when that function does.
+        builder="scripts/build_era_neutral_models.py",
+        config="config.yaml",
+        lib="scripts/lib.py",
         zips=NEUTRAL_ZIPS,
         verified=f"{VALIDATION_DIR}/neutral_verified_{GENE}.done",
     output:
@@ -230,10 +248,20 @@ rule prepare_parquet:
         # file can change under a corpus that already exists.
         pcp=lambda wc: str(corpus(wc.corpus).source_pcp),
         # The code that decides the row-group layout and the `nt_rates` /
-        # `nt_csps` columns. `build_neutral` declares its `dasm2` dependencies;
-        # without these the same standard was not applied here.
+        # `nt_csps` columns.
         writer="dasm2/data/parquet_writer.py",
         rates="dasm2/neutral/tabular_rates.py",
+        # The rest of the read-convert-write path: the backend and row
+        # converter the rows go through, the seam identity and segment handler
+        # that decide what a row is, and the sha256 recorded in the metadata.
+        backend="dasm2/data/parquet_backend.py",
+        registry="dasm2/data/registry.py",
+        segment_handlers="dasm2/data/segment_handlers.py",
+        local="dasm2/data/local.py",
+        # Imported for its side effects: `use_system_arrow_pool()` runs at
+        # package import and steers Arrow off mimalloc. See
+        # `tests/test_import_order.py`.
+        dasm2_init="dasm2/__init__.py",
     output:
         parquet=f"{PARQUET_DIR}/{{corpus}}.parquet",
         summary=f"{PARQUET_DIR}/{{corpus}}_era_rows.json",
@@ -294,6 +322,9 @@ rule audit_censor:
     input:
         script="scripts/audit_censor.py",
         masking_lib="dasm2/sequence/masking.py",
+        constants="dasm2/sequence/constants.py",
+        fasta_io="dasm2/io.py",
+        dasm2_init="dasm2/__init__.py",
         config="config.yaml",
         lib="scripts/lib.py",
     output:
