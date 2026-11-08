@@ -251,10 +251,20 @@ rule prepare_parquet:
         tested=f"{VALIDATION_DIR}/tests_passed.done",
         config="config.yaml",
         lib="scripts/lib.py",
-        # The data the corpus is made of. It belongs in `input` rather than
-        # only in `params` because mat-pcp rebuilds its tree in place, so the
-        # file can change under a corpus that already exists.
-        pcp=lambda wc: str(corpus(wc.corpus).source_pcp),
+        # The data the corpus is made of, declared so the DAG records what
+        # this was built from -- and `ancient`, so a new mtime on it does not
+        # rebuild. The file is far above snakemake's 1 MB checksum threshold,
+        # so only its mtime is compared; mat-pcp re-emits its tree in place,
+        # and a byte-identical re-emit would otherwise rebuild every corpus
+        # and, under M3, retrain on them.
+        #
+        # A re-emit that genuinely changed the data must not rebuild here
+        # either: a regenerated corpus is a different 90/10 split of the
+        # paper's data. `check_corpus` is what catches that, and it declares
+        # this same file un-ancient so it reruns and fails on the pins. To
+        # rebuild on purpose, update them in `config.yaml`, which is small
+        # enough to be content-tracked and does trigger.
+        pcp=lambda wc: ancient(str(corpus(wc.corpus).source_pcp)),
         # The code that decides the row-group layout and the `nt_rates` /
         # `nt_csps` columns.
         writer="dasm2/data/parquet_writer.py",
@@ -292,19 +302,28 @@ rule check_corpus:
     Every later milestone inherits this. It is the reason a rebuilt corpus
     cannot silently become a different 90/10 split of the paper's data.
 
-    **Every corpus declares its own Parquet, received ones included.** A built
-    corpus gets the file ``prepare_parquet`` writes. A pinned one gets the file
-    this pipeline receives, which no rule produces and which therefore only has
-    to exist -- but mat-pcp rebuilds its tree in place, so that file can move
-    under a report that already passed. Undeclared, the check would not rerun
-    and a stale pass would stand; declared, the rebuilt corpus fails its pinned
-    digest, which is the stop-everything signal this rule exists to raise.
+    **This rule watches both files it reads, and neither is ancient.** It is
+    the cheap guard, so it is the one that should rerun when anything moves.
+    The Parquet was previously declared only for corpora built here, leaving
+    the received ``full_depth`` -- the corpus most of the paper trains on --
+    unwatched. The source PCP was read and gated by ``check_corpus.py`` and
+    declared nowhere at all, which is the gap that matters most: mat-pcp
+    re-emits its tree in place, and ``source_pcp_md5`` is the pin that catches
+    it. Both files are far above snakemake's 1 MB checksum threshold, so a
+    re-emit moves their mtime and this rule reruns, whether or not the bytes
+    changed. That is the intended trade -- minutes of hashing against a stale
+    pass on the paper's own split.
+
+    A missing received Parquet now raises ``MissingInputException`` at DAG
+    build rather than being reported by ``check_corpus.py`` itself. Both
+    abort; this one aborts before the corpora are built rather than after.
     """
     input:
         script="scripts/check_corpus.py",
         config="config.yaml",
         lib="scripts/lib.py",
         parquet=lambda wc: str(corpus(wc.corpus).path),
+        source_pcp=lambda wc: str(corpus(wc.corpus).source_pcp),
     output:
         report=f"{ARTIFACT_ROOT}/corpus_guard/{{corpus}}.json",
         membership=f"{ARTIFACT_ROOT}/corpus_guard/{{corpus}}_fold0_membership.npz",
