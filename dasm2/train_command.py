@@ -185,7 +185,7 @@ def _attach_info_print_handler(logger_name: str, print_fn: Callable[..., None]) 
 #
 # Until this is generalised into a per-head ``tasks_for_head`` registry,
 # every site above needs to grow a new branch when a second multi-loss
-# head appears. The discriminated-union ``LossConfig`` (post-#621) is
+# head appears. The discriminated-union ``LossConfig`` is
 # already shaped to absorb the per-task data; only the dataset-side
 # wiring is still head-keyed. Down-stream call sites compare to
 # ``HeadType.AAH_WHICHMUT_HEAD`` directly rather than via a dispatch
@@ -240,8 +240,8 @@ def _maybe_relaunch_under_accelerate(
     # Port 0 tells Accelerate to pick a free port rather than defaulting to
     # 29500. Two runs launched on one host otherwise both resolve to 29500 --
     # neither sees it taken yet -- and the one that loses the bind race dies at
-    # rendezvous with EADDRINUSE. Hit while launching the two #959 training
-    # arms seconds apart.
+    # rendezvous with EADDRINUSE. Hit while launching two training arms
+    # seconds apart.
     cmd = ["accelerate", "launch", "--multi_gpu", "--main_process_port", "0"]
     if num_gpus is not None:
         cmd += ["--num_processes", str(num_gpus)]
@@ -419,9 +419,7 @@ def _validate_resume_checkpoint_config(
 ) -> None:
     """Fail fast when --resume's config is incompatible with the checkpoint.
 
-    Two independent checks (renamed from ``_validate_resume_task_config_matches``,
-    PR #1223 review, once it grew a second unrelated check): the task list
-    must match, and the checkpoint must not have been trained with a
+    Two independent checks: the task list must match, and the checkpoint must not have been trained with a
     feature ``resume_training()`` doesn't support restoring.
 
     ``resume_training()`` reconstructs the model from the checkpoint's own
@@ -440,8 +438,8 @@ def _validate_resume_checkpoint_config(
     inside ``Trainer.restore_training_state``'s presence-mismatch assertion
     — after the model, datasets, and logger are already built. Checking the
     checkpoint's own config here catches it before any of that setup starts.
-    (``head_optimizer`` had the same one-sided gap before issue #1220's
-    resume support landed; ``resume_training()`` now rebuilds it from the
+    (``head_optimizer`` had the same one-sided gap before its resume
+    support landed; ``resume_training()`` now rebuilds it from the
     checkpoint's own config the same way it does the main optimizer, so
     there is nothing to check here for it anymore.)
 
@@ -501,16 +499,16 @@ def _validate_resume_world_size_matches(
     schedule that was annealed for the original — and the step budget covers
     proportionally less data, since steps are taken in lockstep on every
     rank. Neither is visible in any log line. Elastic resume (deliberately
-    changing world size) would mean rescaling both, which is out of scope
-    (issue #1027); reject it with both numbers named instead.
+    changing world size) would mean rescaling both, which is out of scope;
+    reject it with both numbers named instead.
 
     Args:
         checkpoint_path: Path to the resume checkpoint (for the error message).
         checkpoint_num_processes: World size recorded in the checkpoint's
             ``training_metadata``, or None for checkpoints written before
-            #1027 recorded it. None skips the check — a missing field means
+            it was recorded. None skips the check — a missing field means
             "unknown", and assuming 1 would reject legitimate resumes of
-            every pre-#1027 multi-GPU checkpoint.
+            every older multi-GPU checkpoint.
         run_num_processes: World size of the current run's backend.
         batch_size: Per-device batch size read off the *checkpoint's* own
             config, not this run's. ``resume_training`` rebuilds the trainer
@@ -572,7 +570,7 @@ def _validate_resume_mixed_precision_matches(
         checkpoint_path: Path to the resume checkpoint (for the error message).
         checkpoint_mixed_precision: Backend precision mode recorded in the
             checkpoint's ``training_metadata``, or None for checkpoints
-            written before #1027 recorded it. None skips the check, for the
+            written before it was recorded. None skips the check, for the
             same reason it does in :func:`_validate_resume_world_size_matches`:
             absent means unknown, not ``"no"``.
         run_mixed_precision: This run's ``backend.mixed_precision``.
@@ -643,9 +641,9 @@ def _validate_resume_overrides_dont_conflict(
     before ``resume_training()`` runs, so those do take effect). Passing
     e.g. ``--learning_rate`` alongside ``--resume`` would
     otherwise be accepted without complaint and then silently have no
-    effect — the same silent-divergence failure class issue #516 exists to
-    fix, just one layer up (a mismatched *intent* instead of a mismatched
-    *restore*).
+    effect — the same silent-divergence failure class that resumable
+    training state exists to fix, just one layer up (a mismatched *intent*
+    instead of a mismatched *restore*).
 
     Accepts an override when it matches the checkpoint's own value exactly
     (this is what makes the Snakemake idempotency pattern in
@@ -1016,7 +1014,7 @@ def train_model_from_datasets(  # noqa: C901
         freeze_branch_lengths_after_first_cycle: If set, override the config's
             ``freeze_branch_lengths_after_first_cycle``. True lets cycle-0
             ``pre_cycle`` set the branch lengths and then holds them fixed for
-            the rest of the run (issue #199 / #713 frozen-BL retrain). What
+            the rest of the run. What
             cycle 0 does is handler-dependent: with a calibrated
             ``bl_init_strategy`` it runs the mutation-frequency init and
             optimizes nothing; without one it falls through to the cache and
@@ -1191,14 +1189,14 @@ def train_model_from_datasets(  # noqa: C901
             raise ValueError(
                 f"--resume checkpoint {resume_path} is missing 'training_config' "
                 "metadata; it may predate the resumable-checkpoint format "
-                "(issue #502) and cannot be resumed."
+                "and cannot be resumed."
             )
         checkpoint_training_config = TrainingConfig(
             **checkpoint_metadata["training_config"]
         )
         # Read here (the metadata is already in hand) but validated further
         # down, once the backend exists to compare against. Both are None for
-        # any checkpoint written before #1027 started recording them.
+        # any checkpoint written before they were recorded.
         checkpoint_training_metadata = checkpoint_metadata.get("training_metadata", {})
         checkpoint_num_processes = checkpoint_training_metadata.get("num_processes")
         checkpoint_mixed_precision = checkpoint_training_metadata.get("mixed_precision")
@@ -1548,7 +1546,7 @@ def train_model_from_datasets(  # noqa: C901
             )
         if training_config.head_optimizer is not None:
             _print(
-                f"  head_optimizer (issue #1220) on "
+                f"  head_optimizer on "
                 f"{training_config.head_optimizer_head_type}: "
                 f"lr={training_config.head_optimizer.learning_rate}, "
                 f"weight_decay={training_config.head_optimizer.weight_decay}"
@@ -1583,7 +1581,7 @@ def train_model_from_datasets(  # noqa: C901
             head_optimizer_head_type=training_config.head_optimizer_head_type,
         )
 
-        # Debug knob (issue #724 cycle-1-stall repro). ``start_cycle`` skips
+        # Debug knob for reproducing a cycle-1 stall. ``start_cycle`` skips
         # whole cycles, threading into the BLO ``pre_cycle`` hook so cycle
         # ``start_cycle`` hard-loads its cached branch lengths (raises on
         # miss). A model-only checkpoint loaded via ``checkpoint=`` above +
@@ -1718,7 +1716,7 @@ def _resolve_censor_table(
     """Load the configured censor table, or None when censoring is off.
 
     Merges mat-pcp's global mask into every clade when one is configured -- either
-    ``masked_nt_sites_file`` (mat-pcp#153, nucleotide-granular, preferred) or the
+    ``masked_nt_sites_file`` (nucleotide-granular, preferred) or the
     older ``codon_sites_to_mask_file``, never both. Every mask file reaches
     the loss through one table, because a clade-independent site mask is what
     ``CensorSpec.site_nt_indices`` already means; see
@@ -2090,7 +2088,7 @@ def train_model(  # noqa: C901
         freeze_branch_lengths_after_first_cycle: If set, override the config's
             ``freeze_branch_lengths_after_first_cycle``. True lets cycle-0
             ``pre_cycle`` set the branch lengths and then holds them fixed for
-            the rest of the run (issue #199 / #713 frozen-BL retrain). What
+            the rest of the run. What
             cycle 0 does is handler-dependent: with a calibrated
             ``bl_init_strategy`` it runs the mutation-frequency init and
             optimizes nothing; without one it falls through to the cache and
@@ -2155,11 +2153,10 @@ def train_model(  # noqa: C901
     # ignored override.
     if epochs is not None:
         raise ValueError(
-            "--epochs was removed in issue #578 (step-based training loop). "
+            "--epochs was removed when training became step-based. "
             "Pass --max_train_steps to control the per-cycle optimizer-step "
             "budget and --eval_every_steps to control the validation "
-            "cadence. See `dasm2 train --help` or the issue #578 PR for "
-            "the full flag list."
+            "cadence. See `dasm2 train --help` for the full flag list."
         )
 
     # Fire parses "0,1,2,3" as a tuple; coerce back to comma-separated str.
@@ -2241,10 +2238,10 @@ def train_model(  # noqa: C901
         # that do not accept ``cv_split``, so silently passing them
         # ``cv_split`` from the YAML config would have no effect. Fail
         # loudly instead.
-        # Post-#621 the dispatch is loss-type-keyed; resolve each head's
-        # effective ``loss_type`` from the v4 ``tasks: [...]`` block.
-        # AAH expands to two task entries (whichmut + aao_whichmut) sharing
-        # the same head_type, so iterate tasks rather than heads.
+        # The dispatch is loss-type-keyed; resolve each head's effective
+        # ``loss_type`` from the ``tasks: [...]`` block. A head with two
+        # losses expands to two task entries sharing one head_type, so
+        # iterate tasks rather than heads.
         cv_supported_loss_types = (
             EVOLUTIONARY_LOSS_TYPES
             | WHICHMUT_LOSS_TYPES

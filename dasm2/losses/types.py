@@ -1,6 +1,6 @@
 """Loss type enumeration and dataset-dispatch frozensets.
 
-After issue #621 (Option B: loss owned by Task, not head), dataset dispatch
+Because a loss is owned by a Task rather than a head, dataset dispatch
 for the L×20 evolutionary head family keys off ``LossType`` rather than
 ``HeadType``. The architecture-determined head sets (DMS, structural,
 pooled, contrastive, delta-affinity) remain head-keyed in
@@ -12,7 +12,7 @@ from typing import Literal
 
 # Single source of truth for the DASMLoss class-weighting mode literal —
 # referenced by both ``DASMLossConfig`` (pydantic field) and
-# ``DASMLoss.__init__`` (constructor arg). Issue #678.
+# ``DASMLoss.__init__`` (constructor arg).
 WeightMode = Literal["uniform", "static", "inverse_freq"]
 
 
@@ -44,7 +44,7 @@ class LossType(str, Enum):
 
 
 # Loss types whose batches come from `WhichmutDataset` / `AAOWhichmutDataset`.
-# Replaces the pre-#621 `uses_whichmut_dataset` ClassVar on heads.
+# Replaces a former `uses_whichmut_dataset` ClassVar on heads.
 WHICHMUT_LOSS_TYPES: frozenset[LossType] = frozenset(
     {
         LossType.WHICHMUT,
@@ -79,7 +79,7 @@ QDASM_FAMILY_LOSS_TYPES: frozenset[LossType] = frozenset(
 
 
 # Loss types whose batches come from the pairwise-binding CSV loader
-# (`dasm2/data/pairwise_binding.py`). Issue #810: lets `dasm2 train`'s
+# (`dasm2/data/pairwise_binding.py`). Lets `dasm2 train`'s
 # on-the-fly `cv_split` gate accept `BindingClassificationHead` alongside
 # the evolutionary/whichmut families.
 BINDING_CLASSIFICATION_LOSS_TYPES: frozenset[LossType] = frozenset(

@@ -403,7 +403,7 @@ def get_process_tree_rss_mb() -> Optional[float]:
     was harmless while the memory-sensitive sweeps ran at ``num_workers=0``,
     but the streaming fetch path forks up to ``MAX_FETCH_WORKERS`` DataLoader
     workers, so a self-only reading now omits a real term of the host footprint
-    the #988 success criteria are written against. ``RUSAGE_CHILDREN`` is not a
+    a host-footprint reading is written against. ``RUSAGE_CHILDREN`` is not a
     substitute: it reports the largest single *reaped* child, and persistent
     DataLoader workers are only reaped at loader teardown.
 

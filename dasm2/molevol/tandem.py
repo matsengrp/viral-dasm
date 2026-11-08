@@ -1,11 +1,11 @@
 """Germline-anchored tandem (hit-class) term for the product-of-three neutral.
 
-Issue #1683. The product of three per-position changes has no instantaneous
+The product of three per-position changes has no instantaneous
 multi-nucleotide rate, so a 2-nt codon change is O(t²). The tandem term gives
 each unordered pair of codon positions (p, q) a joint change at rate
 δ_pq·√(r_p r_q), the two new bases drawn from csp_p·csp_q, where r and csp
-are the site's per-base departure rate and CSP (dasm2-codon-tex's
-parametrization, phyz#3621). The adjacent pairs 1–2 and 2–3 run at δ; the
+are the site's per-base departure rate and CSP. The adjacent pairs 1–2 and
+2–3 run at δ; the
 outer pair 1–3 at δ_13.
 
 The pairs are competing first-jump events among themselves (Λ sums the

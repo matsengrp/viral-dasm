@@ -1,8 +1,7 @@
 """Selection-factor distribution metrics for the DASM-family heads.
 
-Issue #678 §7 introduced this instrumentation to detect calibration
-breakdown early (the focal-cycle-0 regime from #652) rather than at the
-final checkpoint. The accumulator mirrors :class:`CodonPredictionMetrics`:
+This instrumentation detects calibration breakdown early, in the cycle-0
+focal regime, rather than at the final checkpoint. The accumulator mirrors :class:`CodonPredictionMetrics`:
 on-device tensor counts, ``counts() / metrics_from_counts()`` for
 multi-rank gather, ``compute()`` as the single-rank shortcut.
 
@@ -10,7 +9,7 @@ Six metrics are emitted, all derived from the per-batch ``(B, L, 20)``
 post-parent-AA-zap selection-factor tensor:
 
 - ``sf_child_median_nonsyn_1nt`` — median push on the observed child AA
-  at single-NT non-syn positions; the central placement signal from #652.
+  at single-NT non-syn positions; the central placement signal.
 - ``sf_child_median_nonsyn_multihit`` — same for 2-/3-NT non-syn positions.
 - ``sf_nonparent_mean_conserved`` — mean SF over the 19 non-parent AAs at
   conserved positions; the calibration signal.
@@ -23,8 +22,8 @@ post-parent-AA-zap selection-factor tensor:
 
 Quantiles are computed from a fixed-range histogram (``[-_SF_HIST_RANGE,
 +_SF_HIST_RANGE]`` for child-AA medians, ``[0, _SF_HIST_RANGE]`` for
-``|SF|`` p95). The range covers the observed regime (the 3.09-nat flip
-threshold in #652 plus headroom) at sub-bin precision (~0.04 nat at the
+``|SF|`` p95). The range covers the observed regime, including the flip
+threshold, with headroom, at sub-bin precision (~0.04 nat at the
 default bin count). Out-of-range mass is clamped to the boundary bins so
 the percentile remains computable even on focal-failure runs that
 overshoot.
@@ -41,7 +40,7 @@ from dasm2.codon_table import get_codon_to_aa_lookup_with_sentinel
 from dasm2.sequence.constants import AMBIGUOUS_CODON_IDX, CODONS
 
 # Histogram bounds: |SF| values much above this are pathological. Picked to
-# cover the 3.09-nat flip threshold from #652 §4 with headroom.
+# cover the flip threshold with headroom.
 _SF_HIST_RANGE = 10.0
 _SF_HIST_BINS = 256
 
@@ -89,7 +88,7 @@ class SelectionFactorPredictingLoss(Protocol):
 
     The SF :class:`~dasm2.training.metric_providers.MetricProvider` is
     gated on the head's ``SELECTION_FACTOR`` capability, not on the loss
-    (issue #738): every SF-producing head emits the tensor, so the head
+    every SF-producing head emits the tensor, so the head
     output is the SF tensor and an identity head-level fallback supplies
     the extractor when a loss does not override it. A loss may still
     implement this method to customize extraction; ``DASMLoss`` does (an

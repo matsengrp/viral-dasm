@@ -50,7 +50,7 @@ def zap_predictions_along_diagonal(
     # sync (+27-30 us per call on an L40S) on a function that runs on every
     # head's forward pass; this elementwise bound is free. Nothing upstream
     # produces negatives today (``AA_PADDING_TOKEN`` is 20), so this guards a
-    # latent wrap-around rather than fixing an observed one. See #1005.
+    # latent wrap-around rather than fixing an observed one.
     valid_mask = (aa_parents_idxs >= 0) & (aa_parents_idxs < 20)
 
     # Only update the predictions for valid positions

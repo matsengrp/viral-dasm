@@ -69,10 +69,6 @@ Three implementations of the same mutation frequency:
     only in dropping a whole codon per ambiguous nucleotide.
 
 See Also:
-    - Issue #140 for slope-based derivation
-    - Issue #499 for closed-form estimates and warm-started optimization
-    - Issue #534 for pluggable strategy design
-    - Issue #992 for the columnar Arrow cold-start path
     - AntibodySegmentHandler.bl_init_strategy for the calibrated slope value
 """
 
@@ -719,10 +715,10 @@ def mutation_frequencies_from_parquet(
 
     Streams the parent and child segment columns one row group at a time and
     reduces each row group with numpy over the raw Arrow string buffers. This
-    is the cold-start branch-length path for Parquet-backed datasets (issue
-    #992): it replaces materializing both full NT columns as Python strings,
-    whose cost is independent of how many rows the split actually keeps — a
-    258k-row validation split paid a 5.05M-row read.
+    is the cold-start branch-length path for Parquet-backed datasets: it
+    replaces materializing both full NT columns as Python strings, whose cost
+    is independent of how many rows the split actually keeps, so a small
+    validation split paid for a read of the whole corpus.
 
     Args:
         backend: Parquet backend to stream from. Under a row filter, only the

@@ -668,7 +668,6 @@ class AntibodySegmentHandler(SegmentHandler):
     # Empirical slope from trained DASM on v1jaffeCC+v1tangCC (n=742,377, R²=0.974).
     # This slope applies to segments with rate adjustment factor 1.0 (heavy chains).
     # For other segments, the effective slope is slope / rate_adjustment.
-    # See issue #140 for derivation details.
     bl_init_strategy: BranchLengthInitStrategy = ProportionalStrategy(slope=1.76)  # type: ignore[assignment]
 
     # Expected V gene family prefixes per segment (first 3 chars of v_gene before '-')

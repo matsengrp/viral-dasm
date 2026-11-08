@@ -128,7 +128,7 @@ class TransformerEncoder(nn.Module):
         if self.distance_encoding_mode == "continuous":
             # bias=False so distance_proj actually conditions on log(d)
             # rather than learning a position-independent global bias
-            # (issue #199, Exp 3).
+            # than a bias.
             self.distance_proj = nn.Linear(1, self.d_model, bias=False)
             # Zero-init so the projection starts as a no-op: a model warm-started
             # from a no-distance checkpoint is then *identical* to its base at
@@ -136,7 +136,7 @@ class TransformerEncoder(nn.Module):
             # model's optimum. The random Kaiming default would instead inject a
             # large constant embedding shift (~|log d| per dim), biasing that
             # optimization. Gradients still flow (d/dW = dL/dout · log d ≠ 0), so
-            # the projection learns normally from zero. See issue #199 frozen-BL.
+            # the projection learns normally from zero.
             nn.init.zeros_(self.distance_proj.weight)
             self.distance_noise_std = config.distance_noise_std
         elif self.distance_encoding_mode == "binned":

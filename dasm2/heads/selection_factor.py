@@ -1,4 +1,4 @@
-"""Selection factor prediction head (#621 Task #5).
+"""Selection factor prediction head.
 
 The unified head that consumes the shared ``L×20`` selection-factor tensor
 from ``CoreModel``'s ``SelectionFactorProjection`` and returns it
@@ -6,7 +6,7 @@ unchanged. The matching loss class — ``DASMLoss``, ``WhichmutLoss``, or
 ``AAOWhichmutLoss`` — is attached via ``Task.loss`` and does all the
 work.
 
-This single head replaces the pre-#621 trio of identity-forward
+This single head replaces the former trio of identity-forward
 ``DASMEvolHead`` / ``WhichmutHead`` / ``AAOWhichmutHead`` heads. The
 three legacy ``HeadConfig`` classes and ``HeadType`` enum members are
 retained as YAML-compat shims (see ``dasm2/config.py`` and

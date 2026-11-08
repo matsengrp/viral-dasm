@@ -348,7 +348,7 @@ class CoreModel(nn.Module):
             # Head exists - return existing instance (config ignored)
             return cast(PredictionHead, self.prediction_heads[head_type.value])
 
-        from dasm2.heads.factory import create_head  # function-local: see #1294
+        from dasm2.heads.factory import create_head  # function-local: breaks an import cycle
 
         head = create_head(head_config)
         self.prediction_heads[head_type.value] = head
@@ -388,7 +388,6 @@ class CoreModel(nn.Module):
         by an encoder that freezes its own parameters for reasons unrelated
         to this switch (see the note in ``__init__``). Consulted by
         ``Trainer.export_metadata`` to decide ``TrainingConfig.freeze_encoder``
-        (issue #1076).
         """
         return self._encoder_frozen_via_freeze_call
 
@@ -559,7 +558,7 @@ class CoreModel(nn.Module):
             distance: Maturation distance (sum of IQ-TREE branch lengths from
                 naive ancestor to parent). Required when the encoder has
                 distance_encoding_mode != "none"; ``None`` raises ``ValueError``
-                in that case. There is no safe silent default — see issue #199.
+                in that case. There is no safe silent default.
             raw: If True, return un-zapped selection factors (before gauge
                 enforcement). Default False returns zapped SF where the parent
                 amino acid entry is 1.0 (log SF = 0).
@@ -586,7 +585,7 @@ class CoreModel(nn.Module):
 
         Raises:
             ValueError: If the encoder is distance-aware and ``distance`` is
-                None. There is no safe default — see issue #199.
+                None. There is no safe default.
         """
         encoder_distance_mode = getattr(self.encoder, "distance_encoding_mode", "none")
         if encoder_distance_mode == "none":
@@ -596,7 +595,7 @@ class CoreModel(nn.Module):
                 "Encoder is configured with distance_encoding_mode="
                 f"{encoder_distance_mode!r}; selection_factors_of_aa_str() "
                 "requires an explicit `distance=` argument. There is no "
-                "safe default — see issue #199."
+                "safe default."
             )
         batch["distance"] = torch.tensor(
             [distance], dtype=torch.float32, device=self.device

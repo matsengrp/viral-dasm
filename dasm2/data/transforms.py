@@ -280,7 +280,7 @@ class ComputeMutIndicator:
         single_nt_only: If True, exclude multi-nucleotide codon mutations
             (2+ nt changes). The Whichmut neutral rate tensor only has entries
             for single-nt transitions; multi-hit mutations produce zero-rate
-            numerators with no useful gradient. See issue #403.
+            numerators with no useful gradient.
     """
 
     parent_key: str
@@ -429,12 +429,11 @@ class ComputeNeutralCodonProbs:
             outside a ``TransformDataset`` (e.g. in isolation in tests).
             A between-cycle refit (``CodonStrengthOptimizer``) mutates the
             shared tensor in place, which streaming/Parquet workers pick up
-            on their next ``__getitem__`` call (DESIGN.md D6; issue #1039).
+            on their next ``__getitem__`` call (DESIGN.md D6).
         tandem: Optional fixed tandem term, the neutral model's ``tandem``
-            (issue #1683). The branch-length objective reads the same object
+            The branch-length objective reads the same object
             off the bundle's neutral model, so both see one neutral.
-            Construction raises if it is active alongside ``multihit_model``
-            (issue #1753).
+            Construction raises if it is active alongside ``multihit_model``.
     """
 
     multihit_model: Optional["HitClassModel"] = None
@@ -886,7 +885,7 @@ class CensorReferenceReversions:
     reference, not only the ones the UShER team curated: read mapping, gap
     filling and consensus calling all fail toward the reference allele, so any
     parent -> reference transition is over-represented relative to its true rate.
-    That is the same defect #1079 fixes for UShER-masked mutations, from a
+    That is the same defect censoring fixes for UShER-masked mutations, from a
     different cause, so it gets the same treatment -- an observation whose rate is
     artifactually amplified should not have its *absence* charged to selection.
 

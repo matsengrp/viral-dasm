@@ -392,9 +392,8 @@ class BaseHeadConfig(BaseModel):
     additional required fields. Uses discriminated union pattern for
     fail-fast validation at deserialization time.
 
-    Per #621 Task #4 the canonical home for ``loss_weight`` is the
-    ``Task`` object, not the head config; the field has been retired
-    from this base class as part of the v3-compat shim retirement.
+    The canonical home for ``loss_weight`` is the ``Task`` object, not the
+    head config; the field is not carried on this base class.
     """
 
     head_type: HeadType = Field(description="Head type discriminator")
@@ -408,7 +407,7 @@ class BaseHeadConfig(BaseModel):
 
 
 class SelectionFactorHeadConfig(BaseHeadConfig):
-    """Configuration for ``SelectionFactorHead`` (post-#621 Task #5).
+    """Configuration for ``SelectionFactorHead``.
 
     The unified config for the head that consumes the shared selection
     factor tensor and identity-forwards it. The matching loss class —
@@ -497,8 +496,7 @@ HeadConfig = Annotated[
 # LossConfig discriminated union.
 # Each variant maps 1:1 to a `Loss(nn.Module)` class via `create_loss` in
 # `dasm2.losses.factory`. `loss_type` is the discriminator. Defaults are
-# unambiguous per loss family — the migration script populates these from
-# pre-#621 head_config values one-to-one.
+# unambiguous per loss family.
 # ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -561,14 +559,11 @@ LossConfig = WhichmutLossConfig
 class TaskConfig(BaseModel):
     """v4 declarative task entry: pairs a head with a loss + weight.
 
-    Introduced by issue #621 Task #6. The v4 ``TrainingConfig.tasks`` block
-    holds one ``TaskConfig`` per (head, loss) pair the trainer should
-    construct. ``head_type`` points at one of the entries in
-    ``model.heads`` (deduplicated — AAH yields two ``TaskConfig`` entries
-    sharing the same ``head_type`` pointer, one per loss).
-
-    Pre-v4 YAMLs must be rewritten by ``scripts/migrate_yaml_to_v4.py``
-    before they can be loaded.
+    The ``TrainingConfig.tasks`` block holds one ``TaskConfig`` per
+    (head, loss) pair the trainer should construct. ``head_type`` points at
+    one of the entries in ``model.heads`` (deduplicated -- a head with two
+    losses yields two ``TaskConfig`` entries sharing one ``head_type``
+    pointer).
     """
 
     head_type: HeadType = Field(
@@ -581,7 +576,7 @@ class TaskConfig(BaseModel):
         default=1.0,
         ge=0.0,
         description="Multiplicative weight applied to this task's loss. 0.0 is "
-        "valid (not just >0): OverfitGuardHook (issue #1096) legitimately zeroes "
+        "valid (not just >0): OverfitGuardHook legitimately zeroes "
         "a live Task's loss_weight at runtime, and Trainer.export_metadata() "
         "round-trips that live value back into a TaskConfig, so the schema must "
         "tolerate it or checkpoint/cache saves crash after the guard fires.",
@@ -677,7 +672,7 @@ class ReduceOnPlateauSchedulerConfig(BaseModel):
     evaluations (not epochs): at ``eval_every_steps=500`` an
     ``eval_patience=10`` waits 5000 steps before reducing. The field is
     deliberately named ``eval_patience`` rather than ``patience`` so a
-    pre-#578 YAML carrying ``patience: N`` (epoch semantics) fails with
+    an older YAML carrying ``patience: N`` (epoch semantics) fails with
     ``extra="forbid"`` instead of silently reinterpreting the value
     under eval semantics.
     """
@@ -815,7 +810,7 @@ class SelectionFactorProjectionConfig(BaseModel):
         default=None,
         description="Link from the projection's output, the site fitness F, to "
         "log f. 'phi' gives log f(y) = log phi(F_y - F_parent), phi(S) = S / (1 - exp(-S)), the "
-        "Halpern-Bruno fixation factor (issue #1583). None keeps the wiggle "
+        "Halpern-Bruno fixation factor. None keeps the wiggle "
         "path. Mutually exclusive with wiggle_beta.",
     )
 
@@ -1097,45 +1092,43 @@ class TrainingConfig(BaseModel):
         default=None,
         description="Path to a CSC (codon stability coefficient) optimality TSV. "
         "When set, the within-AA log-optimality is applied to neutral codon "
-        "probabilities (issue #747). The strength β_CSC is fixed at 1 unless "
+        "probabilities. The strength β_CSC is fixed at 1 unless "
         "``fit_codon_strengths`` is set. Incompatible with "
         "DASM2_NEUTRAL_MODE=matrix_exp. Reaches the training loss on every "
-        "loader/mode (CSV, pickle, Parquet; precomputed or streaming) as of "
-        "issue #1039.",
+        "loader/mode (CSV, pickle, Parquet; precomputed or streaming).",
     )
     codon_pref_tai_table: Optional[Path] = Field(
         default=None,
         description="Path to a tAI (tRNA adaptation index) optimality TSV "
-        "(second codon-optimality axis, issue #747). Requires "
+        "(second codon-optimality axis). Requires "
         "``codon_pref_table`` (CSC) to also be set; the two axes are combined "
         "as Σ_k β_k·ξ̃ᵏ. Same matrix-exp incompatibility as ``codon_pref_table``, "
-        "and reaches the training loss on every loader/mode the same way "
-        "(issue #1039).",
+        "and reaches the training loss on every loader/mode the same way.",
     )
     fit_codon_strengths: bool = Field(
         default=False,
         description="When set (and a codon-optimality table is configured), fit "
         "the per-axis strengths β_k jointly with the model via the "
-        "CodonStrengthOptimizer between-cycle hook (issue #747). When False, the "
+        "CodonStrengthOptimizer between-cycle hook. When False, the "
         "strengths stay fixed at 1 (the β=1 smoke-test behavior). Works on every "
         "loader/mode: codon_pref_log is shared-memory dataset state on "
         "streaming/Parquet bundles (DESIGN.md D6), so the between-cycle refit "
         "reaches them the same way BranchLengthOptimizer already reaches branch "
-        "lengths (issue #1039).",
+        "lengths.",
     )
     fit_multihit_factors: bool = Field(
         default=False,
         description="When set (and a multihit-correction model is configured via "
         "neutral_model.multihit_model_name), refit the 3 log hit-class factors "
         "jointly with the model via the MultihitOptimizer between-cycle hook "
-        "(issue #501), replacing the pretrained antibody-fit values with a fit "
+        "replacing the model's pretrained values with a fit "
         "conditioned on the current dataset and selection factors. When False, "
         "the factors stay fixed at whatever the neutral model was loaded with. "
         "Works on every loader/mode: log_hit_class_factors is a shared-memory "
         "parameter on the bundle's multihit model (DESIGN.md D6), so the "
         "between-cycle refit reaches streaming and Parquet-backed bundles the "
-        "same way BranchLengthOptimizer already reaches branch lengths "
-        "(issue #1041). On a corpus with no neutral model of its own, configure "
+        "same way BranchLengthOptimizer already reaches branch lengths. "
+        "On a corpus with no neutral model of its own, configure "
         "the correction through the PrecomputedRates carrier "
         "(PrecomputedRatesNeutralModelConfig).",
     )
@@ -1148,7 +1141,7 @@ class TrainingConfig(BaseModel):
     head_optimizer: Optional[OptimizerConfig] = Field(
         default=None,
         description="Optional separate optimizer scoped to one head's own "
-        "parameters (issue #1220), e.g. slowing BindingClassificationHead's "
+        "parameters, e.g. slowing one head's "
         "own convergence in joint training without touching the shared "
         "encoder or any other head. Requires head_optimizer_head_type. Only "
         "that head's parameters move under this optimizer's own "
@@ -1282,7 +1275,7 @@ class TrainingConfig(BaseModel):
         description="If set, form micro-batches under this cap on total PADDED "
         "tokens (max sequence length in the batch x number of rows) instead of a "
         "fixed batch_size, so a long-sequence cluster holds fewer rows and no "
-        "batch's padded forward blows up (issue #724 load-imbalance fix). "
+        "batch's padded forward blows up. "
         "batch_size is reused as the per-batch row cap. None (default) keeps "
         "fixed-size batching. Only applies to datasets exposing per-sample "
         "lengths (evolutionary heads); other heads fall back to fixed batching.",
@@ -1294,7 +1287,7 @@ class TrainingConfig(BaseModel):
         "num_dataloader_workers > 0). Lower it (e.g. 2) on memory-constrained "
         "nodes: each prefetched batch is held in host RAM, and with long "
         "sequences padded to maxlen a deep queue is a large, bursty footprint "
-        "that can OOM a worker (issue #724).",
+        "that can OOM a worker.",
     )
     parquet_cache_budget_gb: Optional[float] = Field(
         default=None,
@@ -1302,13 +1295,11 @@ class TrainingConfig(BaseModel):
         description="RAM budget in GB of decoded row groups (arrow nbytes, "
         "measured at insert) for each copy of a Parquet backend's row-group "
         "cache; the main process and every DataLoader worker hold their own. "
-        "None (default) keeps the pre-#1272 bound: as many row groups as fit "
-        "2 GiB of parquet total_byte_size (~24 on the v10 corpus, ~14 GB "
-        "decoded), capped at the working set. When set, the budget is not "
-        "clamped, but startup warns if the main process and train workers at "
-        "this budget, plus the val workers' sweep caches, would exceed 25% of "
-        "MemTotal (issue #1272; "
-        "issue #724 for the OOM a cache bound prevents). The "
+        "None (default) keeps the older bound: as many row groups as fit "
+        "2 GiB of parquet total_byte_size, capped at the working set. When "
+        "set, the budget is not clamped, but startup warns if the main "
+        "process and train workers at this budget, plus the val workers' "
+        "sweep caches, would exceed 25% of MemTotal. The "
         "DASM2_PARQUET_CACHE_BUDGET_GB env var overrides this field.",
     )
     dataloader_pin_memory: bool = Field(
@@ -1316,7 +1307,7 @@ class TrainingConfig(BaseModel):
         description="Whether to pin DataLoader host memory. Pinned memory speeds "
         "CPU->GPU transfer but is page-locked and non-swappable, so under host-RAM "
         "pressure it cannot be paged out and can push a constrained node into the "
-        "OOM-killer (issue #724). Set False to disable on such nodes. Only takes "
+        "OOM-killer. Set False to disable on such nodes. Only takes "
         "effect on CUDA devices.",
     )
 
@@ -1327,7 +1318,7 @@ class TrainingConfig(BaseModel):
         "None (default) auto-picks min(cpu_count // 2, 10). Lower it (e.g. 6) to "
         "bound peak host RAM: each worker holds its own optimization chunk, and on "
         "a large per-cycle corpus the aggregate footprint can OOM-kill a worker at "
-        "the cycle boundary (issue #724).",
+        "the cycle boundary.",
     )
     bl_optimization_max_chunk_size: int = Field(
         default=1000,
@@ -1336,7 +1327,7 @@ class TrainingConfig(BaseModel):
         "Each in-flight chunk is held in host RAM (at most num_workers + 1 alive at "
         "once), so this caps the BL-optimization working set. 1000 (default) matches "
         "historical behavior; lower it (e.g. 250) on a large per-cycle corpus that "
-        "OOM-kills a worker at the cycle boundary (issue #724). The effective chunk "
+        "OOM-kills a worker at the cycle boundary. The effective chunk "
         "size may be smaller to keep at least num_workers chunks for parallelism.",
     )
     freeze_branch_lengths: bool = Field(
@@ -1349,11 +1340,10 @@ class TrainingConfig(BaseModel):
         "true/generating values from a simulation) are used unchanged "
         "throughout training. The input's branch_length column is what gets "
         "frozen on both the Parquet and the DataFrame/CSV path; a corpus "
-        "without that column freezes at DEFAULT_BRANCH_LENGTH=0.1 (issue "
-        "#1168). Without this flag, even a cycles=1 run overwrites the input "
-        "branch lengths at both cycle boundaries (issue #821: needed to "
-        "remove the BL-estimation confound when comparing training on "
-        "reconstructed vs. true ancestors at matched branch lengths).",
+        "without that column freezes at DEFAULT_BRANCH_LENGTH=0.1. Without "
+        "this flag, even a cycles=1 run overwrites the input branch lengths "
+        "at both cycle boundaries, which confounds any comparison that needs "
+        "branch lengths held fixed.",
     )
     freeze_branch_lengths_after_first_cycle: bool = Field(
         default=False,
@@ -1367,10 +1357,10 @@ class TrainingConfig(BaseModel):
         "gets frozen; without one, cycle 0 falls through to the cache and "
         "then to model-based optimization, and the optimized values are what "
         "get frozen. The weaker sibling of freeze_branch_lengths, which "
-        "additionally freezes cycle 0. Used by the issue #199 / #713 "
-        "frozen-BL retrain to stop the model from co-adapting branch lengths "
-        "to its own suppressed selection across cycles while still training "
-        "against a sensible BL estimate. Mutually exclusive with "
+        "additionally freezes cycle 0. It stops the model from co-adapting "
+        "branch lengths to its own suppressed selection across cycles while "
+        "still training against a sensible BL estimate. Mutually exclusive "
+        "with "
         "freeze_branch_lengths.",
     )
     init_branch_lengths_from_input: bool = Field(
@@ -1389,7 +1379,7 @@ class TrainingConfig(BaseModel):
         "step counters) in addition to model weights, so `dasm2 train "
         "--resume <checkpoint>` can continue the optimizer/LR schedule "
         "exactly where it left off instead of restarting it from the "
-        "config's base learning rate (issue #516). Default False preserves "
+        "config's base learning rate. Default False preserves "
         "the historical weights-only checkpoint behavior.",
     )
     freeze_encoder: bool = Field(
@@ -1403,7 +1393,7 @@ class TrainingConfig(BaseModel):
         "create_optimizer builds its param groups from "
         "requires_grad-filtered parameters, and before any DDP wrap, since "
         "the reducer registers every parameter that requires grad at "
-        "construction time (issue #1076).",
+        "construction time.",
     )
 
     # Dataset pipeline mode
@@ -1446,7 +1436,7 @@ class TrainingConfig(BaseModel):
         "while leaving all of their candidates in the partition function. "
         "Requires the censored_mutations_file/censored_clades_file pair.",
     )
-    # The same global mask at nucleotide granularity (mat-pcp#153), and the one to
+    # The same global mask at nucleotide granularity, and the one to
     # prefer. Named for `pcps/{gene}/masked_nt_sites.csv` and for the manifest's
     # `masked_nt_sites`, keeping the config key, the manifest field and the
     # filename one vocabulary, as the codon field above does.
@@ -1477,11 +1467,11 @@ class TrainingConfig(BaseModel):
         description="Which half of censoring to apply. 'both' is the only "
         "coherent objective and the only value to use in production. The two "
         "single-half modes exist for the ablation demonstrating the halves do "
-        "different things (#1079); each on its own still trains and produces a "
+        "different things; each on its own still trains and produces a "
         "plausible curve, which is precisely why they must be named explicitly. "
         "Shared by every censoring source, including reference_sequence_file, "
         "where the halves matter more because that rule is "
-        "numerator-dominated (#1099).",
+        "numerator-dominated.",
     )
 
     # Extensible hook configuration
@@ -1496,7 +1486,7 @@ class TrainingConfig(BaseModel):
         max_length=1,
         description="Top-level (not per-task) hooks controlling how multiple "
         "tasks' gradients on shared parameters are combined before the "
-        "optimizer step — e.g. PCGradHook (issue #1144). Unlike pre_hooks/"
+        "optimizer step — e.g. PCGradHook. Unlike pre_hooks/"
         "post_hooks above (populated only by Trainer.export_metadata for "
         "checkpoint round-tripping), this field is read at load time: "
         "train_command.py resolves it via create_hook() once and passes the "
@@ -1516,14 +1506,12 @@ class TrainingConfig(BaseModel):
         "regenerating data.",
     )
 
-    # v4 declarative task block (issue #621 Task #6). One entry per
-    # (head, loss) pair. AAH expands to two entries sharing the same
-    # ``head_type`` pointer. Pre-v4 YAMLs must be migrated with
-    # ``scripts/migrate_yaml_to_v4.py``.
+    # Declarative task block: one entry per (head, loss) pair. A head with
+    # two losses expands to two entries sharing one ``head_type`` pointer.
     tasks: List[TaskConfig] = Field(
         default_factory=list,
         description=(
-            "v4 declarative tasks block (issue #621). Each entry pairs a head "
+            "Declarative tasks block. Each entry pairs a head "
             "(by ``head_type`` discriminator) with a ``LossConfig`` and a "
             "``loss_weight``. AAH expands to two entries (whichmut + "
             "aao_whichmut) sharing the same ``head_type`` pointer."
@@ -1540,7 +1528,7 @@ class TrainingConfig(BaseModel):
         exists, so pointing it at a non-whichmut task would configure a file that
         is silently never read -- the failure mode this whole change is about.
 
-        The global mask -- ``masked_nt_sites_file`` (mat-pcp#153) or the older
+        The global mask -- ``masked_nt_sites_file`` or the older
         ``codon_sites_to_mask_file``, never both -- rides on top of that
         pair rather than standing alone; see the comments at their checks for why
         global-only censoring is deliberately unrepresentable and why the two
@@ -1578,8 +1566,8 @@ class TrainingConfig(BaseModel):
         # the roster alone would do. Requiring the whole pair keeps one loading
         # path -- `with_global_codon_sites` merges into a loaded table -- at the
         # cost of making global-only censoring unrepresentable. Deliberate: no arm
-        # of #1083's pilot wants it, and a second construction path for a case
-        # nobody needs is the speculative generality CONSTITUTION IX warns about.
+        # case needs it, and a second construction path for a case nobody
+        # needs is speculative generality.
         if self.codon_sites_to_mask_file is not None and not has_table:
             raise ValueError(
                 f"codon_sites_to_mask_file is set "
@@ -1616,7 +1604,7 @@ class TrainingConfig(BaseModel):
                 f"the codon file widens each flagged nucleotide to its whole "
                 f"codon, so it strictly contains the nucleotide file and would "
                 f"silently win. Set exactly one -- masked_nt_sites_file unless "
-                f"you are reproducing a pre-mat-pcp#153 run."
+                f"you are reproducing a run that predates it."
             )
         if (has_table or has_reference) and self.tasks:
             sources = [
@@ -1649,7 +1637,7 @@ class TrainingConfig(BaseModel):
                 )
             # AAO is whichmut-family and censorable in principle -- its chain
             # builds codon_neutral_rates before MarginalizeCodonsToAAO -- but
-            # #1079 scoped it out to keep this change one variable, and
+            # it was scoped out to keep that change one variable, and
             # `_load_whichmut_head_data` raises NotImplementedError on it. Say so
             # here rather than at data-loading time: both are loud, but a config
             # that cannot run should not survive config validation.
@@ -1659,8 +1647,8 @@ class TrainingConfig(BaseModel):
             ):
                 raise ValueError(
                     f"Censoring is not yet implemented for the AAO whichmut path "
-                    f"(#1079 scoped it out deliberately, and #1099 kept it out "
-                    f"for the same one-variable reason). Remove "
+                    f"(it was scoped out deliberately, to keep that change "
+                    f"one variable). Remove "
                     f"{' and '.join(sources)} or use the standard whichmut head."
                 )
         return self

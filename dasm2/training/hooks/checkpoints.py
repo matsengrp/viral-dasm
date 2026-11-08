@@ -44,7 +44,7 @@ class CheckpointSaveHook(TrainingHook):
             save_training_state: If True, save resumable checkpoints that include
                 optimizer, scheduler, counters, and RNG state for training resume.
             checkpoint_every_n_steps: If set, also save every N optimizer steps
-                via on_step() (issue #1640: D₂'s evals are hours apart), as
+                via on_step(), which matters when evals are hours apart, as
                 ``periodic_step{N}`` files of which only the newest
                 ``PERIODIC_KEEP`` are kept. The save follows the step's eval, if
                 one ran.
@@ -76,8 +76,8 @@ class CheckpointSaveHook(TrainingHook):
         The trainer calls ``_restore_best_model()`` at the end of every
         cycle's step loop, so *every* post-cycle save holds that cycle's
         best-validation weights rather than its last-step weights. The
-        ``_best`` marker in the suffix says so on the file itself: before
-        issue #1011 the final cycle's save was the one file with neither a
+        ``_best`` marker in the suffix says so on the file itself: formerly
+        the final cycle's save was the one file with neither a
         cycle nor a step suffix, which read as a generic "last state"
         artifact and, with two attempts in one directory, produced two
         equally anonymous files that selection heuristics picked between at

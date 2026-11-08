@@ -60,7 +60,7 @@ def use_system_arrow_pool() -> None:
                 "pyarrow was imported before dasm2, so Parquet's reader still "
                 "allocates from %s, not %s; under pyarrow 25 mimalloc requests "
                 "transparent huge pages. Import dasm2 before pandas or pyarrow, "
-                "or set %s before starting Python (#1368).",
+                "or set %s before starting Python.",
                 pa.default_memory_pool().backend_name,
                 requested,
                 ARROW_POOL_ENV_VAR,

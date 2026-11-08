@@ -23,8 +23,8 @@ class PerSiteParentChildHead(PerSiteEncoderFreeHead):
     PerSiteChildHead (which uses a fixed wildtype and fits L x 20) because
     this conditions on the actual parent amino acid at each site.
 
-    Loss is provided by ``WhichmutLoss``; pre-#621 this head inherited
-    from ``WhichmutLossMixin`` and the post-#621 bridge defaults match.
+    Loss is provided by ``WhichmutLoss``; this head formerly inherited
+    from ``WhichmutLossMixin`` and the bridge defaults match.
     """
 
     def __init__(

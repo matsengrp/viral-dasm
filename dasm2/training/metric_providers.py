@@ -25,7 +25,7 @@ Two gating shapes coexist behind one uniform loop:
   loss-intrinsic — ``AAOWhichmutLoss`` is AA-level and cannot produce a
   codon distribution even though it shares a head with codon-capable
   losses — so the provider gates on the loss exposing ``predict_codons``.
-  Behavior is identical to the pre-#738 ``isinstance(loss, ...)`` gate.
+  Behavior is identical to a plain ``isinstance(loss, ...)`` gate.
 
 Either shape can be narrowed by loss class. ``excluded_loss_classes`` removes
 a provider for losses whose batches lack the keys its ``update`` reads (the
@@ -267,7 +267,7 @@ def build_active_metrics(
     (from the loss or the head fallback); a declared capability with no
     resolvable extractor is a wiring bug and raises here — at task-build
     time — rather than silently omitting the metric at eval time (the
-    failure mode #738 fixes).
+    failure mode this registry exists to prevent).
     """
     active: List[ActiveMetric] = []
     for provider in providers if providers is not None else METRIC_PROVIDERS:

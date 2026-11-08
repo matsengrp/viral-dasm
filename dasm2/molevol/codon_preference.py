@@ -411,19 +411,19 @@ def apply_codon_pref_log(
 
     Two forms:
 
-    - ``"divide_z"`` (default, the #749/#767 merged form): add the log
+    - ``"divide_z"`` (the default): add the log
       preference, then renormalize with a softmax over all 64 codons
       (``÷ Z``, ``Z = Σ_k p_k·g_k``). Not a cycle-consistent potential — ``Z``
       depends on the neutral row (branch length, parent) — but agrees with the
       ratio form on the identifiable within-box synonymous signal.
-    - ``"ratio"`` (issue #930 Rung 1): add the log preference gauged by the
+    - ``"ratio"``: add the log preference gauged by the
       *parent codon's own* preference, i.e. ``g_{c'}/g_{x̄_j}`` for child ``c'``
       and parent codon ``x̄_j``. This is the cycle-consistent form the DASM
       likelihood uses (``ℓ = p·(g_{c'}/g_{x̄_j})·f``): a global shift of
       ``codon_pref_log`` is an exactly flat direction, and the output is
       **not** renormalized to sum to 1 — the 64-way normalization comes from
       the caller's ``compute_log_adjusted_codon_probs`` step, not from this
-      primitive. That step is configurable since issue #1238 (parent-absorb
+      primitive. That step is configurable (parent-absorb
       or a sense-restricted ``log_softmax``); the flat-direction claim holds
       under either, since both denominators scale with a global shift.
       Requires ``parent_codon_idxs``.

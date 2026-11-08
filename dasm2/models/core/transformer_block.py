@@ -4,7 +4,7 @@ Replaces PyTorch's monolithic nn.TransformerEncoderLayer with a composable
 TransformerBlock where each sub-component (normalization, activation, FFN,
 attention) is independently configurable.
 
-See #375 and #376 for design rationale.
+Attention and feed-forward are separately configurable blocks.
 """
 
 from typing import Callable, Literal, Optional

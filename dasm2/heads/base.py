@@ -1,6 +1,6 @@
 """Base classes for prediction heads.
 
-After #621 Task #4, heads own only the forward pass; loss math lives on
+Heads own only the forward pass; loss math lives on
 ``Loss`` modules in ``dasm2/losses/`` (and is registered on the trainer
 via the per-task ``Task.loss``). The ``compute_loss`` ABC is gone;
 ``SharedSelectionFactorHead`` is now a thin identity-forward

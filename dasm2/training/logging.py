@@ -461,7 +461,7 @@ class TrainingLogger:
 
         ``val_metrics`` is one flat dict merging every
         validation metric group eligible for this task — child-codon
-        prediction and selection-factor distribution (#678 §7).
+        prediction and selection-factor distribution.
         Keys are emitted at the top level prefixed with ``val_`` (e.g.
         ``val_codon_acc_mutated``, ``val_sf_frac_positive``), exactly as the
         previously separate ``val_codon_metrics`` / ``val_sf_metrics`` did,
@@ -523,7 +523,7 @@ class TrainingLogger:
         ``per_task_val_metrics`` maps task_key to one flat dict
         merging every validation metric group eligible for that task —
         child-codon prediction and selection-factor distribution
-        (#678 §7). Keys are flattened as ``val_{task_key}_{metric_name}`` to
+        Keys are flattened as ``val_{task_key}_{metric_name}`` to
         mirror the per-task loss flatten pattern and stay queryable from the
         JSONL log; the on-disk schema is unchanged from the previously
         separate codon / sf payloads. ``optimizer_step_metrics`` is a

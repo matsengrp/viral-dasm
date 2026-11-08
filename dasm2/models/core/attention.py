@@ -299,7 +299,7 @@ class EntmaxMultiheadAttention(nn.Module):
         We do NOT use PyTorch's fastpath optimizations since we need custom normalization.
 
         Note: Parameter order matches nn.MultiheadAttention (attn_mask before
-        key_padding_mask). Aligned in #376 for SequenceMixer protocol compatibility.
+        key_padding_mask), for SequenceMixer protocol compatibility.
 
         Args:
             query: Query embeddings [batch, seq_len, embed_dim] if batch_first=True

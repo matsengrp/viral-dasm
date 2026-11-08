@@ -1,7 +1,7 @@
 """Row-aligned numpy views of parent/child NT columns, read off Arrow buffers.
 
-The columnar passes over Parquet PCPs (the branch-length cold start, issue
-#992, and the scored-substitution guard, issue #1243) compare parent and child
+The columnar passes over Parquet PCPs (the branch-length cold start and the
+scored-substitution guard) compare parent and child
 sequences byte for byte without building Python strings. They share the
 reading: null-fill each segment column, split both columns at the union of
 their chunk boundaries, take zero-copy ``(offsets, data)`` views of each

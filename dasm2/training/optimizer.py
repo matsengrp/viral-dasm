@@ -30,8 +30,8 @@ def create_optimizer(
         model: Model to optimize (should be the unwrapped model, not DDP-wrapped)
         optimizer_config: Optimizer configuration with type and parameters
         exclude_module: Optional submodule whose parameters are left out of
-            this optimizer entirely (issue #1220: a separate, head-scoped
-            optimizer owns them instead). Matched by parameter identity
+            this optimizer entirely (a separate, head-scoped optimizer owns
+            them instead). Matched by parameter identity
             (``id(p)``), not by name, so this is safe even if the excluded
             submodule's parameter names happen to collide with another
             submodule's. None (default) reproduces today's behavior exactly

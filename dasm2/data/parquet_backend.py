@@ -163,7 +163,7 @@ def _explicit_budget(spec: CacheBudgetSpec) -> Optional[tuple[int, str]]:
 def default_cache_row_groups(rg_parquet_bytes: Sequence[int]) -> int:
     """Row groups the default cache bound allows: 2 GiB of ``total_byte_size``.
 
-    The pre-#1272 rule, kept as the default: as many median-size row groups as
+    The older rule, kept as the default: as many median-size row groups as
     fit ``_CACHE_FLOOR_PARQUET_BYTES`` of parquet ``total_byte_size``, and at
     most the number of row groups there are. The median keeps one short final
     row group from inflating the count.
@@ -242,14 +242,13 @@ def plan_cache(
     By default the cache holds ``min(working set, floor)`` row groups: the
     working set is ``_working_set_row_groups``, the floor is as many row groups
     as fit ``_CACHE_FLOOR_PARQUET_BYTES`` of parquet ``total_byte_size`` (the
-    pre-#1272 rule). An explicit budget (the ``DASM2_PARQUET_CACHE_BUDGET_GB``
+    older rule). An explicit budget (the ``DASM2_PARQUET_CACHE_BUDGET_GB``
     env var, then ``spec.budget_gb``) bounds it instead in decoded bytes,
     measured per row group at insert, up to the working set's count. It is not
     clamped, but a warning names the host-RAM cost when the main process and
     train workers holding the budget, plus the val workers' sequential caches,
-    would exceed ``_EXPLICIT_BUDGET_WARN_FRACTION`` of ``MemTotal``: #1270's
-    Bw8cache arm (a 30 GB budget, 8 workers) took a shared 1.1 TB host to
-    ~738 GB used.
+    would exceed ``_EXPLICIT_BUDGET_WARN_FRACTION`` of ``MemTotal``: a
+    generous budget times a worker count is how a shared host gets filled.
 
     Args:
         spec: Config budget and worker count.
@@ -595,7 +594,7 @@ class ParquetBackend:
         """Return a copy of this backend with an empty sequential-sweep cache.
 
         For a forward-only walk split across forked DataLoader workers (the
-        post-cycle BL pass, issue #1276). Each worker fills its own copy of
+        post-cycle BL pass). Each worker fills its own copy of
         the cache, so a copy of this backend would let every worker grow to
         the shuffle-sized bound set at construction. The copy's cache holds
         ``SEQUENTIAL_SWEEP_CACHE_SIZE`` row groups instead, and it reopens its

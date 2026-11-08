@@ -56,8 +56,8 @@ from dasm2.sequence.constants import NUM_BASES
 if TYPE_CHECKING:
     from dasm2.data.segment_handlers import SegmentHandler
 
-# Head types categorized by their data requirements.  After #621 Task #4
-# the architecture-determined sets stay head-keyed (one loss per head
+# Head types categorized by their data requirements. The
+# architecture-determined sets stay head-keyed (one loss per head
 # shape); the loss-keyed dispatch (``EVOLUTIONARY_LOSS_TYPES``,
 # ``WHICHMUT_LOSS_TYPES``) lives in ``dasm2/losses/types.py``.
 
@@ -548,7 +548,7 @@ def seam_identity(nickname: Optional[str]) -> Dict[str, str]:
     into a Parquet file at write time and recomputing it at load time is what
     lets the Parquet CV path (which splits rows *as stored*, never calling
     :func:`preprocess_rows_for_split`) prove it is splitting the row set the
-    CSV and MLM paths split -- see issue #1131.
+    CSV and MLM paths split.
 
     Args:
         nickname: Registered dataset nickname whose manifest drives the seam,
@@ -694,7 +694,7 @@ def verify_parquet_seam_stamp(
     # self-declares. Without this, a file stamped vacuously -- built from a
     # bare CSV path before that path was registered -- verifies against its
     # own empty naughty list forever, even after the manifest it is now loaded
-    # under grows a real one (PR #1139 review).
+    # under grows a real one.
     loaded_identity = (
         seam_identity(component_nickname) if component_nickname is not None else None
     )
@@ -704,8 +704,8 @@ def verify_parquet_seam_stamp(
             problems.append(
                 (
                     path,
-                    "no seam stamp (written by a writer that predates issue "
-                    "#1131, or by no known writer)",
+                    "no seam stamp (written by a writer that predates "
+                    "stamping, or by no known writer)",
                 )
             )
             rows_comparable = False
@@ -742,7 +742,7 @@ def verify_parquet_seam_stamp(
             # partially-copied stamp can carry one key without the other, and
             # indexing the missing one raised ``KeyError`` in both strict and
             # warn modes instead of the ``ValueError`` with rebuild
-            # instructions this function promises (PR #1139 review).
+            # instructions this function promises.
             if key not in meta:
                 problems.append((path, f"stamp is missing '{key}'"))
             elif meta[key] != expected[key]:
@@ -824,8 +824,8 @@ def verify_parquet_seam_stamp(
 
     if subsampled_from is not None:
         # "Rebuild with write_parquet.py" is actively wrong advice here: it
-        # would produce the full dataset, not this subsample (PR #1139
-        # review). A subsample has no correct rebuild -- it is the wrong input
+        # would produce the full dataset, not this subsample. A subsample
+        # has no correct rebuild -- it is the wrong input
         # for a row-count-driven split, whatever it was built from.
         remedy = (
             f"\nA subsample holds a random subset of the rows in "

@@ -11,7 +11,7 @@ shape: it isn't per-task (``TrainingHook``'s ``pre_cycle``/``post_cycle``/
 under ``dasm2/training/hooks/`` for exactly this reason — an earlier version
 of this class was misnamed ``HeadOptimizerHook`` and placed in that
 directory, which invited exactly the confusion this paragraph is now
-avoiding (PR #1223 review).
+avoiding.
 
 What it actually is: ``Trainer`` supports giving exactly one head its own
 optimizer, separate from the shared main optimizer every other parameter
@@ -54,9 +54,7 @@ def assert_head_optimizer_supported_by_backend(backend: "ComputeBackend") -> Non
     expensive model/dataset setup — the three call sites
     (``create_trainer``, ``Trainer.__init__``, ``resume_training``) each want
     to fail fast at their own entry point rather than share one call site,
-    which is why this is a shared function, not a single shared call
-    (PR #1223 review: the check itself was previously copy-pasted three
-    times with three slightly different messages).
+    which is why this is a shared function, not a single shared call.
 
     Raises:
         ValueError: If ``backend.num_processes > 1``.
@@ -66,7 +64,7 @@ def assert_head_optimizer_supported_by_backend(backend: "ComputeBackend") -> Non
             "head_optimizer is not supported under multi-process backends "
             f"(backend.num_processes={backend.num_processes}): only "
             "SingleGPUBackend has been exercised with a second, head-scoped "
-            "optimizer (issue #1220). Run single-process (SingleGPUBackend) "
+            "optimizer. Run single-process (SingleGPUBackend) "
             "until DDP support is added."
         )
 

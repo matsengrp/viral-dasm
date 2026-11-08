@@ -502,7 +502,7 @@ class LenientBranchLengthArtifact(BranchLengthArtifact):
 
     Validates only what changes the branch-length objective: the
     neutral_model config and, for every head both configs train, the loss
-    ``normalization`` (``DASMLossConfig``'s endpoint kernel, issue #1238).
+    ``normalization`` (``DASMLossConfig``'s endpoint kernel).
     This allows reuse across training configurations that differ only in
     fields that leave the fitted lengths' meaning unchanged, such as hook
     configs.

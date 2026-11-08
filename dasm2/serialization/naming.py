@@ -38,7 +38,7 @@ RUN_TOKEN_PATTERN = re.compile(rf"_({RUN_TOKEN_BODY})_")
 #: The optional ``_{run_token}`` segment that :func:`build_checkpoint_filename`
 #: places between a checkpoint's suffix and its ``_{hash}_{date}`` trailer.
 #: Callers matching a suffix against that trailer must allow for it, and must
-#: allow for its absence: checkpoints predating #1011, or written by a run
+#: allow for its absence: checkpoints predating the token, or written by a run
 #: with no structured logger, carry no token.
 OPTIONAL_RUN_TOKEN = rf"(?:_{RUN_TOKEN_BODY})?"
 
@@ -49,7 +49,7 @@ def run_token_from_run_id(run_id: Optional[str]) -> Optional[str]:
     Checkpoint filenames carry this token so that two attempts writing into
     the same directory produce distinguishable files, and so any checkpoint
     can be traced back to the ``logs/{run_id}_log.jsonl`` that describes it
-    (issue #1011). The token keeps the run ID's timestamp so filenames sort
+    The token keeps the run ID's timestamp so filenames sort
     chronologically within a naming group, unlike the metadata hash.
 
     Args:

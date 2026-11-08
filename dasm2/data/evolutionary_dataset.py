@@ -166,7 +166,7 @@ def warn_if_parquet_dataset_mode_mismatch(dataset_mode: str) -> None:
 
     "streaming" matches what Parquet actually does, so only the
     "precomputed" request is silently violated -- warning on "streaming"
-    instead (the inverted pre-#501 condition) fired on the case that
+    instead (the inverted condition) fired on the case that
     already matches reality and stayed silent on the one config knob a
     user would reach for to get precomputed behavior, which Parquet can't
     provide.
@@ -373,10 +373,8 @@ def _validate_parquet_scored_substitutions(
         raise ValueError(
             f"{num_inert} of {backend.total_rows} selected rows in "
             f"{[str(path) for path in parquet_paths]} have no scored codon "
-            f"substitution. Rebuild the file with "
-            f"scripts/prepare_compara_parquet.py or "
-            f"scripts/prepare_superfamily_parquet.py, which drop these rows "
-            f"(issue #1243)."
+            f"substitution. The corpus-building pipeline drops such rows; "
+            f"rebuild the file with it."
         )
 
 
@@ -541,7 +539,7 @@ class TransformDataset(torch.utils.data.Dataset):
             modes (streaming reads per-sample in ``__getitem__``, precomputed stores
             reference for ``recompute_neutral_probs``).
         codon_pref_log: Optional log-space codon preference vector (64,)
-            (issue #747). Shared-memory, same live-update pattern as
+            Shared-memory, same live-update pattern as
             ``branch_lengths``: streaming/Parquet ``__getitem__`` injects it
             into the sample dict for ``ComputeNeutralCodonProbs`` to read;
             ``CodonStrengthOptimizer`` refits it in-place.
@@ -596,7 +594,7 @@ class TransformDataset(torch.utils.data.Dataset):
         # so a between-cycle refit (CodonStrengthOptimizer) can update it
         # in-place and have streaming/Parquet workers see the change on their
         # next __getitem__ call — the same live-dataset-state pattern as
-        # ``branch_lengths`` (DESIGN.md D6; verified by probe, issue #1039).
+        # ``branch_lengths`` (DESIGN.md D6).
         self._codon_pref_log = (
             codon_pref_log.clone().share_memory_()
             if codon_pref_log is not None
@@ -895,8 +893,8 @@ class TransformDataset(torch.utils.data.Dataset):
           ``copy_``.
 
         Always updates ``self._codon_pref_log`` — the single source of truth
-        ``BranchLengthDatasetBundle.codon_pref_log`` reads through to (issue
-        #1039; mirrors ``branch_lengths``, which is exactly the same
+        ``BranchLengthDatasetBundle.codon_pref_log`` reads through to
+        (mirroring ``branch_lengths``, which is exactly the same
         read-through relationship). For streaming/Parquet mode, this alone
         makes the update visible: the per-sample ``ComputeNeutralCodonProbs``
         transform reads ``sample["codon_pref_log"]`` fresh on every
@@ -967,7 +965,7 @@ class TransformDataset(torch.utils.data.Dataset):
         streaming/Parquet for the same reason: the transform holds the very
         object the bundle exposes as ``multihit_model``, and its
         ``log_hit_class_factors`` are shared memory, so a refit mutates it in
-        place rather than routing through here (issue #1041; see
+        place rather than routing through here (see
         ``_prepare_transform_multihit``).
 
         Args:
@@ -1588,7 +1586,7 @@ class BranchLengthDatasetBundle(DatasetBundle):
                 padding_sentinel, include_parent_nt_windows=include_parent_nt_windows
             )
         )
-        # Issue #199: carry the per-sample distance scalar through BL optimization
+        # Carry the per-sample distance scalar through BL optimization
         # when the training dataset exposes it.
         if has_distance:
             collator_specs["distance"] = (0.0, "scalar")
@@ -1693,7 +1691,7 @@ def _whichmut_transforms(
     Args:
         num_segments: Number of protein segments.
         censor_table: Optional ``{clade: CensorSpec}`` enabling UShER censoring
-            (#1079). Appended last, since it must run after *both*
+            Appended last, since it must run after *both*
             ``ComputeCodonMutationRates`` and ``NarrowLossMask``.
         censor_mode: Which half of censoring to apply; shared by both censoring
             transforms. See
@@ -1811,7 +1809,7 @@ def create_whichmut_dataset(
             ``"streaming"`` for per-sample computation (zero memory overhead).
         nickname: Human-readable identifier.
         censor_table: Optional ``{clade: CensorSpec}`` enabling UShER censoring
-            (#1079). Requires a ``clade`` column in ``sequences_df``.
+            Requires a ``clade`` column in ``sequences_df``.
         censor_mode: Which half of censoring to apply, for both sources.
         reference_base_idxs: Optional reference base indices enabling
             parent -> reference reversion censoring. Needs **no**
@@ -2247,7 +2245,7 @@ def create_whichmut_dataset_from_parquet(
         nickname: Human-readable identifier.
         row_filter: Optional boolean list selecting which rows to include.
         censor_table: Optional ``{clade: CensorSpec}`` enabling UShER censoring
-            (#1079). Requires a ``clade`` column in the Parquet.
+            Requires a ``clade`` column in the Parquet.
         censor_mode: Which half of censoring to apply, for both sources.
         reference_base_idxs: Optional reference base indices enabling
             parent -> reference reversion censoring. Needs no ``clade``
@@ -2609,7 +2607,7 @@ def _build_precomputed_dataset(
     here while working correctly in streaming and Parquet mode — which is why
     the empty-table equivalence test is parameterized over all three.
 
-    Pass 4 takes a *sequence* rather than one transform because #1099's
+    Pass 4 takes a *sequence* rather than one transform because the
     reversion rule is a sibling of the table's, not a mode of it, and the two
     compose. ``clades`` is required only by the clade-keyed transform:
     :class:`~dasm2.data.transforms.CensorReferenceReversions` is
@@ -2905,7 +2903,7 @@ def load_whichmut_train_val(
             the split on the fly. Supported on both Parquet and CSV
             inputs.
         censor_table: Optional ``{clade: CensorSpec}`` enabling UShER censoring
-            (#1079), applied to both splits.
+            Applied to both splits.
         censor_mode: Which half of censoring to apply, for both sources.
         reference_base_idxs: Optional reference bases for parent -> reference
             reversion censoring, applied to both splits.
@@ -3172,8 +3170,8 @@ def _combine_component_strategies(
 ) -> Optional[BranchLengthInitStrategy]:
     """One BL init strategy for a multiname spec's rows.
 
-    Returns the components' strategy when they all agree, as before issue
-    #1289, and otherwise a ``PerSourceStrategy`` keyed by file path.
+    Returns the components' strategy when they all agree, and otherwise a
+    ``PerSourceStrategy`` keyed by file path.
 
     Raises:
         ValueError: If some components carry a strategy and others do not:
@@ -3209,7 +3207,7 @@ def _reject_raw_pcp_parquet(
     That is what raw PCP output looks like (pcp-pipeline's Parquet, for one):
     no stamping writer has run, so the rows the CSV and MLM paths drop
     (naughty clonal families) are still in it. An unstamped file that does
-    carry rates was written by a pre-#1131 writer and only warns (see
+    carry rates was written by an older writer and only warns (see
     :func:`verify_parquet_seam_stamp`). A stamped rate-free file is fine: the
     configured neutral model computes its rates at load.
 
@@ -3257,7 +3255,7 @@ def _resolve_parquet_paths_and_schema(
     ``train_command`` so every caller that reaches Parquet data -- eval,
     o/e plots, bootstraps, one-off experiment scripts -- is covered.
 
-    I/O cost: this opens every file's footer, where the pre-#1131 version read
+    I/O cost: this opens every file's footer, where an earlier version read
     only ``comp_paths[0]``'s schema. On a many-shard corpus that is O(shards)
     footer reads instead of one -- but every caller here goes on to build a
     ``ParquetBackend``, whose ``__init__`` already opens *every* path and walks
@@ -3374,7 +3372,7 @@ def _resolve_parquet_paths_and_schema(
     assert handler is not None, "No parquet components resolved"
     # Assigned unconditionally, including to None: skipping the assignment for
     # an unstamped spec would let a strategy left on the singleton by an
-    # earlier load leak into this one (issue #814 review).
+    # earlier load leak into this one.
     handler.bl_init_strategy = _combine_component_strategies(
         component_strategies, path_strategies
     )

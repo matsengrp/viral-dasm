@@ -73,9 +73,9 @@ def _distance_content_mask(
       layout-gate design no longer applies.)
     - Paired ``HEAVY^LIGHT`` input: mask is True on both heavy and light
       content, False on the separator and padding. Distance is added to
-      both chains. Per Erick (issue #199, 2026-04-28) distance is
-      conceptually a maturation-stage scalar, applied uniformly to chain
-      content rather than a chain-specific quantity.
+      both chains: distance is conceptually a maturation-stage scalar,
+      applied uniformly to chain content rather than a chain-specific
+      quantity.
     """
     token_ids = batch["token_ids"]
     is_content = (token_ids != AA_AMBIG_IDX) & (token_ids != AA_SEPARATOR_IDX)
@@ -124,7 +124,7 @@ def _apply_continuous_distance(
 
     The broadcast is masked to chain-content tokens (any amino acid),
     skipping separator and padding tokens. See ``_distance_content_mask``
-    for the per-input-shape behavior. Issue #199.
+    for the per-input-shape behavior.
 
     Args:
         embeddings: Current embeddings ``[B, L, d_model]``.
@@ -153,7 +153,7 @@ def _apply_binned_distance(
 ) -> torch.Tensor:
     """Quantize log(distance), look up embedding, add at chain-content positions.
 
-    Content-masked like ``_apply_continuous_distance`` — see issue #199.
+    Content-masked like ``_apply_continuous_distance``.
 
     Args:
         embeddings: Current embeddings ``[B, L, d_model]``.
@@ -562,7 +562,7 @@ class ConcatPosEmbeddingPipeline:
             positions = torch.arange(token_ids.size(1), device=token_ids.device)
 
         if self.positional_embedding is not None:
-            # Positional subspace: no sqrt scaling (experimental — see #340)
+            # Positional subspace: no sqrt scaling (experimental)
             pos_emb = self.positional_embedding(positions)  # [..., seq, d_pos]
             if not self.per_segment_positions:
                 pos_emb = pos_emb.unsqueeze(0).expand(token_ids.size(0), -1, -1)

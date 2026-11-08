@@ -295,12 +295,11 @@ def has_scored_substitution(parent: str, child: str) -> bool:
     chain also narrows the mask to single-nucleotide codon changes, and with
     a censor table or reference bases it censors sites too. So a PCP whose
     only scored substitutions are multi-nucleotide or censored passes here
-    but has an empty Whichmut loss mask. Issue #1243 leaves such rows out of
-    scope.
+    but has an empty Whichmut loss mask. Such rows are out of scope here.
 
     A PCP without one carries no information: its branch length fits to
     zero, where the target is the parent codon at every scored site
-    (issue #1243).
+    at every scored site.
 
     Args:
         parent: Parent NT sequence, segments joined by ``^^^``.
@@ -392,8 +391,8 @@ def scored_substitution_flags_from_arrow(
                 )
             # Only substituted codons can score, and they are a small fraction,
             # so key just those. Three 1-D gathers and uint8 table sums are
-            # what keep this pass under the mutation-frequency pass (#1243
-            # criterion 3); a row gather of (n, 3) codons was 30% over.
+            # what keep this pass under the cost of the mutation-frequency
+            # pass; a row gather of (n, 3) codons was well over.
             differs = (parent_nt != child_nt).reshape(-1, 3)
             codons = np.flatnonzero(differs[:, 0] | differs[:, 1] | differs[:, 2])
             codon_starts = 3 * codons

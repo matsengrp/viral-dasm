@@ -102,9 +102,9 @@ So the trace is evidence, not a work order, and the gates are what decide.
 ### Checkpoint migrations are gone
 
 `models/key_migration.py` rewrote state-dict keys for two older `dasm2`
-layouts: the `TransformerEncoderLayer` → `TransformerBlock` rename (#379) and
-the three shared-SF heads whose `prediction_layer` moved into `sf_projection`
-(#513). Both ran only for a key that did not already match the model being
+layouts: the `TransformerEncoderLayer` → `TransformerBlock` rename, and the
+three shared-SF heads whose `prediction_layer` moved into `sf_projection`.
+Both ran only for a key that did not already match the model being
 loaded into, and all 64 keys of the `dasm-85k` reference checkpoint match as
 written, so neither ever fired here. The rewrites were also not idempotent —
 applied to a current key, the block migration yields

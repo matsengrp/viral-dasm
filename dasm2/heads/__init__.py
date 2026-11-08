@@ -11,12 +11,12 @@ Import heads explicitly from specific modules (no package-level re-exports):
 - from dasm2.heads.types import HeadType
 - from dasm2.heads.factory import create_head
 
-After #621 Task #4, heads no longer own loss mixins. Loss math lives in
+Heads do not own loss mixins. Loss math lives in
 ``dasm2/losses/`` (one ``Loss`` class per ``LossType``); the trainer
 attaches them to tasks via ``Task.loss``.
 
-After #621 Task #5, ``DASMEvolHead`` / ``WhichmutHead`` /
-``AAOWhichmutHead`` are collapsed into ``SelectionFactorHead`` (single
+``DASMEvolHead`` / ``WhichmutHead`` / ``AAOWhichmutHead`` are collapsed
+into ``SelectionFactorHead`` (single
 identity-forward head consuming the shared SF tensor).
 
 Note: Head classes are NOT re-exported from this package to avoid circular

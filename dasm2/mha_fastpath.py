@@ -58,7 +58,7 @@ def mha_fastpath_enabled() -> Iterator[None]:
     stock PyTorch behavior rather than DASM2's. Restores the previous value on
     exit, including when the body raises, so it composes and nests.
 
-    Not for production code: re-enabling reintroduces the #1005 crash for any
+    Not for production code: re-enabling reintroduces the crash for any
     eval-mode forward past the int32 attention cutoff.
     """
     was_enabled = torch.backends.mha.get_fastpath_enabled()

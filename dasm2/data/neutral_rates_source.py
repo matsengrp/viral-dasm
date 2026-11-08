@@ -1,7 +1,7 @@
 """Where per-site neutral rates come from, for training and for evaluation.
 
-Issue #1299. A Parquet corpus either carries per-site ``nt_rates``/``nt_csps``
-columns or it does not.
+A Parquet corpus either carries per-site ``nt_rates``/``nt_csps`` columns or
+it does not.
 
 - **Column-carrying file:** the loader reads the columns, whatever the config
   names (DESIGN.md D8).

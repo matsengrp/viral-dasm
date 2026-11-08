@@ -74,7 +74,7 @@ class TokenBudgetBatchSampler(Sampler[List[int]]):
             length-grouping + token-packing WITHIN each window only. This keeps
             the ``ParquetBackend`` LRU row-group cache warm — a global shuffle
             (the default mode) instead touches every row group per mega-batch
-            and thrashes the cache (issue #724 follow-up). ``None`` → the
+            and thrashes the cache. ``None`` → the
             global-shuffle mode, correct for in-memory datasets.
         buffer_size: The streaming window size; only used with
             ``row_group_boundaries``. Pass the source ``ShuffleBufferSampler``'s

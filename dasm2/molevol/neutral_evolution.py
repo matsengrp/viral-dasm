@@ -105,10 +105,10 @@ def neutral_codon_probs(
         codon_pref_log: Optional log-space codon preference vector, shape (64,).
             When provided, probabilities are multiplied by exp(codon_pref_log)
             and renormalized per position. Used for codon-optimality tables
-            (issue #747). Default None is a no-op.
+            Default None is a no-op.
         tandem_pair_probs: Optional per-site tandem event probabilities τ,
             shape (codon_count, 3), from ``TandemTerm.pair_event_probs``
-            (issue #1683). When given, the tandem term is mixed in after the
+            When given, the tandem term is mixed in after the
             product of three and the parent codon is reset to 1 − Σ
             off-parent, before the codon preference. Default None is a no-op.
 
@@ -146,7 +146,7 @@ def neutral_codon_probs(
     # codon_probs here are unnormalized (they do not sum to 1 over the 64
     # codons), and a within-AA-uniform / between-AA-only / zero-strength table
     # produces an all-zero codon_pref_log. Renormalizing in that case would
-    # rescale the raw probs, so the no-op-table identity (issue #747 test 1)
+    # rescale the raw probs, so the no-op-table identity
     # requires skipping the renormalization entirely. When no table is
     # configured (`codon_pref_log is None`) the `.any()` short-circuits, so the
     # default training path pays no device-sync cost.

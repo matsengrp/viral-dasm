@@ -171,7 +171,7 @@ def predict_whichmut_child_codons(
     This returns the ``argmax`` of that score over the parent's reachable
     children, i.e. "given a mutation here, which child codon does the model
     most expect". It is the prediction the conditional codon-accuracy metric
-    (``whichmut_codon`` provider, issue #738) compares against the observed
+    (``whichmut_codon`` provider) compares against the observed
     child. The score is normalization-free, so the per-sequence partition
     function is irrelevant to the argmax.
 

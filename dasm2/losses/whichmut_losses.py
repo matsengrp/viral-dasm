@@ -2,11 +2,9 @@
 
 Wraps the pure-function math kernels in ``dasm2.losses.whichmut_loss``. The
 AA-level AAO variant went with ``AAHWhichmutHead``, the only head that paired
-with it (#4). The pre-#621
-plain-Python wrapper classes (used only by ``AAHWhichmutHead``) are
-promoted to ``nn.Module`` subclasses so loss-owned parameters (none today,
-reserved for future) participate cleanly in the optimizer's parameter
-graph via ``model.task_losses``.
+with it (#4). The former plain-Python wrapper classes are ``nn.Module``
+subclasses so loss-owned parameters participate cleanly in the
+optimizer's parameter graph via ``model.task_losses``.
 """
 
 from __future__ import annotations
@@ -56,7 +54,7 @@ class WhichmutLoss(nn.Module):
         """Top-1 reachable child-codon prediction per position, ``(B, L)``.
 
         Implementing this opts whichmut into the conditional codon-accuracy
-        metric group (``whichmut_codon`` provider, issue #738): the metric
+        metric group (``whichmut_codon`` provider): the metric
         provider resolves its extractor by looking up ``predict_child_codons``
         on the task's loss. The name is deliberately distinct from DASM's
         ``predict_codons`` — whichmut predicts *which mutation* conditioned on
