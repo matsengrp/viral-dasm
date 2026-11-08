@@ -1,0 +1,102 @@
+# dasm-85k: the smaller of the paper's two transformers.
+#
+# TEMPLATE. `scripts/render_config.py` fills the brace-delimited slots below
+# and writes the rendered file into the artifact root. Do not train against
+# this file directly -- the censor paths are not real paths here.
+#
+# The architecture is `dasm2-experiments`' `center` arm, unchanged, because
+# this is the run M1's gates compare against: `2026-09-21-v12-replicate-
+# training` rep0, on the same corpus, the same fold and the same seed. The
+# only line that differs from that run's rendered config is `flash_attention`.
+#
+# 144,516 parameters allocated, 84,884 of them effective: `positional_
+# embedding.weight` is allocated (5000, 16) against a corpus whose longest
+# amino-acid sequence is 1,273, so 59,632 of them never receive a gradient.
+
+model:
+    encoder:
+        type: TransformerEncoder
+        nhead: 4
+        # d_model = 32 = 16 AA + 16 positional.
+        d_model_per_head: 8
+        num_layers: 5
+        dim_feedforward: 128
+        dropout: 0.1
+        vocab_size: 21
+        d_pos: 16
+        # false, and false everywhere in this repository. flash-attn is
+        # CUDA-only, so a model trained under it needs a GPU to evaluate;
+        # off, the published checkpoint can be scored on a laptop. At fixed
+        # weights the two agree to six decimal places on this checkpoint and
+        # this corpus (flash 7.766709, dense 7.766710), so it costs speed,
+        # not comparability -- measured at this geometry on an L40S, 45.0
+        # ms/step with flash against 176.3 ms/step without.
+        #
+        # `d_model_per_head: 8` stays even though its reason (flash's minimum
+        # head dimension) is gone: changing it would change the architecture
+        # away from the run being reproduced.
+        flash_attention: false
+
+    # No `max_aa_seq_len`: it defaults to None, no truncation, which is what
+    # the reference run's meta records.
+
+    heads:
+        - head_type: SelectionFactorHead
+
+tasks:
+    - head_type: SelectionFactorHead
+      loss_config:
+          loss_type: whichmut
+      loss_weight: 1.0
+
+optimizer:
+    optimizer_name: AdamW
+    learning_rate: 0.001
+    weight_decay: 1.0e-04
+    betas: [0.9, 0.999]
+
+# No scheduler block, so the trainer's default ReduceLROnPlateau applies. Three
+# of its values are library defaults that appear in no config file and that
+# together decide when this run stops: `min_learning_rate` 1e-6, plateau
+# `factor` 0.5 and plateau `eval_patience` 10. 1e-3 x 0.5^10 = 9.77e-7 < 1e-6,
+# and that is the whole derivation of the reference's 436,000-step stop.
+# `scripts/check_rendered_config.py` asserts all three against the
+# instantiated trainer, because a vendored trainer defaulting
+# `min_learning_rate` to 0 would stop somewhere else with nothing to say why.
+
+max_train_steps: {MAX_TRAIN_STEPS}
+eval_every_steps: 2000
+
+# Patience 30 never fires on this run -- the LR floor is reached first, with
+# the last improvement 12 evals before the stop.
+early_stopping_patience: 30
+
+# 1e-4, not the sampling-depth ladder's 1e-3. It gates best-model tracking as
+# well as stopping (`trainer.py`, `if val_loss < self.best_val_loss -
+# self.early_stopping_min_delta`), and at 1e-3 the reference's step-16,000
+# eval stops counting as an improvement. One flipped flag in the Gate-2 table.
+early_stopping_min_delta: 0.0001
+
+batch_size: 128
+val_batch_size: 256
+dataset_mode: streaming
+num_dataloader_workers: 6
+save_training_state: true
+
+# The three censoring sources. All five of these are TrainingConfig fields,
+# read from this file rather than from viral-dasm's config.yaml -- which is
+# why config.yaml renders them in rather than replacing them.
+#
+# The reversion source is roughly 40x the other two on Spike, so losing it is
+# the most damaging possible prune error. Gate 1 asserts the banner these
+# print, where it shows up as `4/4 bases present` going missing.
+censored_mutations_file: {CENSORED_MUTATIONS_FILE}
+censored_clades_file: {CENSORED_CLADES_FILE}
+censor_mode: {CENSOR_MODE}
+masked_nt_sites_file: {MASKED_NT_SITES_FILE}
+reference_sequence_file: {REFERENCE_SEQUENCE_FILE}
+
+# No `neutral_model` block. This corpus carries `nt_rates` and `nt_csps`, so a
+# configured neutral model would be loaded and then never used.
+# `scripts/check_rendered_config.py` raises on one rather than reproducing
+# that silence.
