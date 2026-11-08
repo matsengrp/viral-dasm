@@ -24,10 +24,8 @@ from lib import (  # noqa: E402
     BUILT_CORPUS_NAMES,
     CORPUS_NAMES,
     CUTOFF,
-    FULL_DEPTH,
     GENE,
     PREP_MEM_MB,
-    TRAIN_SEED,
     VERSION,
     corpus,
 )

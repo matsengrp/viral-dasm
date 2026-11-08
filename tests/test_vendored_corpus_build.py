@@ -29,13 +29,18 @@ VENDORED_FOR_THE_BUILD = (
 
 @pytest.mark.parametrize("module_name", VENDORED_FOR_THE_BUILD)
 def test_the_build_modules_import_from_this_repository(module_name):
-    """Each imports, and lands here rather than in an editable install."""
+    """Each imports, and lands here rather than in an editable install.
+
+    Against `VENDORED_DASM2`, not `REPO_ROOT`: `.venv/` lives under the
+    repository root, so a `dasm2` in this environment's site-packages
+    satisfies the looser test.
+    """
     import importlib
 
-    from lib import assert_dasm2_is_this_repo
+    from lib import VENDORED_DASM2, assert_dasm2_is_this_repo
 
     module = importlib.import_module(module_name)
-    assert Path(module.__file__).resolve().is_relative_to(REPO_ROOT)
+    assert Path(module.__file__).resolve().is_relative_to(VENDORED_DASM2)
     assert_dasm2_is_this_repo()
 
 
@@ -75,7 +80,9 @@ def test_scov2_rates_resolves_no_manifests():
     has quietly reacquired ~2,200 lines and the README's claim that every path
     is in `config.yaml` has stopped being true.
     """
-    source = (REPO_ROOT / "dasm2" / "neutral" / "scov2_rates.py").read_text()
+    from lib import VENDORED_DASM2
+
+    source = (VENDORED_DASM2 / "neutral" / "scov2_rates.py").read_text()
     for forbidden in (
         "viral_fitness_registry",
         "dasm2.data.discovery",

@@ -29,8 +29,15 @@ def test_dasm2_resolves_inside_this_repository():
 
     Against `VENDORED_DASM2`, not `REPO_ROOT`: `.venv/` lives under the
     repository root, so a `dasm2` installed into this environment's
-    site-packages satisfies the looser test while being exactly the thing
-    this is meant to catch.
+    site-packages satisfies the looser test.
+
+    What this catches depends on how pytest was started. Under `python -m
+    pytest` the working directory goes on `sys.path` first, so the fork wins
+    the import and a competing copy is invisible here; under a bare `pytest`
+    it is not, and this fails. The case it catches either way is the one that
+    actually bit us: an editable install resolving `dasm2` to a different
+    checkout. `test_no_dasm2_submodule_resolves_outside_this_repository`
+    below is the thorough version.
     """
     import dasm2
 
@@ -143,6 +150,13 @@ def test_training_path_imports(module):
     """
     __import__(module)
     assert module in sys.modules
+    # Present is not the same as present *here*: the editable finder serves a
+    # module this repository has deleted from whatever checkout it points at,
+    # and the import above would succeed on that copy.
+    resolved = Path(sys.modules[module].__file__).resolve()
+    assert resolved.is_relative_to(VENDORED_DASM2), (
+        f"{module} imported from {resolved}, outside {VENDORED_DASM2}"
+    )
 
 
 def test_a_script_run_resolves_dasm2_inside_this_repository():
@@ -206,4 +220,6 @@ def test_no_dasm2_submodule_resolves_outside_this_repository():
         text=True,
         check=False,  # the assertion below reports the guard's own message
     )
-    assert result.returncode == 0, result.stderr.strip().splitlines()[-1:]
+    # The whole of stderr, not its last line: the guard's message lists one
+    # offending module per line, and the listing is the useful part.
+    assert result.returncode == 0, result.stderr.strip()

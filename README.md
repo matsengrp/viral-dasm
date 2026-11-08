@@ -94,8 +94,8 @@ so the same row order is the same split.
 `dasm2/` is a one-way fork of the model-training code, taken once from a
 private repository and never merged with afterwards — the paper's code should
 keep reproducing the paper's numbers, which a dependency that moves does not.
-[`dasm2/PROVENANCE.md`](dasm2/PROVENANCE.md) records the commit it came from
-and what is still to be pruned.
+[`dasm2/PROVENANCE.md`](dasm2/PROVENANCE.md) records the commit it came from,
+what each cut removed, and what the fork still carries without running.
 
 It keeps the name `dasm2`, so each module reads exactly as it does upstream
 and a diff against the source commit stays meaningful. `tests/test_fork.py`

@@ -46,16 +46,16 @@ Two cuts, for different reasons.
 other CLI commands, and the test fixtures. That left 218 files and 83,937
 lines.
 
-**After the gates (#4):** what the import closure reaches but never runs.
+**Once the port could be checked (#4):** what the import closure reaches but never runs.
 The closure is inflated by eager registry imports that load every head,
 dataset, loss and encoder so their factories populate, so most of it was
 reachable without being executed. That cut removed a further 111 files and
 left **107 files and 46,088 lines**; a second cut inside
 `data/evolutionary_dataset.py`, recorded below, brought the tree to
 **107 files and 43,543 lines**; a third, recorded below, brought it to
-**100 files and 40,637 lines**. It came *after* Gate 1 deliberately:
-once the reference checkpoint scores to seven significant figures, each
-deletion is checked rather than argued.
+**100 files and 40,637 lines**. It came deliberately *after* the check that
+scores the reference checkpoint in this tree: once that reproduces to seven
+significant figures, each deletion is checked rather than argued.
 
 By feature area, it removed the other encoders (ESM2, MPNN light-attention,
 site-masked, MLM, identity); the datasets this pipeline has no input for
@@ -75,7 +75,8 @@ loader left to supply tokens, the encoder's `num_tdi_tokens` embedding, the
 into checkpoint metadata had nothing to do. The embedding is the only part
 that could have moved the state dict, and it could not: the reference has
 `num_tdi_tokens` unset, so the branch never built a parameter for it, which
-is why Gate 1's key-set assertion is what certifies the cut.
+is why the checkpoint check's state-dict key-set assertion is what certifies
+the cut.
 
 `model_catalog.yaml` went with `neutral/` -- it holds only Thrifty and S5F
 models. Two things still named it, and both were inert rather than stale:

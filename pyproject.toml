@@ -29,9 +29,10 @@ dependencies = [
     "torch",
     "tqdm",
     "typing_extensions",
-    # ESM2 encoders reach for these. Nothing viral-dasm trains uses them; they
-    # are here only because the vendored tree still carries that path, and they
-    # go when it is pruned.
+    # `dasm2/tokenizers.py` and `dasm2/training/compute_backend.py` import
+    # these. Nothing viral-dasm trains uses the ESM2 path they serve, but the
+    # imports are at module scope, so dropping the dependencies means editing
+    # the vendored tree rather than this list.
     "accelerate>=1.0.0",
     "transformers>=4.30.0",
 ]

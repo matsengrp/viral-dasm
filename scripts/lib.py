@@ -121,22 +121,12 @@ CV_NUM_FOLDS = int(CONFIG["cv_split"]["num_folds"])
 CV_FOLD_INDEX = int(CONFIG["cv_split"]["fold_index"])
 CV_SEED = int(CONFIG["cv_split"]["seed"])
 
-#: One evaluation per this many steps. The cadence the paper's reference runs
-#: used, kept so a curve recorded here lines up row for row with one recorded
-#: in ``dasm2-experiments``.
-EVAL_EVERY_STEPS = 2000
-
 #: Evals between intermediate checkpoint saves, matching the reference run.
 CHECKPOINT_EVERY_N_EVALS = 10
 
 #: Cycles per run. These heads need no branch-length re-optimization, so
 #: ``global_step`` and ``cycle_step`` agree and a step budget is a step budget.
 NUM_CYCLES = 1
-
-#: DataLoader workers. The per-sample whichmut transform chain runs in the
-#: worker, so at 0 a scoring pass is dataloader-bound and roughly 4x slower for
-#: an identical answer.
-DATALOADER_WORKERS = 6
 
 #: The mat-pcp files the training config names. A typo in one of these renders
 #: a config with a path that silently censors nothing, which is why the lookup
