@@ -12,9 +12,13 @@
 # Where the pipeline writes. Large, and not in the repository.
 artifact_root: /fh/fast/matsen_e/shared/bcr-mut-sel/dasm2/experiments/viral-dasm
 
-# The mat-pcp run this paper is built on. These five files are TrainingConfig
-# fields, rendered into each training config rather than read by viral-dasm
-# itself.
+# The mat-pcp run this paper is built on.
+#
+# The first five files are TrainingConfig fields, rendered into each training
+# config rather than read by viral-dasm itself. The four GLM tables below them
+# are read by the neutral-model build (`workflow/corpus.smk::build_neutral`),
+# which is the one stage that needs mat-pcp's fitted counts rather than its
+# PCPs.
 mat_pcp:
     root: /fh/fast/matsen_e/shared/viral-dasm/mat-pcp/results/gisaid-and-public_2026-08-06_v12
     manifest: s2SpikeGisaidAll-2026-08-06-v12
@@ -24,6 +28,24 @@ mat_pcp:
     masked_nt_sites_file: pcps/S/masked_nt_sites.csv
     reference_sequence_file: clade_founders/S/19A.fa
     censor_mode: both
+    # The fitted mutation-rate tables, one per era plus the pooled fit. The
+    # era partition is viral-dasm's own choice (see `data/era_map.yaml`); these
+    # are the inputs it picks between, not the partition itself.
+    master_table_file: glm/master_table.csv
+    master_table_pre_omicron_file: glm/master_table_pre_omicron.csv
+    master_table_omicron_file: glm/master_table_omicron.csv
+    # Per-site counts the rate tables are applied against. 748 MB.
+    site_annotations_file: glm/annotated_counts.csv
+    # Which clades each era's GLM was actually fitted over. The era partition is
+    # read from here rather than restated, so the corpus and the rate tables
+    # cannot drift apart.
+    era_fit_summary_file: glm/era_fit_summary.csv
+    # The run's axes, spelled out rather than parsed back out of `manifest`.
+    # They appear in every neutral archive's stem and in the era map's
+    # `neutral_model_name`, which is the only record in a finished Parquet of
+    # which neutral model produced it.
+    cutoff: "2026-08-06"
+    version: v12
 
 # The prepared corpora.
 #
@@ -45,8 +67,14 @@ mat_pcp:
 # was. The row-order digest is what the split depends on, and it is the hard
 # check.
 #
-# M2 adds the three thinned arms here. Those have no reference curve to match
-# and draw their own folds.
+# The three thinned arms are BUILT by this pipeline, into `artifact_root`.
+# They have no reference curve to match and draw their own folds, so they
+# record no `md5`: there is no pinned file for a rebuild to be compared
+# against, and the row-order digest is the check that matters anyway.
+#
+# `n_train`/`n_val` are per corpus because the fold draw sizes itself from
+# `n_rows`. `cv_split` below holds only what every arm shares: the seed, the
+# number of folds, and which one is held out.
 corpora:
     full_depth:
         path: /fh/fast/matsen_e/shared/bcr-mut-sel/dasm2/experiments/2026-09-02-v12-sampling-depth-ladder/parquet/S/full_depth.parquet
@@ -66,20 +94,96 @@ corpora:
         # The row-group cache budget this file needs. The library's 2 GB
         # default caps the cache below the shuffle buffer's working set, and
         # the failure is silent: the run trains ~34x too slowly to finish.
+        #
+        # Computed, not chosen: `scripts/lib.py::parquet_cache_budget_gb` on
+        # the file itself. `cap_5000_0` lands lower because it has only 27 row
+        # groups, so the floor of 40 wins over `default_cache_row_groups`.
         parquet_cache_budget_gb: 7.27
+        n_train: 1435362
+        n_val: 159412
+
+    # The thinned arms. Each is a mat-pcp aggregate in its own right: the
+    # thinning happens there, and nothing in this pipeline filters, subsamples
+    # or reshapes rows. That is why a rebuild reproduces the row order, and so
+    # the fold, for these too.
+    cap_50000_0:
+        path: /fh/fast/matsen_e/shared/bcr-mut-sel/dasm2/experiments/viral-dasm/parquet/S/cap_50000_0.parquet
+        n_rows: 377534
+        source_pcp: /fh/fast/matsen_e/shared/viral-dasm/mat-pcp/results/gisaid-and-public_2026-08-06_v12/pcps/S/cap_50000_0/all_pcps_dasm_ready.csv.gz
+        source_pcp_manifest: s2SpikeGisaidAll-cap_50000_0-2026-08-06-v12
+        source_pcp_md5: 62ec8fe5079069956d4c26f85df9ffa9
+        row_order_digest: cf4b8019de6235b6118eb6f11263f44d
+        parquet_cache_budget_gb: 7.27
+        n_train: 339895
+        n_val: 37639
+
+    cap_20000_0:
+        path: /fh/fast/matsen_e/shared/bcr-mut-sel/dasm2/experiments/viral-dasm/parquet/S/cap_20000_0.parquet
+        n_rows: 216146
+        source_pcp: /fh/fast/matsen_e/shared/viral-dasm/mat-pcp/results/gisaid-and-public_2026-08-06_v12/pcps/S/cap_20000_0/all_pcps_dasm_ready.csv.gz
+        source_pcp_manifest: s2SpikeGisaidAll-cap_20000_0-2026-08-06-v12
+        source_pcp_md5: fd97a44d4b7e5e9da87b7676bfe4ad9f
+        row_order_digest: 10b3b9d4bc5b364ffcaa4b10734a1243
+        parquet_cache_budget_gb: 7.27
+        n_train: 194701
+        n_val: 21445
+
+    cap_5000_0:
+        path: /fh/fast/matsen_e/shared/bcr-mut-sel/dasm2/experiments/viral-dasm/parquet/S/cap_5000_0.parquet
+        n_rows: 53897
+        source_pcp: /fh/fast/matsen_e/shared/viral-dasm/mat-pcp/results/gisaid-and-public_2026-08-06_v12/pcps/S/cap_5000_0/all_pcps_dasm_ready.csv.gz
+        source_pcp_manifest: s2SpikeGisaidAll-cap_5000_0-2026-08-06-v12
+        source_pcp_md5: ce3991c6348f1ef76b1e576c442b8d98
+        row_order_digest: 420dbb31e2e7df72e1272842adf2dde1
+        parquet_cache_budget_gb: 7.09
+        n_train: 48562
+        n_val: 5335
+
+# The neutral-model archives the pipeline builds, pinned by a digest of the
+# `rates_table.csv` inside each one.
+#
+# These were computed from the archives the paper's models were trained
+# against, on 2026-11-08. `verify_era_neutral_models.py` rebuilds the archives
+# from `mat_pcp`'s GLM tables and requires the result to reproduce them, so the
+# equality is a reproduction rather than a restatement of this pipeline's own
+# output.
+#
+# NOT a digest of the member's bytes: of the table rendered canonically, rows
+# sorted by key and each rate at 8 significant digits. Rate selection sums and
+# divides GLM coefficients, and NumPy is free to choose the order: the pinned
+# archives were built under NumPy 2.4.4 / pandas 3.0.5, this repository's
+# lockfile installs 2.5.4 / 3.1.1, and the same code over the same
+# `master_table.csv` then differs in the last bits -- up to 2.5e-14 relative
+# over the 1,152 rates here. A byte digest would call that a changed model, and
+# would do it again after every `uv lock --upgrade`. Eight digits sits 171x
+# above that spread and far below any rate-selection change, which moves rates
+# by whole percent.
+#
+# What this does not do is show the rates were right to begin with -- it
+# records what was built. The round-trip check beside it carries that, by
+# rebuilding the table from the GLM input. See `dasm2/PROVENANCE.md`.
+#
+# `rates_table.csv` rather than the zip's own bytes: a zip records mtimes, so
+# two identical rate tables packed a minute apart give different archive
+# digests and the check would fail on a legitimate rebuild.
+neutral_archives:
+    pre_omicron: b56cfa3c97606587c25f0151f9a354b87280481fe47bcc1d8a34369cb692250f
+    omicron: 85478573d0fb18b133a47c41b7f631c828a9b478240a325c049f7d80d96071b9
+    pooled: 076b311626e71dd469aa203c56f53a7c65665602f704e9114c48d7b9757b0aa2
 
 # The wiring test's corpus: a few hundred PCPs spanning both eras.
 fast_test_corpus:
     path: /fh/fast/matsen_e/shared/bcr-mut-sel/dasm2/experiments/2026-09-02-v12-sampling-depth-ladder/fast_test/S/fast_test.parquet
     md5: 72b90961147b20649a9ca59ff148d998
 
-# The split every reference run held out, and every model in the paper holds out.
+# The split every reference run held out, and every model in the paper holds
+# out. Only the three numbers every arm shares live here; the resulting fold
+# sizes are per corpus, because the draw sizes itself from that corpus's
+# `n_rows`.
 cv_split:
     num_folds: 10
     fold_index: 0
     seed: 42
-    n_train: 1435362
-    n_val: 159412
 
 # Training seed. 42 everywhere, so a run here is comparable to the reference.
 train_seed: 42

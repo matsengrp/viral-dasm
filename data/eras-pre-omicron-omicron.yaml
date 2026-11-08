@@ -1,0 +1,90 @@
+# Era -> clade map for the mat-pcp pre-Omicron / Omicron split.
+#
+# GENERATED -- do not hand-edit. Regenerate with:
+#   python scripts/write_era_config.py --output <this file>
+#
+# The partition is read from the mat-pcp run's own `glm/era_fit_summary.csv`,
+# the only artifact recording which clades each era's GLM was actually fitted
+# over. Read rather than restated so the training corpus and the rate tables
+# cannot drift apart.
+#
+# This is a TEMPLATE: `{gene}` and `{artifact_root}` are substituted by the
+# Snakefile. The placeholders are what make this committed file
+# installation-independent, so a reader with their own mat-pcp run and their own
+# artifact root renders their own archive paths from it.
+#
+# Every clade in the corpus must fall in exactly one era. `prepare_viral_parquet`
+# raises on an unmapped clade and on an era matching zero rows, and never
+# defaults. Clades that sit in the tree but have no clade founder are absent,
+# because mat-pcp emits no PCPs for them.
+#
+# One map serves every corpus. mat-pcp does not refit the GLM per subsampling
+# arm, so the era partition and both eras' rate tables are shared, and the
+# archives built from them are the same for every rung of the ladder.
+
+neutral_model_name: "{scheme}-TabularRates-SCoV2-{gene}-2026-08-06-v12"
+eras:
+  pre_omicron:
+    # 21 clades
+    archive: "{artifact_root}/neutral_models/TabularRates-SCoV2-gisaid-public-{gene}-2026-08-06-v12-pre_omicron.zip"
+    clades:
+      - 19A
+      - 19B
+      - 20A
+      - 20B
+      - 20C
+      - 20D
+      - 20E
+      - 20F
+      - 20G
+      - 20H
+      - 20I
+      - 20J
+      - 21B
+      - 21C
+      - 21D
+      - 21E
+      - 21F
+      - 21G
+      - 21H
+      - 21I
+      - 21J
+  omicron:
+    # 35 clades
+    archive: "{artifact_root}/neutral_models/TabularRates-SCoV2-gisaid-public-{gene}-2026-08-06-v12-omicron.zip"
+    clades:
+      - 21K
+      - 21L
+      - 21M
+      - 22A
+      - 22B
+      - 22C
+      - 22D
+      - 22E
+      - 22F
+      - 23A
+      - 23B
+      - 23C
+      - 23D
+      - 23E
+      - 23F
+      - 23G
+      - 23H
+      - 23I
+      - 24A
+      - 24B
+      - 24C
+      - 24D
+      - 24E
+      - 24F
+      - 24G
+      - 24H
+      - 24I
+      - 25A
+      - 25B
+      - 25C
+      - 25D
+      - 25E
+      - 25F
+      - 25G
+      - 25H

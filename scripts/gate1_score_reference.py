@@ -62,12 +62,11 @@ from eval_common import (
 )
 from lib import (
     CV_FOLD_INDEX,
-    CV_N_TRAIN,
-    CV_N_VAL,
     CV_NUM_FOLDS,
     CV_SEED,
     DATALOADER_WORKERS,
     SELF_CHECK_TOLERANCE,
+    Corpus,
     assert_dasm2_is_this_repo,
     corpus,
     reference_run,
@@ -112,22 +111,27 @@ DEAD_PARAM_KEY = "encoder.positional_embedding.weight"
 MAX_AA_SEQ_LEN = 1273
 
 
-def check_split_sizes(parquet: Path, cv_split: CvSplitConfig) -> tuple[list[str], dict]:
-    """Fold sizes, taken from the library's own resolver rather than redrawn."""
+def check_split_sizes(spec: Corpus, cv_split: CvSplitConfig) -> tuple[list[str], dict]:
+    """Fold sizes, taken from the library's own resolver rather than redrawn.
+
+    Compared against ``spec``'s recorded sizes rather than a module-level pair,
+    because the draw sizes itself from the corpus's row count: every arm has
+    its own.
+    """
     _paths, _nick, train_filter, val_filter, _h, _m = _resolve_parquet_train_val(
-        str(parquet), cv_split=cv_split
+        str(spec.path), cv_split=cv_split
     )
     n_train = int(np.asarray(train_filter).sum())
     n_val = int(np.asarray(val_filter).sum())
     print(
         f"  split: {n_train:,} train / {n_val:,} val "
-        f"(expected {CV_N_TRAIN:,} / {CV_N_VAL:,})"
+        f"(expected {spec.n_train:,} / {spec.n_val:,})"
     )
     failures = []
-    if (n_train, n_val) != (CV_N_TRAIN, CV_N_VAL):
+    if (n_train, n_val) != (spec.n_train, spec.n_val):
         failures.append(
             f"fold {CV_FOLD_INDEX} of {CV_NUM_FOLDS} at seed {CV_SEED} gives "
-            f"{n_train:,}/{n_val:,}, not {CV_N_TRAIN:,}/{CV_N_VAL:,}. Every "
+            f"{n_train:,}/{n_val:,}, not {spec.n_train:,}/{spec.n_val:,}. Every "
             f"number below would then be measured on a different held-out set."
         )
     return failures, {"n_train": n_train, "n_val": n_val}
@@ -322,7 +326,7 @@ def main() -> None:
             "dasm2/__init__.py's import-time disable_mha_fastpath() did not run."
         )
 
-    split_failures, split_measured = check_split_sizes(spec.path, cv_split)
+    split_failures, split_measured = check_split_sizes(spec, cv_split)
     failures += split_failures
     measured |= split_measured
 

@@ -16,9 +16,10 @@ registry that resolved dataset nicknames by scanning directories named in
 changed what the code did. It is not vendored. Nothing here consults anything
 outside the checkout and the paths `config.yaml` names.
 
-**Status: milestone 1 of 7.** The training code is vendored and its gates are
-green; the corpora, the remaining training runs, the scoring tables, the four
-analyses, the figure composition and the release are issues
+**Status: milestone 2 of 7.** The training code is vendored and its gates are
+green, and the pipeline now builds its own corpora and the neutral model they
+carry. The remaining training runs, the scoring tables, the four analyses, the
+figure composition and the release are issues
 [#1](https://github.com/matsengrp/viral-dasm/issues/1) tracks.
 
 ## Layout
@@ -64,6 +65,30 @@ Every figure depends on a checkpoint *path* that either a training rule or a
 fetch rule can supply, and the figures rebuild in minutes for a reader who is
 not retraining.
 
+## Building a corpus
+
+`snakemake corpora` goes from a mat-pcp run to a training Parquet, in four
+stages:
+
+| rule | what it produces |
+|---|---|
+| `build_neutral` | three `TabularRates` archives -- both eras and the pooled fit -- from mat-pcp's GLM tables |
+| `verify_neutral` | four checks on those archives, including that they reproduce the ones the paper trained against |
+| `render_era_map` | the era -> clade map, from the committed template in `data/`, with real archive paths filled in |
+| `prepare_parquet` | one corpus's Parquet, each row carrying the neutral rates of its clade's era |
+
+**One neutral model, every corpus.** mat-pcp does not refit its GLM per
+sampling depth, so `build_neutral` and `render_era_map` take no corpus
+argument. That is what pins λ across the ladder: a per-corpus rebuild would let
+the neutral model move with the corpus, which is the one thing a depth contrast
+cannot afford.
+
+**Nothing here filters, subsamples or reshapes rows.** A sampling-depth arm
+*is* a mat-pcp aggregate; the thinning happens there. The Parquet inherits its
+source file's row order verbatim, which is what lets `check_corpus` prove a
+rebuild gives the paper's fold 0 -- the held-out set is a row-positional draw,
+so the same row order is the same split.
+
 ## The vendored training code
 
 `dasm2/` is a one-way fork of the model-training code, taken once from a
@@ -105,7 +130,7 @@ same corpus, the same fold and the same seed.
 |---|---|---|
 | `fast_test` | under a minute | the whole training path runs: Parquet load, tokenization, censoring, forward, backward, eval |
 | `check_config` | seconds | the rendered config, and the three library defaults no config file states that together decide where a run stops |
-| `check_corpus` | minutes | the corpus is the file the paper's 90/10 split was drawn from |
+| `check_corpus` | minutes | the corpus is in the row order the paper's 90/10 split was drawn from |
 | `gate1` | minutes, no training | the reference checkpoint scores 7.766710 here, over exactly 158,137 loss-mask positions |
 
 Two more land separately: `gate2`, a 20,000-step canary compared against the
