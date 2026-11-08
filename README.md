@@ -138,9 +138,15 @@ unchecked and the one whose split the paper's models were actually trained on.
 The checks that proved the vendored tree still trains the model it came from
 were port scaffolding, and
 [#8](https://github.com/matsengrp/viral-dasm/issues/8) removed them. What they
-measured is recorded in the pull requests that ran them: the reference
-checkpoint scored 7.766710 in this tree over 158,137 loss-mask positions, and
-a full run from scratch here reached a best validation loss of 7.766302
-against the reference's 7.766710, stopping on the same learning-rate floor.
+measured is recorded in the pull requests that ran them. The strongest of
+them was a fixed-weights pass: the reference checkpoint, scored in this tree,
+came within 1.1e-08 of the loss its own run logged, over exactly 158,137
+loss-mask positions. A full run from scratch here then reached a best
+validation loss of 7.766302 against the reference's 7.766710 -- a difference
+of 4e-4, an order of magnitude below the 0.0055-nat spread across three seeds
+of that reference configuration, and smaller than the run's own
+evaluation-to-evaluation jitter. The two are indistinguishable, and the sign
+carries no information.
+
 Those were one-time claims about the port, and the pipeline that builds the
 paper's figures should not carry the apparatus that made them.
