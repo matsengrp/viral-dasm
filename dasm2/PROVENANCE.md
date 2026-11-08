@@ -19,11 +19,14 @@ that moves does not, and publishing `dasm2` as a versioned package would
 make this repository describe an analysis a reader cannot run without a
 second repository they also have to be given.
 
-So: nothing here tracks upstream. A fix landing in `dasm2-experiments`
-does not land here unless someone deliberately brings it across and re-runs
-the gates. The only tie left between the two trees is `workflow/gates.smk`,
-which checks that this code still trains the model `dasm2-experiments`
-trained — see issue #2.
+So: nothing here tracks upstream. A fix landing in `dasm2-experiments` does
+not land here unless someone deliberately brings it across and re-establishes
+that this tree still trains the same model. Issue #2 did that once, with a set
+of comparisons against `dasm2-experiments` runs on the same corpus, fold and
+seed; issue #8 then removed them, because a one-time claim about a port
+belongs in the record of the port rather than in the pipeline. What they
+measured is in the pull requests that ran them. There is no live tie between
+the two trees.
 
 ## It is still named `dasm2`
 
@@ -83,9 +86,9 @@ become settable and silent; and `data/segment_handlers.py`'s uncalled
 
 ### What the measurement got wrong
 
-The cut list came from a `sys.setprofile` trace of three runs
-(`scripts/trace_executed_modules.py`, `scripts/prune_candidates.py`). A file
-counts as having run only if a named `def` in it executed. That rule has a
+The cut list came from a `sys.setprofile` trace of three runs, taken by two
+scripts that were removed with the rest of the port tooling in #8. A file
+counted as having run only if a named `def` in it executed. That rule has a
 known failure mode in each direction, and both fired:
 
 * **Dead by the trace, alive in fact.** Nine modules had to be restored
@@ -97,7 +100,8 @@ known failure mode in each direction, and both fired:
   executed one function, `_build_preferred_codons()`, at import — reached
   only through a chain that was itself being deleted.
 
-So the trace is evidence, not a work order, and the gates are what decide.
+So the trace was evidence, not a work order; what decided each cut was
+whether the tree still trained the same model afterwards.
 
 ### Checkpoint migrations are gone
 
@@ -126,13 +130,14 @@ never consulted.
 `dasm2`'s comments carry a great deal of detail about work that is not this
 paper: results, measurements and design arguments from other projects, and
 references to private `dasm2-experiments` issue numbers. Generic explanation
-stays. Anything that reports a result or an argument from elsewhere is
-collected in `dasm2/COMMENT-FLAGS.md` for a decision before this repository
-goes public.
+stays. Anything that reported a result or an argument from elsewhere was
+collected into a generated inventory and decided before this repository goes
+public; the inventory and the script that produced it were removed in #8, once
+the count below had reached its final value.
 
 The prune took out 568 of them on its own — 1,235 flags before, **667**
 after — which is why it came before the comment review rather than after.
-What is left is in files this pipeline actually runs, so each one needs
+What was left was in files this pipeline actually runs, so each one needed
 reading rather than deleting with its module.
 
 ### The fourth cut: the comments themselves (#4)
@@ -190,8 +195,8 @@ now-unused `Final` import.
 
 ## What is left that the trace calls dead
 
-`data/prune/delete_candidates.txt` still lists 23 files and 6,630 lines, and
-most of that list is the measurement's known false positive rather than work
+The trace's final candidate list held 23 files and 6,630 lines, and most of
+that list was the measurement's known false positive rather than work
 remaining: a module whose contribution is a class, an enum or a `Protocol`
 has no named `def` to execute, so it reads as dead however load-bearing it
 is. `positional_encoding.py` is the clearest case — deleting it is an
@@ -230,9 +235,8 @@ Two things recorded here because they were predicted wrongly first:
   and `neutral/codon_boundary.py`; all of them are still imported by
   `data/transforms.py` and `neutral/base.py`, which are live, and
   `mutation_matrices.py` is reached by a relative import an earlier grep
-  pattern missed. Re-tracing after the cut leaves
-  `data/prune/delete_candidates.txt` byte-identical, which is the same fact
-  measured a second way.
+  pattern missed. Re-tracing after the cut left the candidate list
+  byte-identical, which is the same fact measured a second way.
 
 ## The third cut: single-entry modules and the manifest registry (#4)
 

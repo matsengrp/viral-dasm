@@ -174,11 +174,6 @@ neutral_archives:
     omicron: 85478573d0fb18b133a47c41b7f631c828a9b478240a325c049f7d80d96071b9
     pooled: 076b311626e71dd469aa203c56f53a7c65665602f704e9114c48d7b9757b0aa2
 
-# The wiring test's corpus: a few hundred PCPs spanning both eras.
-fast_test_corpus:
-    path: /fh/fast/matsen_e/shared/bcr-mut-sel/dasm2/experiments/2026-09-02-v12-sampling-depth-ladder/fast_test/S/fast_test.parquet
-    md5: 72b90961147b20649a9ca59ff148d998
-
 # The split every reference run held out, and every model in the paper holds
 # out. Only the three numbers every arm shares live here; the resulting fold
 # sizes are per corpus, because the draw sizes itself from that corpus's
@@ -190,19 +185,3 @@ cv_split:
 
 # Training seed. 42 everywhere, so a run here is comparable to the reference.
 train_seed: 42
-
-# The dasm2-experiments runs M1 checks the port against. Not inputs to any
-# figure -- they exist so the port can be shown not to have changed the model.
-reference_runs:
-    dasm-85k:
-        experiment: 2026-09-21-v12-replicate-training
-        run: rep0
-        checkpoints_dir: /fh/fast/matsen_e/shared/bcr-mut-sel/dasm2/experiments/2026-09-21-v12-replicate-training/checkpoints/rep0/S/full_depth/transformer
-        best_checkpoint: transformer_SelectionFactorHead-path_b2c98048_train_cycle0_best_run20260921-160509-78b6e5_fb100aef_20260922.zip
-        best_checkpoint_md5: 7f40771defa159c67890518b75957d2e
-        best_val_loss: 7.766710
-        best_step: 412000
-        stop_step: 436000
-        stop_reason: "LR 9.77e-07 < 1.00e-06"
-        n_loss_positions: 158137
-        effective_params: 84884

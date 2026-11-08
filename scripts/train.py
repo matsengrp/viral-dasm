@@ -15,9 +15,9 @@ builds argv for a CLI that is not here.
 
 Resuming is idempotent. A run that dies partway -- preemption, a full disk, a
 walltime -- picks up from its own latest checkpoint instead of starting over,
-which on a 40-hour run is the difference between a bad afternoon and a bad
-week. That needs `save_training_state: true` in the config, which
-`scripts/check_rendered_config.py` asserts.
+which on a multi-day run is the difference between a bad afternoon and a bad
+week. That needs `save_training_state: true` in the config; every template
+under `configs/` sets it.
 """
 
 from __future__ import annotations

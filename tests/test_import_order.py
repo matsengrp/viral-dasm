@@ -3,10 +3,10 @@
 **`lib` before `dasm2`.** `scripts/lib.py` is what puts the repository root
 on `sys.path`. Until it has, `import dasm2` is served by the venv's editable
 install, which points at whichever checkout it was installed from -- a script
-run puts `scripts/` on `sys.path[0]`, never the repository root. Three gate
-scripts imported `dasm2` above `lib` for the Arrow reason below, and Gate 2
-duly measured the other checkout. `lib` imports only the standard library and
-`yaml`, so it cannot itself lose the Arrow race.
+run puts `scripts/` on `sys.path[0]`, never the repository root. Three
+scripts once imported `dasm2` above `lib` for the Arrow reason below, and one
+of them duly ran against the other checkout. `lib` imports only the standard
+library and `yaml`, so it cannot itself lose the Arrow race.
 
 **`dasm2` before pyarrow.**
 

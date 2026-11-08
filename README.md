@@ -16,10 +16,10 @@ registry that resolved dataset nicknames by scanning directories named in
 changed what the code did. It is not vendored. Nothing here consults anything
 outside the checkout and the paths `config.yaml` names.
 
-**Status: milestone 2 of 7.** The training code is vendored and its gates are
-green, and the pipeline now builds its own corpora and the neutral model they
-carry. The remaining training runs, the scoring tables, the four analyses, the
-figure composition and the release are issues
+**Status: milestone 2 of 7.** The training code is vendored and shown to still
+train the model it was ported from, and the pipeline builds its own corpora and
+the neutral model they carry. The training runs, the scoring tables, the four
+analyses, the figure composition and the release are issues
 [#1](https://github.com/matsengrp/viral-dasm/issues/1) tracks.
 
 ## Layout
@@ -29,9 +29,9 @@ config.yaml   every path and pinned number the pipeline uses
 Snakefile     terminal targets, named for what they produce
 workflow/     the rules, one file per stage
 configs/      training-config templates, rendered from config.yaml
-scripts/      the pipeline's own code: gates, guards, renderers
+scripts/      the pipeline's own code: builders, guards, renderers
 dasm2/        a vendored fork of the model-training code (see its PROVENANCE.md)
-tests/        what has to hold for the gates to mean anything
+tests/        what has to hold for the rest of it to mean anything
 data/         the publishable numbers behind each figure
 results/      pipeline outputs (not tracked; they live under artifact_root)
 ```
@@ -107,9 +107,9 @@ anything from `dasm2/`.** An editable install of it puts a finder on
 `sys.meta_path` that maps the *name* `dasm2` to the directory it was installed
 from, and resolves submodules against that directory rather than against this
 package's `__path__`. A module you delete here therefore still imports, served
-from the other checkout, and every gate goes green on code this repository does
-not contain. Deleting a file and watching the gates pass is not evidence the
-file stopped running.
+from the other checkout, and the pipeline runs green on code this repository
+does not contain. Deleting a file and watching the pipeline pass is not
+evidence the file stopped running.
 
 Three things make that visible rather than silent. `assert_dasm2_is_this_repo`
 in [`scripts/lib.py`](scripts/lib.py) sweeps `sys.modules` after the import and
@@ -121,25 +121,26 @@ imported before `dasm2`, since `lib` is what puts the repository root on
 repository. Checking the package root alone passes while a submodule leaks, so
 all three check module by module.
 
-## The gates
+## The corpus guard
 
-The port is checked against runs the private repository already made, on the
-same corpus, the same fold and the same seed.
+`check_corpus` is the one check the pipeline keeps, and it is not about the
+port. Fold 0 is a row-positional draw: the held-out index set comes from
+`(seed, num_folds, n_rows)`, and which PCP sits at each index comes from the
+Parquet's row order. A rebuilt corpus that reorders rows is therefore a
+different 90/10 split of the same data, silently. The guard pins the row order
+-- a blake2b-128 digest over the per-row `(clade, parent, child)` digests, in
+order -- so that cannot happen unnoticed.
 
-| gate | cost | what it proves |
-|---|---|---|
-| `fast_test` | under a minute | the whole training path runs: Parquet load, tokenization, censoring, forward, backward, eval |
-| `check_config` | seconds | the rendered config, and the three library defaults no config file states that together decide where a run stops |
-| `check_corpus` | minutes | the corpus is in the row order the paper's 90/10 split was drawn from |
-| `gate1` | minutes, no training | the reference checkpoint scores 7.766710 here, over exactly 158,137 loss-mask positions |
+It runs for all four corpora, `full_depth` included. That one is received from
+mat-pcp rather than built here, which makes it the corpus most easily left
+unchecked and the one whose split the paper's models were actually trained on.
 
-Two more land separately: `gate2`, a 20,000-step canary compared against the
-reference's first ten evaluations, and `gate3`, a full run to the
-learning-rate floor.
-
-`gate2` compares two curves that no amount of care makes identical, so its
-tolerance is measured rather than chosen: `scripts/measure_tolerance.py` takes
-the spread across two runs and doubles it. What those two runs differ in
-decides what the tolerance means. Two seeds in one tree measure seed variation;
-two runs at one seed in one tree measure run-to-run nondeterminism, which is
-the tighter null and the one a prune should be judged against.
+The checks that proved the vendored tree still trains the model it came from
+were port scaffolding, and
+[#8](https://github.com/matsengrp/viral-dasm/issues/8) removed them. What they
+measured is recorded in the pull requests that ran them: the reference
+checkpoint scored 7.766710 in this tree over 158,137 loss-mask positions, and
+a full run from scratch here reached a best validation loss of 7.766302
+against the reference's 7.766710, stopping on the same learning-rate floor.
+Those were one-time claims about the port, and the pipeline that builds the
+paper's figures should not carry the apparatus that made them.

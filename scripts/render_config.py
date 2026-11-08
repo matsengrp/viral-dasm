@@ -25,7 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from lib import CANARY_STEPS, CONFIG, mat_pcp_path
+from lib import CONFIG, mat_pcp_path
 
 PLACEHOLDER = re.compile(r"\{([A-Z0-9_]+)\}")
 
@@ -76,9 +76,9 @@ def main() -> None:
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument(
         "--max-train-steps",
+        required=True,
         type=int,
-        default=CANARY_STEPS,
-        help="the step budget this run gets; the canary's by default",
+        help="the step budget this run gets",
     )
     args = parser.parse_args()
 
