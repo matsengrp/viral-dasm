@@ -13,13 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional, Tuple, Union
 
 if TYPE_CHECKING:
-    from dasm2.config import (
-        EncoderConfig,
-        ESM2EncoderConfig,
-        IdentityEncoderConfig,
-        MPNNLightAttentionEncoderConfig,
-        TrainingConfig,
-    )
+    from dasm2.config import EncoderConfig, TrainingConfig
 
 #: Literal prefix marking the run-token component of a checkpoint filename.
 RUN_TOKEN_PREFIX = "run"
@@ -100,7 +94,7 @@ def parse_run_token(filename: str) -> Optional[str]:
 
 def generate_model_identifier(
     config_name: Optional[str],
-    encoder_config: "Union[EncoderConfig, ESM2EncoderConfig, MPNNLightAttentionEncoderConfig, IdentityEncoderConfig]",
+    encoder_config: "EncoderConfig",
 ) -> str:
     """Generate model identifier from config name or architecture.
 
@@ -222,7 +216,7 @@ def compute_metadata_hash(
 
 def build_checkpoint_filename(
     config_name: Optional[str],
-    encoder_config: "Union[EncoderConfig, ESM2EncoderConfig, MPNNLightAttentionEncoderConfig, IdentityEncoderConfig]",
+    encoder_config: "EncoderConfig",
     head_dataset_pairs: List[Tuple[str, str]],
     training_config: "TrainingConfig",
     suffix: Optional[str] = None,

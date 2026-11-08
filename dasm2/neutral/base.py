@@ -23,6 +23,7 @@ from typing import (
     Hashable,
     Iterable,
     List,
+    NoReturn,
     Optional,
     Protocol,
     Tuple,
@@ -37,7 +38,6 @@ from dasm2.molevol.neutral_evolution import neutral_codon_probs_of_seq
 from dasm2.sequence.conversion import codon_idx_tensor_of_str_ambig
 
 if TYPE_CHECKING:
-    from dasm2.config import NeutralModelConfig
     from dasm2.molevol.tandem import TandemTerm
     from dasm2.neutral.hit_class import HitClassModel
 
@@ -122,11 +122,12 @@ class AbstractNeutralModel(ABC):
         pass
 
     @abstractmethod
-    def to_config(self) -> "NeutralModelConfig":
-        """Reconstruct NeutralModelConfig from neutral model state.
+    def to_config(self) -> NoReturn:
+        """Reconstruct this model's config -- unsupported in this fork.
 
-        Returns:
-            NeutralModelConfig matching current neutral model configuration.
+        The neutral-model config classes went with the prune, because nothing
+        here builds one: the corpus carries `nt_rates`/`nt_csps` in the
+        Parquet. Implementations raise rather than return.
         """
         pass
 

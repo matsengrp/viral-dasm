@@ -523,7 +523,6 @@ def _build_inference_trainer(
     """
     # Local imports: serialization -> training is a circular dependency
     # (training.trainer imports serialization.checkpoints.save_model at module level).
-    from dasm2.config import create_neutral_model_from_config
     from dasm2.models.factory import create_model_from_config
     from dasm2.training.compute_backend import SingleGPUBackend
     from dasm2.training.trainer import Trainer
@@ -546,12 +545,11 @@ def _build_inference_trainer(
     if state_dict is not None:
         model.load_state_dict(state_dict)
 
-    # Create neutral model from config (if present)
-    neutral_model = (
-        create_neutral_model_from_config(training_config.neutral_model)
-        if training_config.neutral_model is not None
-        else None
-    )
+    # Always None here: `TrainingConfig.neutral_model` is typed `None` in this
+    # fork, so the branch that built one is unreachable and its constructor went
+    # with the prune. This corpus carries `nt_rates`/`nt_csps` in the Parquet,
+    # which is why no neutral model is loaded at all.
+    neutral_model = None
 
     # Initialize Trainer with all components (empty tasks for evaluation only)
     cache_dir_str = str(cache_dir) if cache_dir is not None else ".dasm2_cache"
@@ -843,7 +841,7 @@ def resume_training(
         FileNotFoundError: If checkpoint file doesn't exist
     """
     # Local imports: serialization -> training is a circular dependency
-    from dasm2.config import TrainingConfig, create_neutral_model_from_config
+    from dasm2.config import TrainingConfig
     from dasm2.models.factory import create_model_from_config
     from dasm2.training.compute_backend import SingleGPUBackend
     from dasm2.training.head_optimizer_state import (
@@ -908,12 +906,8 @@ def resume_training(
     if training_config.freeze_encoder:
         model.freeze_encoder()
 
-    # Create neutral model
-    neutral_model = (
-        create_neutral_model_from_config(training_config.neutral_model)
-        if training_config.neutral_model is not None
-        else None
-    )
+    # Always None -- see `_build_inference_trainer` above.
+    neutral_model = None
 
     config_name = metadata.get("config_name")
 

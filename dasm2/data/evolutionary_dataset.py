@@ -147,6 +147,7 @@ from dasm2.utils.torch_utils import pin_single_thread
 
 if TYPE_CHECKING:
     from dasm2.config import CvSplitConfig
+    from dasm2.neutral.base import RatesCSPNeutralModel
     from dasm2.neutral.hit_class import HitClassModel
 
 logger = logging.getLogger(__name__)
