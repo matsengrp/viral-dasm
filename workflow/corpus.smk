@@ -17,14 +17,21 @@ wildcard. That is what pins lambda across the ladder: a per-corpus rebuild
 would let the neutral model move with the corpus, which is the one thing a
 depth contrast cannot afford.
 
-**Every rule declares the code it runs**: its entry-point script, that
-script's direct imports of repository code, and ``config.yaml`` wherever
-``scripts/lib.py`` is required, since ``lib`` reads and validates it at
-import. Direct imports only -- a glob over the vendored package would be complete
-and would also make a comment edit anywhere in the vendored package invalidate the
+**Every rule that runs a script declares that script's code**: the
+script itself, its direct imports of repository code, and ``config.yaml``
+wherever ``scripts/lib.py`` is required, since ``lib`` reads and validates it
+at import rather than importing it. Direct imports only -- a glob over
+``dasm2`` would also make a comment edit anywhere in it invalidate the
 corpora, and with them the training runs below. What covers the residual
 transitive risk is ``check_corpus``, which gates each corpus's row-order
 digest. ``tests/test_rule_inputs.py`` holds every rule to this.
+
+Two consequences worth knowing. ``validate_tests`` is the exception: it runs
+pytest over all of ``dasm2`` and declares none of it, because declaring that
+*is* the glob above; it declares every test file instead and leans on the
+suite's own assertions. And ``config.yaml`` is declared whole, Snakemake
+having no way to depend on a subset of its keys, so editing an unrelated key
+rebuilds every corpus.
 
 GISAID: every file under ``PARQUET_DIR``, ``NEUTRAL_DIR`` and ``ERA_MAP_DIR``
 is GISAID-derived and stays on the cluster.
@@ -76,7 +83,8 @@ rule build_neutral:
     """Build the gene's three TabularRates archives: both eras plus pooled.
 
     The gene-aware rate selection in ``scov2_rates.py`` is the
-    correctness-critical part: a fix there has to invalidate these archives.
+    correctness-critical part, and it is declared below so that a fix there
+    invalidates these archives.
     """
     input:
         script="scripts/build_era_neutral_models.py",
@@ -111,7 +119,7 @@ rule verify_neutral:
         # how the archives are named or assembled changes what this checks.
         builder="scripts/build_era_neutral_models.py",
         rates_lib="dasm2/neutral/scov2_rates.py",
-        zip_io="dasm2/serialization/zip_io.py",
+        zip_lib="dasm2/serialization/zip_io.py",
         dasm2_init="dasm2/__init__.py",
         config="config.yaml",
         lib="scripts/lib.py",
@@ -258,8 +266,10 @@ rule prepare_parquet:
         registry="dasm2/data/registry.py",
         segment_handlers="dasm2/data/segment_handlers.py",
         local="dasm2/data/local.py",
-        # Imported for its side effects: `use_system_arrow_pool()` runs at
-        # package import and steers Arrow off mimalloc. See
+        # Imported for its side effects: the package `__init__` calls
+        # `use_system_arrow_pool()` and `disable_mha_fastpath()` at import.
+        # This declares the file holding those two calls, not the modules
+        # implementing them -- direct imports only, as above. See
         # `tests/test_import_order.py`.
         dasm2_init="dasm2/__init__.py",
     output:
@@ -322,8 +332,8 @@ rule audit_censor:
     input:
         script="scripts/audit_censor.py",
         masking_lib="dasm2/sequence/masking.py",
-        constants="dasm2/sequence/constants.py",
-        fasta_io="dasm2/io.py",
+        constants_lib="dasm2/sequence/constants.py",
+        io_lib="dasm2/io.py",
         dasm2_init="dasm2/__init__.py",
         config="config.yaml",
         lib="scripts/lib.py",
