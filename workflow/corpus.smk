@@ -53,9 +53,10 @@ rule corpora:
     `CORPUS_NAMES`, not `BUILT_CORPUS_NAMES`: `full_depth` is received rather
     than built, but it is the corpus the paper's models were trained on and it
     is the one whose fold-0 draw is row-positional, so it is the last corpus
-    that should go unchecked. It used to reach the DAG only because a gate rule
-    consumed its report, which made the guard on the paper's own data an
-    accident of scaffolding.
+    that should go unchecked. It once reached the DAG only because a rule that
+    no longer exists consumed its report, which made the guard on the paper's
+    own data an accident of scaffolding rather than something this target
+    asks for.
     """
     input:
         expand(f"{ARTIFACT_ROOT}/corpus_guard/{{corpus}}.json", corpus=CORPUS_NAMES),

@@ -30,16 +30,19 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # Not belt-and-braces. The venv carries an editable install of this project
 # whose finder maps `dasm2` to the path it was installed from, and that is a
 # *different checkout* whenever the pipeline runs from a `git worktree` -- the
-# arrangement #4's prune uses, because the main checkout is busy with a
-# multi-day run. `_EditableFinder` sits after `PathFinder` in `sys.meta_path`,
-# so the repository wins only while its root is on `sys.path`; a script run
-# puts `scripts/` there, never the root. Without this line the gates import
-# the other checkout's code and pass against it, which is a silent failure
-# in the worst direction: it reports the tree as working when the tree under
-# test was never loaded. `assert_dasm2_is_this_repo` below is the check that
-# makes it loud.
+# arrangement a long training run forces, because the main checkout is busy.
+# `_EditableFinder` sits after `PathFinder` in `sys.meta_path`, so the
+# repository wins only while its root is on `sys.path`; a script run puts
+# `scripts/` there, never the root. Without this line a rule imports the other
+# checkout's code and runs against it, which is a silent failure in the worst
+# direction: the tree that produced the result was never the tree on disk
+# here. `assert_dasm2_is_this_repo` below is the check that makes it loud.
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+#: The vendored package itself, which is what a `dasm2` import has to resolve
+#: inside. `REPO_ROOT` is too loose: `.venv/` sits under it.
+VENDORED_DASM2 = REPO_ROOT / "dasm2"
 
 
 def assert_dasm2_is_this_repo() -> None:
@@ -54,7 +57,11 @@ def assert_dasm2_is_this_repo() -> None:
     `import dasm2.foo` lands in the other checkout -- which is exactly what
     happens to a module this repository has deleted: `PathFinder` finds
     nothing, and the editable finder then serves the copy that still exists
-    over there. A prune verified that way deletes files that keep running.
+    over there.
+
+    Resolution is checked against ``REPO_ROOT / "dasm2"``, not ``REPO_ROOT``:
+    ``.venv/`` lives under the repository root, so a ``dasm2`` installed into
+    this environment's site-packages would satisfy the looser test.
     """
     import dasm2
 
@@ -63,12 +70,13 @@ def assert_dasm2_is_this_repo() -> None:
         for name, module in list(sys.modules.items())
         if (name == "dasm2" or name.startswith("dasm2."))
         and getattr(module, "__file__", None)
-        and not Path(module.__file__).resolve().is_relative_to(REPO_ROOT)
+        and not Path(module.__file__).resolve().is_relative_to(VENDORED_DASM2)
     )
     if leaked:
         listing = "\n  ".join(leaked)
         raise RuntimeError(
-            f"{len(leaked)} `dasm2` module(s) resolved outside {REPO_ROOT}:\n"
+            f"{len(leaked)} `dasm2` module(s) resolved outside "
+            f"{VENDORED_DASM2}:\n"
             f"  {listing}\n"
             "An editable install pointing at another checkout is shadowing "
             "the vendored fork, so this run would measure code this "
@@ -88,9 +96,9 @@ with CONFIG_PATH.open() as handle:
 #:
 #: The override exists for one case: a second checkout -- a ``git worktree``
 #: used to change the code while a multi-day run is still going in the main
-#: one. Both read the same ``config.yaml``, so without it a forced ``fast_test``
-#: or ``gate1`` rerun writes into the live run's directories and can overwrite
-#: its logs and checkpoints. It is deliberately not a config key: a value that
+#: one. Both read the same ``config.yaml``, so without it a forced rerun in
+#: the worktree writes into the live run's directories and can overwrite its
+#: logs and checkpoints. It is deliberately not a config key: a value that
 #: belongs to one checkout for a few days should not be committed, and the
 #: default must stay the one written down.
 ARTIFACT_ROOT = Path(
@@ -113,32 +121,12 @@ CV_NUM_FOLDS = int(CONFIG["cv_split"]["num_folds"])
 CV_FOLD_INDEX = int(CONFIG["cv_split"]["fold_index"])
 CV_SEED = int(CONFIG["cv_split"]["seed"])
 
-#: The one architecture M1 trains, and the reference run it is checked against.
-CANARY_MODEL = "dasm-85k"
-
-#: Steps in the cheap gate. Ten evals at the reference's 2,000-step cadence.
-CANARY_STEPS = 20000
-EVAL_EVERY_STEPS = 2000
-
 #: Evals between intermediate checkpoint saves, matching the reference run.
 CHECKPOINT_EVERY_N_EVALS = 10
 
 #: Cycles per run. These heads need no branch-length re-optimization, so
 #: ``global_step`` and ``cycle_step`` agree and a step budget is a step budget.
 NUM_CYCLES = 1
-
-#: DataLoader workers. The per-sample whichmut transform chain runs in the
-#: worker, so at 0 a scoring pass is dataloader-bound and roughly 4x slower for
-#: an identical answer.
-DATALOADER_WORKERS = 6
-
-#: Agreement required between a loss recomputed here and the value the
-#: reference run logged for itself. Loose enough to absorb a different card's
-#: float reduction order, tight enough that a wrong denominator, a missing
-#: censoring source or a shuffled split could not slip through: all three move
-#: the loss by 1e-3 or more against a quantity of ~7.77.
-SELF_CHECK_TOLERANCE = 1.0e-4
-
 
 #: The mat-pcp files the training config names. A typo in one of these renders
 #: a config with a path that silently censors nothing, which is why the lookup
@@ -301,43 +289,6 @@ FULL_DEPTH = corpus("full_depth")
 #: member's digest rather than the zip's.
 NEUTRAL_ARCHIVE_DIGESTS = dict(CONFIG["neutral_archives"])
 
-FAST_TEST_PARQUET = Path(CONFIG["fast_test_corpus"]["path"])
-FAST_TEST_MD5 = CONFIG["fast_test_corpus"]["md5"]
-
-
-@dataclass(frozen=True)
-class ReferenceRun:
-    """A ``dasm2-experiments`` run the port is checked against."""
-
-    model: str
-    checkpoints_dir: Path
-    best_checkpoint: Path
-    best_checkpoint_md5: str
-    best_val_loss: float
-    best_step: int
-    stop_step: int
-    stop_reason: str
-    n_loss_positions: int
-    effective_params: int
-
-
-def reference_run(model: str) -> ReferenceRun:
-    """The reference run for ``model``."""
-    entry = CONFIG["reference_runs"][model]
-    checkpoints_dir = Path(entry["checkpoints_dir"])
-    return ReferenceRun(
-        model=model,
-        checkpoints_dir=checkpoints_dir,
-        best_checkpoint=checkpoints_dir / entry["best_checkpoint"],
-        best_checkpoint_md5=entry["best_checkpoint_md5"],
-        best_val_loss=float(entry["best_val_loss"]),
-        best_step=int(entry["best_step"]),
-        stop_step=int(entry["stop_step"]),
-        stop_reason=entry["stop_reason"],
-        n_loss_positions=int(entry["n_loss_positions"]),
-        effective_params=int(entry["effective_params"]),
-    )
-
 
 def file_md5(path: Path, chunk_bytes: int = 1 << 24) -> str:
     """md5 of a file, read in chunks so a 1.8 GB Parquet does not go in memory."""
@@ -477,12 +428,6 @@ def _check_config() -> None:
                 f"{name} is read pinned from {spec.path} but records no md5, "
                 f"so nothing identifies the file this pipeline was run against."
             )
-    if CANARY_STEPS % EVAL_EVERY_STEPS:
-        raise ValueError(
-            f"the canary runs {CANARY_STEPS} steps at one eval every "
-            f"{EVAL_EVERY_STEPS}, which does not divide evenly, so its last "
-            f"row would not line up with a reference row."
-        )
 
 
 _check_config()

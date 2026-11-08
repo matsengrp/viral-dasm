@@ -19,16 +19,34 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
+#: The vendored package. `REPO_ROOT` is too loose to assert against: `.venv/`
+#: sits under it, so site-packages would pass.
+VENDORED_DASM2 = REPO_ROOT / "dasm2"
+
 
 def test_dasm2_resolves_inside_this_repository():
-    """`import dasm2` must be the fork, not a package installed alongside it."""
+    """`import dasm2` must be the fork, not a package installed alongside it.
+
+    Against `VENDORED_DASM2`, not `REPO_ROOT`: `.venv/` lives under the
+    repository root, so a `dasm2` installed into this environment's
+    site-packages satisfies the looser test.
+
+    What this catches depends on how pytest was started. Under `python -m
+    pytest` the working directory goes on `sys.path` first, so the fork wins
+    the import and a competing copy is invisible here; under a bare `pytest`
+    it is not, and this fails. The case it catches either way is the one that
+    actually bit us: an editable install resolving `dasm2` to a different
+    checkout. `test_no_dasm2_submodule_resolves_outside_this_repository`
+    below is the thorough version.
+    """
     import dasm2
 
     resolved = Path(dasm2.__file__).resolve()
-    assert resolved.is_relative_to(REPO_ROOT), (
-        f"`import dasm2` resolved to {resolved}, outside {REPO_ROOT}. Something "
-        f"installed in this environment is shadowing the vendored fork, so the "
-        f"gates would be measuring code this repository does not contain."
+    assert resolved.is_relative_to(VENDORED_DASM2), (
+        f"`import dasm2` resolved to {resolved}, outside {VENDORED_DASM2}. "
+        f"Something installed in this environment is shadowing the vendored "
+        f"fork, so the pipeline would be running code this repository does "
+        f"not contain."
     )
 
 
@@ -122,8 +140,8 @@ def test_arrow_pool_side_effect_precedes_pyarrow():
 def test_training_path_imports(module):
     """Every module M1's scope names is present and importable.
 
-    A prune that removes one of these fails here rather than several minutes
-    into a training run.
+    A deletion that removes one of these fails here rather than several
+    minutes into a training run.
 
     ``dasm2.training.train_argv`` was on this list and is not any more. It
     built argv for ``dasm2/cli.py``, which this repository never vendored, so
@@ -132,6 +150,13 @@ def test_training_path_imports(module):
     """
     __import__(module)
     assert module in sys.modules
+    # Present is not the same as present *here*: the editable finder serves a
+    # module this repository has deleted from whatever checkout it points at,
+    # and the import above would succeed on that copy.
+    resolved = Path(sys.modules[module].__file__).resolve()
+    assert resolved.is_relative_to(VENDORED_DASM2), (
+        f"{module} imported from {resolved}, outside {VENDORED_DASM2}"
+    )
 
 
 def test_a_script_run_resolves_dasm2_inside_this_repository():
@@ -142,8 +167,8 @@ def test_a_script_run_resolves_dasm2_inside_this_repository():
     puts the *script's* directory there, so the repository root is absent and
     `_EditableFinder` -- which sits after `PathFinder` in `sys.meta_path` --
     resolves `dasm2` to whatever checkout the venv's editable install points
-    at. When this repository is a `git worktree` of that checkout, the gates
-    then exercise the other tree's code and pass against it.
+    at. When this repository is a `git worktree` of that checkout, a rule
+    then exercises the other tree's code and reports a result for it.
 
     `scripts/lib.py` puts the repository root on `sys.path` to prevent that.
     This is the test that would have caught it: it reproduces a script run
@@ -164,8 +189,8 @@ def test_a_script_run_resolves_dasm2_inside_this_repository():
         check=True,
     )
     resolved = Path(result.stdout.strip()).resolve()
-    assert resolved.is_relative_to(REPO_ROOT), (
-        f"a script run resolved `dasm2` to {resolved}, outside {REPO_ROOT}"
+    assert resolved.is_relative_to(VENDORED_DASM2), (
+        f"a script run resolved `dasm2` to {resolved}, outside {VENDORED_DASM2}"
     )
 
 
@@ -176,8 +201,8 @@ def test_no_dasm2_submodule_resolves_outside_this_repository():
     installed from and resolves submodules against that, not against the
     parent package's `__path__`. So deleting `dasm2/foo.py` here does not
     make `import dasm2.foo` fail while that path still has one: `PathFinder`
-    finds nothing and the editable finder serves the other copy. The prune
-    deleted `positional_encoding.py` and the gates kept passing on the other
+    finds nothing and the editable finder serves the other copy. #4 deleted
+    `positional_encoding.py` here and the checks kept passing on the other
     checkout's copy of it.
     """
     probe = (
@@ -195,4 +220,6 @@ def test_no_dasm2_submodule_resolves_outside_this_repository():
         text=True,
         check=False,  # the assertion below reports the guard's own message
     )
-    assert result.returncode == 0, result.stderr.strip().splitlines()[-1:]
+    # The whole of stderr, not its last line: the guard's message lists one
+    # offending module per line, and the listing is the useful part.
+    assert result.returncode == 0, result.stderr.strip()
