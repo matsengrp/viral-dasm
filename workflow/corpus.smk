@@ -292,16 +292,19 @@ rule check_corpus:
     Every later milestone inherits this. It is the reason a rebuilt corpus
     cannot silently become a different 90/10 split of the paper's data.
 
-    A built corpus depends on the file ``prepare_parquet`` writes; a pinned one
-    depends on nothing, because the file is an input this pipeline receives.
+    **Every corpus declares its own Parquet, received ones included.** A built
+    corpus gets the file ``prepare_parquet`` writes. A pinned one gets the file
+    this pipeline receives, which no rule produces and which therefore only has
+    to exist -- but mat-pcp rebuilds its tree in place, so that file can move
+    under a report that already passed. Undeclared, the check would not rerun
+    and a stale pass would stand; declared, the rebuilt corpus fails its pinned
+    digest, which is the stop-everything signal this rule exists to raise.
     """
     input:
         script="scripts/check_corpus.py",
         config="config.yaml",
         lib="scripts/lib.py",
-        parquet=lambda wc: (
-            [str(corpus(wc.corpus).path)] if corpus(wc.corpus).is_built_here else []
-        ),
+        parquet=lambda wc: str(corpus(wc.corpus).path),
     output:
         report=f"{ARTIFACT_ROOT}/corpus_guard/{{corpus}}.json",
         membership=f"{ARTIFACT_ROOT}/corpus_guard/{{corpus}}_fold0_membership.npz",
