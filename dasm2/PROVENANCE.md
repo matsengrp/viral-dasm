@@ -289,3 +289,99 @@ without an `in_train` column is now an error, where upstream derived the split
 from a registry's `holdout_samples`. A split that lives outside the corpus does
 not travel with it to a reader bringing their own GISAID access.
 
+
+## What came back for the corpus build (#6)
+
+The cuts above were made against a trace of **training**, which reads a
+Parquet that already carries `nt_rates` and `nt_csps`. Building that Parquet
+is a different code path and was never traced, so three modules came back from
+the same source commit:
+
+| module | lines | why it was not in the trace |
+|---|---:|---|
+| `neutral/tabular_rates.py` | 896 | fits and serves the neutral rates the builder writes into the Parquet; training reads the columns, never the model |
+| `neutral/scov2_rates.py` | 584 | assembles one gene's archive from mat-pcp's GLM outputs |
+| `data/parquet_writer.py` | 141 | `ChunkedParquetWriter`, which is what writes the file |
+
+Two of the three are forked rather than copied.
+
+**`scov2_rates.py` resolves no manifests.** `resolve_run_root`,
+`resolve_build_inputs` and `_region_checked_config` are not vendored, and nor
+is the `from dasm2.data.viral_fitness_registry import ...` that fed them.
+Vendoring them would have meant restoring `data/viral_fitness_registry.py` and
+the `discovery`, `manifests` and `registry_schema` modules it imports — the
+~2,200 lines the third cut removed — and reversing `seam_identity`'s new
+contract. Callers hand in a `NeutralBuildInputs` built from `config.yaml`
+instead, which is what the README promises.
+
+One guard is weaker for it, and that is the cost rather than a detail:
+`_region_checked_config` refused to pair one region's founder with another's
+rates by comparing two manifests' `region` fields, and there are no manifests
+left to compare. What replaces it is structural — `config.yaml` names one
+`mat_pcp.gene` under one `mat_pcp.root`, so the founder and the rate tables
+come from the same run by construction — plus `validate_gene`, which still
+rejects a gene with no coordinate blocks.
+
+**`tabular_rates.py::to_config` refuses instead of returning.** It built a
+`TabularRatesNeutralModelConfig`, and the second cut deleted every
+neutral-model config class: `TrainingConfig.neutral_model` is typed to admit
+nothing but `None` here, because viral-DASM takes neutral rates from
+precomputed columns and configures no model. The method could not simply be
+dropped — `AbstractNeutralModel` declares it `@abstractmethod`, so removing
+the override leaves an abstract class and every corpus build fails at
+construction. It now raises `NotImplementedError` naming the archive path,
+which is how this fork refers to a neutral model. `tests/test_vendored_corpus_build.py`
+holds both halves: that the class is still concrete, and that the method
+refuses rather than failing on a missing import.
+
+One check outside this directory got weaker with it, and it belongs in the same
+record. `verify_era_neutral_models.py` used to assert that a freshly built
+archive reproduced a *separately built* prior campaign's, byte for byte --
+equality that was evidence of an independent rebuild. That campaign lives in
+the private repository, so the assertion pointed at a path a reader does not
+have, and a check a reader cannot run makes no assertion at all. It now
+compares against digests recorded in `config.yaml`'s `neutral_archives`. Those
+were read out of the archives the paper's models were trained against, so the
+check is still a reproduction — but of a recorded answer rather than of a
+second independent build. What keeps it from being circular is the round-trip
+check beside it: the archive's rate table is rebuilt from the GLM input with
+`select_gene_rates` and compared, so a rate-selection change is caught by
+derivation rather than by a recorded answer.
+
+The first build in the new venv showed those digests had to be taken over a
+*canonical rendering* of `rates_table.csv` and not over its bytes. All three
+archives failed the byte comparison while the other three checks passed, and
+`metadata.yml` and `secondary_struct.csv` were byte-identical throughout.
+
+The cause was neither the model nor the inputs, and it was not arithmetic.
+`select_gene_rates` performs none on rates: it masks rows out of the GLM's
+master table and sorts them, so both builds ship the same doubles. The pinned
+archives rendered them at about 16 significant digits; this environment writes
+Python's shortest round-trip repr, and this build's rate strings are the master
+table's own strings. Parsed back, the shorter text lands up to 4.43e-14
+relative away — worst case the omicron `TG/GTA` unpaired=0 rate. An earlier
+revision of this document blamed NumPy summation order, which is wrong, and the
+error is recorded here because a reader who checks `select_gene_rates` for the
+sum would find none and lose confidence in the gate.
+
+So the digest now covers the table with rows sorted by key and each rate
+rendered to 8 significant digits, beside the round-trip check's own `rtol=1e-9`
+and far tighter than a rate-selection change, which takes a different row of
+the GLM table and moves rates by whole percent. The closest of these 1,152
+rates sits 1.3e-11 relative from an 8-digit rounding boundary, roughly 300x the
+rendering spread; six through nine digits all clear it, while at eleven and
+twelve the nearest rate is within one part in 1e15 of a boundary, so agreement
+there would be luck. That margin is a minimum-gap order statistic over this
+particular rate table and would move if the GLM were refit — read it as a
+measurement, not a designed tolerance. The
+recorded digests are computed from the paper's archives and reproduced by the
+rebuild here, which is what the check claims. A byte digest would have failed
+again at every `uv lock --upgrade`, and a gate that fires on its own toolchain
+teaches a reader to re-pin it — which is how a real failure gets waved through.
+
+`scripts/audit_censor.py` also lost a branch. It could audit the global mask at
+either nucleotide or codon granularity; `config.yaml` names only the nucleotide
+mask file, and the training templates censor with that same key, so the codon
+branch read a file this pipeline does not configure. Auditing a mask no run
+uses would over-report the footprint while looking like a passing gate, so the
+branch is gone and the audit reads the key the templates name.

@@ -61,8 +61,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from lib import (
     CV_FOLD_INDEX,
-    CV_N_TRAIN,
-    CV_N_VAL,
     CV_NUM_FOLDS,
     CV_SEED,
     corpus,
@@ -112,6 +110,27 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--corpus", default="full_depth")
     parser.add_argument(
+        "--parquet",
+        type=Path,
+        default=None,
+        help=(
+            "check this file instead of the corpus's configured path, against "
+            "that corpus's recorded numbers. For verifying a rebuild at a "
+            "scratch path: without it the only way to check one is to edit "
+            "config.yaml between runs, which is the mutation this guard exists "
+            "to catch. The Parquet's own md5 is not compared under an override."
+        ),
+    )
+    parser.add_argument(
+        "--expect-digest",
+        default=None,
+        help=(
+            "require this row-order digest instead of the corpus's recorded "
+            "one. For checking a file before anything is pinned to it, and for "
+            "the negative control that confirms the digest is order-sensitive."
+        ),
+    )
+    parser.add_argument(
         "--membership-output",
         type=Path,
         default=None,
@@ -126,12 +145,20 @@ def main() -> None:
     args = parser.parse_args()
 
     spec = corpus(args.corpus)
+    parquet_path = args.parquet if args.parquet is not None else spec.path
+    # `or` rather than a None test: a digest is 32 hex characters, so the
+    # empty string is not a value either side can legitimately hold.
+    expected_digest = args.expect_digest or spec.row_order_digest
     failures: list[str] = []
 
-    print(f"corpus: {spec.path}")
+    print(f"corpus: {parquet_path}")
+    if args.parquet is not None:
+        print(f"  (override; {spec.name}'s recorded numbers still apply)")
+    if args.expect_digest is not None:
+        print("  (digest expectation overridden on the command line)")
 
     # 1. Row count, from the footers -- the same number the fold draw reads.
-    footer_rows = pq.ParquetFile(spec.path).metadata.num_rows
+    footer_rows = pq.ParquetFile(parquet_path).metadata.num_rows
     print(f"  rows (footer):   {footer_rows:,}  expected {spec.n_rows:,}")
     if footer_rows != spec.n_rows:
         failures.append(
@@ -147,27 +174,27 @@ def main() -> None:
     n_train = int(footer_rows - n_val)
     print(
         f"  fold-{CV_FOLD_INDEX} split:    {n_train:,} train / {n_val:,} val"
-        f"  expected {CV_N_TRAIN:,} / {CV_N_VAL:,}"
+        f"  expected {spec.n_train:,} / {spec.n_val:,}"
     )
-    if (n_train, n_val) != (CV_N_TRAIN, CV_N_VAL):
+    if (n_train, n_val) != (spec.n_train, spec.n_val):
         failures.append(
             f"fold {CV_FOLD_INDEX} of {CV_NUM_FOLDS} at seed {CV_SEED} gives "
-            f"{n_train:,}/{n_val:,}, not {CV_N_TRAIN:,}/{CV_N_VAL:,}. A wrong "
-            f"cv_seed, a wrong num_folds, an off-by-one fold or a non-numpy "
-            f"RNG all land here."
+            f"{n_train:,}/{n_val:,}, not {spec.n_train:,}/{spec.n_val:,}. A "
+            f"wrong cv_seed, a wrong num_folds, an off-by-one fold or a "
+            f"non-numpy RNG all land here."
         )
 
     # 3. The row-order digest: which PCP sits at each held-out index.
-    digest, digest_rows = row_order_digest(spec.path)
-    print(f"  row-order digest: {digest}  expected {spec.row_order_digest}")
+    digest, digest_rows = row_order_digest(parquet_path)
+    print(f"  row-order digest: {digest}  expected {expected_digest}")
     if digest_rows != footer_rows:
         failures.append(
             f"the digest pass saw {digest_rows:,} rows where the footers "
             f"promise {footer_rows:,}."
         )
-    if digest != spec.row_order_digest:
+    if digest != expected_digest:
         failures.append(
-            f"row-order digest is {digest}, not {spec.row_order_digest}. The "
+            f"row-order digest is {digest}, not {expected_digest}. The "
             f"file's rows are not in the order the paper's fold 0 was drawn "
             f"from, so its held-out set is a different 10% of the corpus. "
             f"Rebuilding this corpus is a decision to retrain every reference, "
@@ -194,11 +221,20 @@ def main() -> None:
         # Reported, not gated: a rebuild recomputes nt_rates/nt_csps and picks
         # its own row-group boundaries, so these bytes can move while every row
         # stays where it was. The digest above is what the split depends on.
-        md5 = file_md5(spec.path)
-        note = "matches" if md5 == spec.md5 else "DIFFERS from"
-        print(
-            f"  parquet md5:      {md5}  ({note} the recorded {spec.md5}; not a gate)"
-        )
+        #
+        # A corpus this pipeline builds records no md5 at all, and under
+        # `--parquet` the recorded one belongs to a different file, so in both
+        # cases the number is printed without a comparison rather than compared
+        # against something it does not describe.
+        md5 = file_md5(parquet_path)
+        if spec.md5 is None or args.parquet is not None:
+            print(f"  parquet md5:      {md5}  (nothing recorded to compare against)")
+        else:
+            note = "matches" if md5 == spec.md5 else "DIFFERS from"
+            print(
+                f"  parquet md5:      {md5}  ({note} the recorded {spec.md5}; "
+                f"not a gate)"
+            )
 
     if args.membership_output is not None and not failures:
         args.membership_output.parent.mkdir(parents=True, exist_ok=True)
@@ -213,15 +249,19 @@ def main() -> None:
         )
         print(f"  membership written to {args.membership_output}")
 
+    md5_comparable = md5 is not None and spec.md5 is not None and args.parquet is None
     report = {
         "corpus": args.corpus,
-        "path": str(spec.path),
+        "path": str(parquet_path),
+        "path_is_override": args.parquet is not None,
         "n_rows": footer_rows,
         "n_train": n_train,
         "n_val": n_val,
         "row_order_digest": digest,
+        "expected_row_order_digest": expected_digest,
+        "digest_expectation_is_override": args.expect_digest is not None,
         "md5": md5,
-        "md5_matches_recorded": None if md5 is None else md5 == spec.md5,
+        "md5_matches_recorded": (md5 == spec.md5) if md5_comparable else None,
         "source_pcp": str(spec.source_pcp),
         "source_pcp_md5": source_md5,
         "passed": not failures,
