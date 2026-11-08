@@ -350,21 +350,30 @@ derivation rather than by a recorded answer.
 
 The first build in the new venv showed those digests had to be taken over a
 *canonical rendering* of `rates_table.csv` and not over its bytes. All three
-archives failed the byte comparison while the other three checks passed. The
-cause was neither the model nor the inputs: running `select_gene_rates` on one
-`master_table.csv` under the two environments gives rates that differ in the
-last bits, by up to 2.5e-14 relative over the 1,152 rates of the three
-archives. The pinned archives were built under NumPy 2.4.4 / pandas 3.0.5; this
-repository's lockfile installs 2.5.4 / 3.1.1, and rate selection sums and
-divides GLM coefficients in whatever order NumPy chooses. `metadata.yml` and
-`secondary_struct.csv` were byte-identical throughout.
+archives failed the byte comparison while the other three checks passed, and
+`metadata.yml` and `secondary_struct.csv` were byte-identical throughout.
+
+The cause was neither the model nor the inputs, and it was not arithmetic.
+`select_gene_rates` performs none on rates: it masks rows out of the GLM's
+master table and sorts them, so both builds ship the same doubles. The pinned
+archives rendered them at about 16 significant digits; this environment writes
+Python's shortest round-trip repr, and this build's rate strings are the master
+table's own strings. Parsed back, the shorter text lands up to 4.43e-14
+relative away — worst case the omicron `TG/GTA` unpaired=0 rate. An earlier
+revision of this document blamed NumPy summation order, which is wrong, and the
+error is recorded here because a reader who checks `select_gene_rates` for the
+sum would find none and lose confidence in the gate.
 
 So the digest now covers the table with rows sorted by key and each rate
-rendered to 8 significant digits — 171x above the measured spread, beside the
-round-trip check's own `rtol=1e-9`, and far tighter than a rate-selection
-change, which takes a different row of the GLM table and moves rates by whole
-percent. Ten and eleven digits also agree today, but their closest rate sits
-under one part in 1e15 from a rounding boundary, so they agree by luck. The
+rendered to 8 significant digits, beside the round-trip check's own `rtol=1e-9`
+and far tighter than a rate-selection change, which takes a different row of
+the GLM table and moves rates by whole percent. The closest of these 1,152
+rates sits 1.3e-11 relative from an 8-digit rounding boundary, roughly 300x the
+rendering spread; six through nine digits all clear it, while at eleven and
+twelve the nearest rate is within one part in 1e15 of a boundary, so agreement
+there would be luck. That margin is a minimum-gap order statistic over this
+particular rate table and would move if the GLM were refit — read it as a
+measurement, not a designed tolerance. The
 recorded digests are computed from the paper's archives and reproduced by the
 rebuild here, which is what the check claims. A byte digest would have failed
 again at every `uv lock --upgrade`, and a gate that fires on its own toolchain

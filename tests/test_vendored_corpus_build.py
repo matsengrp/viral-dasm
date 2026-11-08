@@ -111,20 +111,22 @@ def _rates_frame(values):
 def test_the_rates_digest_ignores_last_bit_noise_but_not_the_model():
     """The archive pin must answer "did the rates change", not "which NumPy".
 
-    Rate selection sums and divides GLM coefficients, and the order NumPy does
-    that in moved when this repository's lockfile crossed NumPy 2.4 -> 2.5: the
-    archives the pin was taken from differ from a rebuild here by up to 2.5e-14
-    relative, with the model unchanged. A digest over the member's bytes called
-    that a changed model. So the two perturbations below have to land on
-    opposite sides of the check, and a test that only asserted the tolerant
-    half would pass just as well against a digest of a constant.
+    No rate is recomputed between the two builds -- `select_gene_rates` masks
+    rows out of the GLM master table and sorts them -- but the archives the pin
+    was taken from rendered their rates at about 16 significant digits, where
+    this environment writes the shortest round-trip repr. Parsed back, the two
+    differ by up to 4.43e-14 relative with the model unchanged, and a digest
+    over the member's bytes called that a changed model. So the two
+    perturbations below have to land on opposite sides of the check, and a test
+    that only asserted the tolerant half would pass just as well against a
+    digest of a constant.
     """
     from verify_era_neutral_models import canonical_rates_digest
 
     base = [0.1336109211125319, 2.2867444902552037, 0.0021947363675641]
     pinned = canonical_rates_digest(_rates_frame(base))
 
-    noise = [v * (1 + 2.5e-14) for v in base]
+    noise = [v * (1 + 4.43e-14) for v in base]
     assert noise != base
     assert canonical_rates_digest(_rates_frame(noise)) == pinned
 

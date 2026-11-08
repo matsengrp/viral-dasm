@@ -832,8 +832,7 @@ class TabularRatesNeutralModel(RatesCSPNeutralModel):
         """Compute neutral rates and CSPs for one or more sequences.
 
         Uses vectorized numpy array lookups for motif rates instead of
-        per-position Python dict lookups (~270x faster for spike-length
-        sequences).
+        per-position Python dict lookups.
 
         Args:
             sequences: Single nucleotide sequence string OR list of sequences

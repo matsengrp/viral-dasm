@@ -149,15 +149,18 @@ corpora:
 # output.
 #
 # NOT a digest of the member's bytes: of the table rendered canonically, rows
-# sorted by key and each rate at 8 significant digits. Rate selection sums and
-# divides GLM coefficients, and NumPy is free to choose the order: the pinned
-# archives were built under NumPy 2.4.4 / pandas 3.0.5, this repository's
-# lockfile installs 2.5.4 / 3.1.1, and the same code over the same
-# `master_table.csv` then differs in the last bits -- up to 2.5e-14 relative
-# over the 1,152 rates here. A byte digest would call that a changed model, and
-# would do it again after every `uv lock --upgrade`. Eight digits sits 171x
-# above that spread and far below any rate-selection change, which moves rates
-# by whole percent.
+# sorted by key and each rate at 8 significant digits. The bytes record how a
+# pandas version chose to print a float, not what the model says. No rate is
+# recomputed between the two builds -- `select_gene_rates` masks rows out of
+# the GLM master table and sorts them, with no arithmetic on rates -- but the
+# pinned archives wrote about 16 significant digits where this environment
+# writes the shortest round-trip repr, which is the master table's own string.
+# Parsed back, the shorter text lands up to 4.43e-14 relative away. A byte
+# digest calls that a changed model, and would again after every
+# `uv lock --upgrade`. Eight digits is far below any rate-selection change,
+# which moves rates by whole percent; the closest of these 1,152 rates sits
+# 1.3e-11 from an 8-digit boundary, about 300x the rendering spread. That
+# margin is a property of this rate table, not a designed tolerance.
 #
 # What this does not do is show the rates were right to begin with -- it
 # records what was built. The round-trip check beside it carries that, by

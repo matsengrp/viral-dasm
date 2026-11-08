@@ -48,11 +48,17 @@ wildcard_constraints:
 
 
 rule corpora:
-    """Every corpus this pipeline builds, each one checked, plus the audit."""
+    """Every corpus this pipeline trains on, each one checked, plus the audit.
+
+    `CORPUS_NAMES`, not `BUILT_CORPUS_NAMES`: `full_depth` is received rather
+    than built, but it is the corpus the paper's models were trained on and it
+    is the one whose fold-0 draw is row-positional, so it is the last corpus
+    that should go unchecked. It used to reach the DAG only because a gate rule
+    consumed its report, which made the guard on the paper's own data an
+    accident of scaffolding.
+    """
     input:
-        expand(
-            f"{ARTIFACT_ROOT}/corpus_guard/{{corpus}}.json", corpus=BUILT_CORPUS_NAMES
-        ),
+        expand(f"{ARTIFACT_ROOT}/corpus_guard/{{corpus}}.json", corpus=CORPUS_NAMES),
         f"{ARTIFACT_ROOT}/audit/{GENE}.json",
 
 
@@ -205,6 +211,12 @@ rule prepare_parquet:
     will, so a corrupt or unloadable file fails here rather than at the start
     of a multi-hour run.
     """
+    wildcard_constraints:
+        # Only the thinned arms are built. Without this the global constraint
+        # admits `full_depth`, and Snakemake will happily build an unchecked
+        # copy of it at this path from `source_pcp` -- a file nothing consumes,
+        # sitting next to the pinned one it is not.
+        corpus="|".join(BUILT_CORPUS_NAMES),
     input:
         script="scripts/prepare_viral_parquet.py",
         era_map=ERA_MAP,
@@ -212,16 +224,23 @@ rule prepare_parquet:
         tested=f"{VALIDATION_DIR}/tests_passed.done",
         config="config.yaml",
         lib="scripts/lib.py",
+        # The data the corpus is made of. It belongs in `input` rather than
+        # only in `params` because mat-pcp rebuilds its tree in place, so the
+        # file can change under a corpus that already exists.
+        pcp=lambda wc: str(corpus(wc.corpus).source_pcp),
+        # The code that decides the row-group layout and the `nt_rates` /
+        # `nt_csps` columns. `build_neutral` declares its `dasm2` dependencies;
+        # without these the same standard was not applied here.
+        writer="dasm2/data/parquet_writer.py",
+        rates="dasm2/neutral/tabular_rates.py",
     output:
         parquet=f"{PARQUET_DIR}/{{corpus}}.parquet",
         summary=f"{PARQUET_DIR}/{{corpus}}_era_rows.json",
-    params:
-        pcp=lambda wc: corpus(wc.corpus).source_pcp,
     resources:
         mem_mb=PREP_MEM_MB,
     shell:
         "python {input.script}"
-        " --pcp-csv {params.pcp}"
+        " --pcp-csv {input.pcp}"
         " --eras {input.era_map}"
         " --output {output.parquet}"
         " --summary {output.summary}"

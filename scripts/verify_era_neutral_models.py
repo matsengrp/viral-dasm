@@ -13,26 +13,32 @@ could be wrong while still producing a well-formed archive:
 
    The digest covers a *canonical rendering* of the table -- rows sorted by key,
    each rate formatted to :data:`RATES_DIGEST_SIG` significant digits -- rather
-   than the member's raw bytes. Raw bytes would pin the NumPy version. Rate
-   selection sums and divides GLM coefficients, and the order those happen in
-   is a NumPy implementation detail: the archives this pin was taken from were
-   built under NumPy 2.4.4 / pandas 3.0.5, this repository's lockfile installs
-   2.5.4 / 3.1.1, and the same code over the same ``master_table.csv`` then
-   differs in the last bits -- by up to 2.5e-14 relative across the 1,152 rates
-   of the three archives. Nothing about the model changes; a byte comparison
-   fails anyway, and fails again after every ``uv lock --upgrade``. A gate that
+   than the member's raw bytes, because the bytes record how a pandas version
+   chose to print a float rather than what the model says.
+
+   No rate is recomputed between the two builds. :func:`select_gene_rates` does
+   no arithmetic on rates at all -- it masks rows out of the GLM's master table
+   and sorts them -- so both builds ship the same doubles. What differs is the
+   rendering: the pinned archives wrote about 16 significant digits, while this
+   environment writes Python's shortest round-trip repr, and this build's rate
+   strings are the master table's own strings. Parse the shorter text back and
+   it lands up to 4.43e-14 relative away, worst case the omicron ``TG/GTA``
+   unpaired=0 rate. Nothing about the model changed; a byte comparison fails
+   anyway, and would fail again after every ``uv lock --upgrade``. A gate that
    fires on its own toolchain teaches the reader to re-pin it, which is how a
    real failure gets waved through.
 
-   Eight significant digits puts the threshold 171x above that measured
-   last-bit spread, and beside check 3's ``rtol=1e-9`` so the two checks test
-   one claim at one strength. It stays far tighter than any rate-selection
-   change, which moves rates by whole percent: taking a before-boundary row
-   where an after-boundary row belongs changes a rate in its first digits, not
-   its eighth. Pinning more digits buys no sensitivity to anything real -- at
-   ten and eleven digits the two builds' tables still agree today, but with a
-   margin to the nearest rounding boundary under one part in 1e15, which is to
-   say by luck.
+   Eight significant digits sits beside check 3's ``rtol=1e-9`` so the two
+   checks test one claim at one strength, and it is far tighter than any
+   rate-selection change, which moves rates by whole percent: taking a
+   before-boundary row where an after-boundary row belongs changes a rate in
+   its first digits, not its eighth. The closest of these 1,152 rates sits
+   1.3e-11 relative from an 8-digit rounding boundary, roughly 300x the
+   rendering spread. Treat that as a measured property of this rate table
+   rather than a designed margin -- it is a minimum-gap order statistic, and it
+   would move if the GLM were refit. Six through nine digits all clear the
+   spread; at eleven and twelve the nearest rate is within one part in 1e15 of
+   a boundary, so agreement there would be luck.
 
    The member rather than the zip, because a zip records mtimes -- two
    identical rate tables packed a minute apart give different archive digests,
@@ -132,7 +138,8 @@ RATES_MEMBER = "rates_table.csv"
 
 #: Significant digits each rate is rendered to before hashing. Eight: see
 #: check 1 for why the digest cannot be taken over the member's raw bytes, and
-#: why more digits would pin the toolchain rather than the model.
+#: why more digits would pin how a pandas version prints a float rather than
+#: what the model says.
 RATES_DIGEST_SIG = 8
 
 
@@ -232,13 +239,16 @@ def check_gene(gene: str, archive_dir: Path) -> tuple[dict, list[str]]:
             digests_match = False
             failures.append(
                 f"{gene}/{key}: {RATES_MEMBER} digests to {got}, not the "
-                f"recorded {want}. Every input is pinned by md5 and the digest "
-                f"is taken at {RATES_DIGEST_SIG} significant digits, which is "
-                f"orders of magnitude coarser than any floating-point or "
-                f"library-version difference -- so some rate moved by more "
-                f"than 1e-{RATES_DIGEST_SIG} relative, and the rate selection "
-                f"in dasm2.neutral.scov2_rates is what moved it. Lambda is "
-                f"pinned across every corpus, so this is not a difference the "
+                f"recorded {want}. The digest is taken at "
+                f"{RATES_DIGEST_SIG} significant digits, orders of magnitude "
+                f"coarser than any float-rendering or library-version "
+                f"difference -- so some rate moved by more than "
+                f"1e-{RATES_DIGEST_SIG} relative. Look first at the rate "
+                f"selection in dasm2.neutral.scov2_rates, then at the GLM "
+                f"tables themselves: config.yaml pins md5s for the source "
+                f"PCPs and the corpora, but NOT for glm/master_table*.csv, "
+                f"and mat-pcp rebuilds its tree in place. Lambda is pinned "
+                f"across every corpus, so this is not a difference the "
                 f"pipeline can absorb."
             )
 
