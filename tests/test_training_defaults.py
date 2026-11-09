@@ -54,10 +54,12 @@ from __future__ import annotations
 
 import ast
 import sys
+from math import inf
 from pathlib import Path
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
@@ -139,11 +141,22 @@ def trainer_default(source: str) -> float:
     )
 
 
-#: Its position in ``Trainer.__init__``, counting from 1 and excluding
-#: ``self``: model, neutral_model, tasks, backend, batch_size,
-#: val_batch_size, optimizer, then this. A call with that many positional
-#: arguments reaches it without naming it.
-MIN_LR_POSITION = 8
+def min_lr_position(source: str) -> float:
+    """How many positional arguments a ``Trainer(...)`` call needs to reach it.
+
+    Derived rather than pinned: the parameter's index among
+    ``posonly + args`` is exactly that count, because dropping ``self``
+    offsets the zero-based index by one. A keyword-only parameter cannot be
+    reached positionally at all, which is ``inf``.
+    """
+    args = _trainer_init(source).args
+    names = [a.arg for a in args.posonlyargs + args.args]
+    return names.index("min_learning_rate") if "min_learning_rate" in names else inf
+
+
+#: Eight for this tree: model, neutral_model, tasks, backend, batch_size,
+#: val_batch_size, optimizer, then this.
+MIN_LR_POSITION = min_lr_position(TRAINER_SOURCE.read_text())
 
 
 def metadata_literal(source: str) -> float:
@@ -341,6 +354,29 @@ def test_template_renders_and_carries_the_plateau(template: Path):
         f"Those two decide how many halvings reach the floor, and so where "
         f"this run stops."
     )
+
+
+def test_a_configured_neutral_model_is_refused():
+    """A neutral model in a training config would be loaded and never used.
+
+    These corpora carry ``nt_rates`` and ``nt_csps`` precomputed, so a
+    configured neutral model is a setting that looks like it has an effect
+    and has none. ``configs/dasm-85k.template.yaml`` says so in a comment,
+    and ``TrainingConfig.neutral_model`` is annotated ``None``, so the
+    vendored config refuses one outright.
+
+    Pinned because that refusal is load-bearing and invisible: a re-vendor
+    widening the annotation would start accepting the block silently, and M3
+    writes three more templates against this contract. The deleted
+    ``check_rendered_config.py`` refused the key in the raw YAML; asserting
+    the vendored refusal is the stronger form of the same check.
+    """
+    rendered = render_config.render(
+        TEMPLATES[0].read_text() + "\nneutral_model:\n    type: TabularRates\n",
+        render_config.substitutions(RENDER_STEPS),
+    )
+    with pytest.raises(ValidationError, match="neutral_model"):
+        TrainingConfig(**yaml.safe_load(rendered))
 
 
 def test_a_template_overriding_the_plateau_is_caught():
