@@ -18,10 +18,12 @@ A capped run's best validation loss is a floor rather than a converged value,
 and three arms of the capacity scan ended that way.
 
 **Patience.** ``_should_stop_early`` checks ``evals_without_improvement >=
-early_stopping_patience`` before it looks at the learning rate, so a run that
-stops improving outright ends after about three plateau reductions rather
-than ten. That is a different stopping rule reached by accident, and the
-message it writes can also contain the letters ``LR`` (``min_delta=...`` is
+early_stopping_patience`` before it looks at the learning rate. Every
+template sets that to ``null``, so no run here can stop that way and the two
+remaining outcomes are the floor and the budget. The check still reports a
+patience stop rather than assuming it away: a template edited back to a
+number would otherwise end an arm by a rule the size comparison does not
+share. Its message can contain the letters ``LR`` (``min_delta=...`` is
 appended to it), which is why the test below is on the ``LR `` prefix rather
 than on a substring.
 

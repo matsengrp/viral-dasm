@@ -72,13 +72,15 @@ max_train_steps: {MAX_TRAIN_STEPS}
 # one evaluation.
 eval_every_steps: {EVAL_EVERY_STEPS}
 
-# 30, the capacity scan's and the ladder's value. It is the gate checked
-# *before* the learning-rate floor, so a run that stops improving outright
-# ends after about three plateau reductions rather than ten; the floor is the
-# operative rule only while improvements keep arriving, which is what the
-# reference runs did. `scripts/check_run.py` reports which of the two ended
-# each run.
-early_stopping_patience: 30
+# null, as in `1863-v12-size-ladder-dense`, so every arm is compared at a
+# matched step budget. Patience is checked *before* the learning-rate floor,
+# so leaving it on adds a third way to stop that could fire on one size and
+# not another -- an asymmetry inside a size comparison. At
+# `early_stopping_min_delta: 0.0` it is close to inert anyway (gate3 ran at
+# the coarser 1e-4 and still stopped on the floor), so disabling it costs
+# nothing and removes the asymmetry. What ends a run is now the floor or the
+# step budget, and `scripts/check_run.py` reports which.
+early_stopping_patience: null
 
 # Zero, which is neither reference campaign's value, and the reason is that it
 # is not a training parameter at all. It reaches `Trainer._update_best_model`

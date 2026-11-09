@@ -10,10 +10,10 @@ are defaults in the vendored ``dasm2``.
 **The floor is not the only gate, and it is not the first one.**
 ``Trainer._should_stop_early`` returns on ``evals_without_improvement >=
 early_stopping_patience`` before it looks at the learning rate, and its own
-docstring says so. The templates set patience 30 against an ``eval_patience``
-of 10, so a run that stops improving outright stops after about three
-reductions rather than ten. The floor is the rule only while improvements
-keep arriving at least once per 30 evaluations, which is what the reference
+docstring says so. The templates set patience to ``null``, matching
+``1863-v12-size-ladder-dense``, so that gate cannot fire and every arm is
+compared at a matched step budget. What ends a run is the floor or the
+budget, which is what the reference
 run did. ``max_train_steps`` bounds each cycle too, and torch's own
 ``ReduceLROnPlateau`` defaults -- ``threshold`` 1e-4 relative, ``cooldown`` 0
 -- decide when each halving fires, since the trainer passes only ``mode``,

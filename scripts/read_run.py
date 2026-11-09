@@ -73,9 +73,12 @@ REPLAY_DELTAS = {
     "at_min_delta_1e3": 1e-3,
 }
 
-#: ``early_stopping_patience`` in every template. The gate checked *before*
-#: the learning-rate floor, so a coarser threshold can end a run earlier by
-#: advancing this counter faster even though the descent is identical.
+#: Patience for the *counterfactual* replays below, not for these runs --
+#: every template sets ``early_stopping_patience: null``, so nothing here
+#: stops on patience. 30 is what the sampling-depth ladder and the capacity
+#: scan ran, so ``patience_stop_step_at_min_delta_1e3`` answers "where would
+#: this run have ended under the ladder's rule", which is the comparison the
+#: derived columns exist to make.
 EARLY_STOPPING_PATIENCE = 30
 
 #: What ``read_run`` writes when the run left no stop event at all. There is
