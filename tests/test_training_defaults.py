@@ -7,6 +7,18 @@ not to a step budget. Three values decide where that lands --
 10 -- and none is *set* as a key in any config file in this repository. They
 are defaults in the vendored ``dasm2``.
 
+**The floor is not the only gate, and it is not the first one.**
+``Trainer._should_stop_early`` returns on ``evals_without_improvement >=
+early_stopping_patience`` before it looks at the learning rate, and its own
+docstring says so. The templates set patience 30 against an ``eval_patience``
+of 10, so a run that stops improving outright stops after about three
+reductions rather than ten. The floor is the rule only while improvements
+keep arriving at least once per 30 evaluations, which is what the reference
+run did. ``max_train_steps`` bounds each cycle too, and torch's own
+``ReduceLROnPlateau`` defaults -- ``threshold`` 1e-4 relative, ``cooldown`` 0
+-- decide when each halving fires, since the trainer passes only ``mode``,
+``factor`` and ``patience``. Those are not pinned here.
+
 A change to any of them raises no error. Runs stop somewhere else, and the
 only evidence is the final learning rate in a finished log. At roughly five
 days wall per full-depth arm, that is the most expensive silent failure M3
@@ -33,9 +45,10 @@ revert does not restore.
 It is also why ``min_learning_rate`` is read from ``trainer.py``'s source
 rather than from ``inspect.signature(Trainer.__init__)``. Torch is already paid --
 ``dasm2.config`` pulls it in below, and ``tests/test_fork.py`` imports it
-too -- but the trainer's own module tree costs a further 68-273 s on this
-filesystem, measured, depending on cache state and contention -- inside
-``validate_tests``, which gates every corpus build. The source is the record; what makes reading it sound is asserted
+too -- but the trainer's own module tree costs tens of seconds warm and minutes
+cold on this filesystem (41 s and 263 s marginal, measured, though the figure
+moves with cache and contention) -- inside ``validate_tests``, which gates
+every corpus build. The source is the record; what makes reading it sound is asserted
 rather than assumed, in ``test_trainer_init_is_a_plain_function`` and
 ``test_only_two_modules_mention_the_floor``, and the gap those leave is
 stated there.
@@ -44,6 +57,14 @@ The plateau pair is asserted on the *loaded config* rather than on
 ``ReduceOnPlateauSchedulerConfig()``'s class defaults, because a template that
 grew its own ``scheduler:`` block would satisfy the class check and still
 train under different numbers. The template is what trains.
+
+**What is pinned is written values and one wiring constant, not the stopping
+logic.** ``trainer.py`` could keep every number and change
+``self.min_learning_rate = min_learning_rate`` to scale it, or invert the
+comparison, and nothing here would fail -- both names stay inside
+``FLOOR_MODULES``, which checks which files mention the parameter, not what
+they do with it. Pinning the behaviour would mean constructing a Trainer,
+which is the import this file exists to avoid.
 
 Adapted from ``scripts/check_rendered_config.py`` at ``4cc5ddb^``,
 which made the same three assertions as a gate script before the port
@@ -65,7 +86,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 import render_config
-from lib import assert_dasm2_is_this_repo
+from lib import NUM_CYCLES, assert_dasm2_is_this_repo
 
 from dasm2.config import TrainingConfig
 
@@ -235,8 +256,8 @@ def test_trainer_init_is_a_plain_function():
     which ``test_only_two_modules_mention_the_floor`` would catch in every
     form that does name it. That is a stated gap, not a proof. If any
     assertion here starts failing, read the default through
-    ``inspect.signature(Trainer.__init__)`` instead and pay the import: 68-273
-    s on this filesystem, measured, inside the job that gates every corpus
+    ``inspect.signature(Trainer.__init__)`` instead and pay the import: tens
+    of seconds warm, minutes cold, inside the job that gates every corpus
     build, which is why it is not paid by default.
     """
     source = TRAINER_SOURCE.read_text()
@@ -274,8 +295,12 @@ def test_recorded_metadata_matches_the_trainer_default():
 
 
 #: Every `Trainer(...)` construction in the vendored package. Pinned so the
-#: scan below cannot pass by matching nothing: a rename or an aliased import
-#: would silently find zero calls and report no override.
+#: scan below cannot pass against nothing: if the matcher broke outright it
+#: would find zero calls and still report no override. It does *not* catch a
+#: call site added under an alias -- `T(...)` after `import Trainer as T`
+#: leaves the count at 3 -- which is what the module-mention test below is
+#: for. An unrelated re-vendor adding a fourth construction fails this; in a
+#: frozen, pruned tree that is a change worth a human look.
 KNOWN_TRAINER_CALLS = 3
 
 #: The only two modules in `dasm2` that mention the floor at all. Pinned for
@@ -309,6 +334,31 @@ def test_no_call_site_can_set_the_floor():
         f"both the written default and the recorded metadata at "
         f"{EXPECTED_MIN_LEARNING_RATE!r}. Assert the call site's value "
         f"instead."
+    )
+
+
+def test_one_cycle_per_run():
+    """The fourth input to the stopping rule, and the one most easily missed.
+
+    ``dasm2.train_command.train_model`` defaults ``cycles`` to 4. Above one
+    cycle, crossing the floor ends a *cycle* rather than the run:
+    ``Trainer._reset_optimizer_with_adjusted_lr`` rebuilds the optimizer at a
+    bumped learning rate and rebuilds the scheduler, so the ten-halvings
+    derivation runs once per cycle from a different starting rate each time
+    and "every run stops on the floor" stops being true.
+
+    This repository overrides that to 1 in ``scripts/lib.py``, which
+    ``scripts/train.py`` passes through as ``--cycles``. Asserted because the
+    override is a bare constant nothing else checks, and because it is the one
+    input to the stopping rule that is this repository's own choice rather
+    than the library's.
+    """
+    assert NUM_CYCLES == 1, (
+        f"NUM_CYCLES is {NUM_CYCLES}, not 1. Above one cycle the learning-rate "
+        f"floor is a cycle boundary rather than a stop -- the optimizer is "
+        f"rebuilt at a bumped rate and the schedule restarts -- so EPIC #1's "
+        f"'every run stops on the floor' no longer holds and steps-to-stop is "
+        f"no longer comparable across the seven runs."
     )
 
 
