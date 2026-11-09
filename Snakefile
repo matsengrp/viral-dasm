@@ -11,7 +11,9 @@ Milestone 1 (issue #2) vendored the training code and showed it still trains
 the model it was ported from. Milestone 2 (issue #6) added the stage before
 it: building a training corpus, and its neutral model, from a mat-pcp run.
 Issue #8 then removed the apparatus that checked the port, so what remains is
-pipeline rather than scaffolding.
+pipeline rather than scaffolding. Milestone 3 (issue #14) added the stage
+after it: the paper's seven models, each stopping on the learning-rate floor
+and each read back out of its own log into ``data/runs.csv``.
 """
 
 import sys
@@ -26,19 +28,25 @@ from lib import (  # noqa: E402
     CUTOFF,
     GENE,
     PREP_MEM_MB,
+    SMOKE_CORPUS,
     VERSION,
     corpus,
+    corpus_max_aa_seq_len,
+    mat_pcp_path,
 )
 
 include: "workflow/corpus.smk"
+include: "workflow/train.smk"
 
 
 rule all:
     """Everything the pipeline produces so far.
 
     Every corpus the paper trains on, each one checked against the row order
-    its fold-0 draw depends on, plus the neutral models they carry. M3 adds
-    the training runs and this target grows to include them.
+    its fold-0 draw depends on, plus the neutral models they carry, and then
+    the seven models trained on them -- each with its stopping point read out
+    of its own log and checked.
     """
     input:
         rules.corpora.input,
+        rules.models.input,

@@ -87,6 +87,7 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 import render_config
 from lib import NUM_CYCLES, assert_dasm2_is_this_repo
+from runs import EVAL_EVERY_STEPS, MAX_TRAIN_STEPS
 
 from dasm2.config import TrainingConfig
 
@@ -109,15 +110,42 @@ EXPECTED_PLATEAU_EVAL_PATIENCE = 10
 TRAINER_SOURCE = REPO_ROOT / "dasm2" / "training" / "trainer.py"
 TRAIN_COMMAND_SOURCE = REPO_ROOT / "dasm2" / "train_command.py"
 
-#: ``max_train_steps`` for the render. Any value below the templates'
-#: ``eval_every_steps`` is rejected by ``TrainingConfig`` -- "a cycle must
-#: contain at least one evaluation" -- so this is a real budget, not a token.
-RENDER_STEPS = 500_000
+#: The budget and the cadence every training rule renders with, imported
+#: rather than restated: ``TrainingConfig`` rejects ``max_train_steps <
+#: eval_every_steps`` -- "a cycle must contain at least one evaluation" -- so
+#: a second copy of either here could render a config the pipeline never does.
+RENDER_STEPS = MAX_TRAIN_STEPS
+RENDER_CADENCE = EVAL_EVERY_STEPS
+
+#: The corpus length ``ci-484k``'s head sizes its table from. Every corpus in
+#: ``config.yaml`` reports 1,273 today; the value here only has to be a legal
+#: one, since nothing below trains.
+RENDER_MAX_AA_SEQ_LEN = 1273
 
 TEMPLATES = sorted((REPO_ROOT / "configs").glob("*.template.yaml"))
 assert TEMPLATES, (
     "no configs/*.template.yaml; the parametrized test below would collect nothing and pass"
 )
+
+
+def rendered(template_text: str) -> str:
+    """``template_text`` rendered the way a training rule renders it.
+
+    ``--max-aa-seq-len`` is supplied only to the template that asks for it,
+    because :func:`render_config.render` raises on a value the template does
+    not use -- which is the check that stops a transformer template from
+    being handed a truncation length nobody wanted.
+    """
+    return render_config.render(
+        template_text,
+        render_config.substitutions(
+            RENDER_STEPS,
+            eval_every_steps=RENDER_CADENCE,
+            max_aa_seq_len=(
+                RENDER_MAX_AA_SEQ_LEN if "{MAX_AA_SEQ_LEN}" in template_text else None
+            ),
+        ),
+    )
 
 
 def _trainer_class(source: str) -> ast.ClassDef:
@@ -389,10 +417,7 @@ def test_template_renders_and_carries_the_plateau(template: Path):
     assertions, so a template that renders but will not validate fails here
     rather than at the start of a multi-day run.
     """
-    rendered = render_config.render(
-        template.read_text(), render_config.substitutions(RENDER_STEPS)
-    )
-    config = TrainingConfig(**yaml.safe_load(rendered))
+    config = TrainingConfig(**yaml.safe_load(rendered(template.read_text())))
     assert (
         config.scheduler.factor,
         config.scheduler.eval_patience,
@@ -421,12 +446,11 @@ def test_a_configured_neutral_model_is_refused():
     ``check_rendered_config.py`` refused the key in the raw YAML; asserting
     the vendored refusal is the stronger form of the same check.
     """
-    rendered = render_config.render(
-        TEMPLATES[0].read_text() + "\nneutral_model:\n    type: TabularRates\n",
-        render_config.substitutions(RENDER_STEPS),
+    text = rendered(
+        TEMPLATES[0].read_text() + "\nneutral_model:\n    type: TabularRates\n"
     )
     with pytest.raises(ValidationError, match="neutral_model"):
-        TrainingConfig(**yaml.safe_load(rendered))
+        TrainingConfig(**yaml.safe_load(text))
 
 
 def test_a_template_overriding_the_plateau_is_caught():
@@ -437,11 +461,7 @@ def test_a_template_overriding_the_plateau_is_caught():
         + "    scheduler_type: reduce_on_plateau\n"
         + "    factor: 0.1\n"
     )
-    config = TrainingConfig(
-        **yaml.safe_load(
-            render_config.render(template, render_config.substitutions(RENDER_STEPS))
-        )
-    )
+    config = TrainingConfig(**yaml.safe_load(rendered(template)))
     assert config.scheduler.factor == 0.1, (
         "a template-level `scheduler:` block did not reach the loaded "
         "config, so the assertion above would pass on class defaults while "

@@ -16,10 +16,11 @@ registry that resolved dataset nicknames by scanning directories named in
 changed what the code did. It is not vendored. Nothing here consults anything
 outside the checkout and the paths `config.yaml` names.
 
-**Status: milestone 2 of 7.** The training code is vendored and shown to still
-train the model it was ported from, and the pipeline builds its own corpora and
-the neutral model they carry. The training runs, the scoring tables, the four
-analyses, the figure composition and the release are issues
+**Status: milestone 3 of 7.** The training code is vendored and shown to still
+train the model it was ported from, the pipeline builds its own corpora and the
+neutral model they carry, and `snakemake models` trains the paper's seven
+models on them. The scoring tables, the four analyses, the figure composition
+and the release are issues
 [#1](https://github.com/matsengrp/viral-dasm/issues/1) tracks.
 
 ## Layout
@@ -89,6 +90,72 @@ source file's row order verbatim, which is what lets `check_corpus` prove a
 rebuild gives the paper's fold 0 -- the held-out set is a row-positional draw,
 so the same row order is the same split.
 
+## Training the models
+
+`snakemake models` trains the paper's seven models and writes one row per run
+into [`data/runs.csv`](data/runs.csv).
+
+| rule | what it produces |
+|---|---|
+| `render_config` | one `(model, corpus)` training config, filled from `config.yaml` |
+| `check_params` | the model built and counted, against the number in its own name |
+| `render_smoke_config` / `smoke` | four CPU steps of each architecture on 400 PCPs: the wiring test |
+| `train` | one run, on one claimed GPU, to the learning-rate floor |
+| `read_run` | that run's endpoint, read out of its own log |
+| `check_run` | the gate: a run that stopped anywhere else fails here |
+| `runs_table` | the seven rows, gathered into `data/runs.csv` |
+
+**Seven runs, four architectures.** Three transformer sizes and the
+context-independent baseline at full depth, where the size ladder and the
+pooling contrast are read; the smallest transformer alone at each of the three
+thinned depths, because that is the architecture the sampling-depth ladder
+trained at every rung. The list is seven named pairs, not a cross product.
+
+| model | effective parameters | geometry | lr |
+|---|---:|---|---:|
+| `dasm-1077k` | 1,076,756 | nhead 16, d_model 128, d_pos 64, ff 512 | 5e-4 |
+| `dasm-293k` | 292,628 | nhead 8, d_model 64, d_pos 32, ff 256 | 1e-3 |
+| `dasm-85k` | 84,884 | nhead 4, d_model 32, d_pos 16, ff 128 | 1e-3 |
+| `ci-484k` | 483,740 | `PerSiteParentChildHead`, no encoder | 5e-4 |
+
+**Named by effective parameters**, which excludes the parameters that can
+never receive a gradient: a transformer's positional table is allocated at
+`pe_max_len` 5,000 rows against a corpus whose longest amino-acid sequence is
+1,273, and the baseline's parent->parent diagonal is zapped in every forward.
+`check_params` builds each model and reproduces the count rather than reading
+it back out of the config, because a template transcribed from the wrong arm
+renders, validates and trains perfectly well.
+
+**One stopping rule for all seven.** Each run trains until `ReduceLROnPlateau`
+has driven the learning rate below 1e-6. `max_train_steps` is a budget guard,
+and a run that reaches it instead writes *no record at all* -- the trainer
+breaks on the budget before it asks whether to stop early -- so the signature
+is the absence of a stop event, and `check_run` fails on it rather than
+letting a capped run reach a figure.
+
+**`early_stopping_min_delta` is 0, for every run.** It is a readout parameter,
+not a training one: it reaches best-model tracking and the patience counter,
+and nothing else, because the plateau scheduler steps on the raw validation
+loss. So two runs at one seed differing only in it descend identically, and
+the coarser one is a prefix of the finer one. At 0, the saved best is the
+validation curve's own minimum, and the two reference campaigns' thresholds
+(1e-4 and 1e-3) are recovered by replaying their rule over the run's recorded
+evaluations -- which is what `data/runs.csv`'s `*_at_min_delta_*` columns are.
+
+**One run per card, claimed by the training process.** `scripts/gpu_slot.py`
+ranks the cards by use, drops any carrying a process this user does not own --
+and any whose occupant cannot be identified at all -- and takes an exclusive
+lock under the artifact root. `scripts/train.py` holds it for exactly as long
+as it trains. This is for throughput and for leaving other people's cards
+alone, not for memory: attention runs through `scaled_dot_product_attention`
+with `need_weights=False`, so no L x L matrix is ever materialised.
+
+**`train` does not declare the test marker**, alone among the rules here. Every
+other rule declares the code it runs, including this one; what it leaves out is
+`tests_passed.done`, because an edit to any test file would otherwise
+invalidate a finished multi-day run. The suite still runs ahead of the corpora,
+which is where a regression in the corpus builder would do its damage.
+
 ## The vendored training code
 
 `dasm2/` is a one-way fork of the model-training code, taken once from a
@@ -143,10 +210,15 @@ them was a fixed-weights pass: the reference checkpoint, scored in this tree,
 came within 1.1e-08 of the loss its own run logged, over exactly 158,137
 loss-mask positions. A full run from scratch here then reached a best
 validation loss of 7.766302 against the reference's 7.766710 -- a difference
-of 4e-4, an order of magnitude below the 0.0055-nat spread across three seeds
-of that reference configuration, and smaller than the run's own
-evaluation-to-evaluation jitter. The two are indistinguishable, and the sign
-carries no information.
+of 4.1e-4, smaller than the run's own evaluation-to-evaluation jitter.
+
+That 4.1e-4 is the only same-corpus, same-fold, same-seed measurement of this
+difference there is, and it is one measurement. The three replicates of that
+reference configuration -- 7.766710, 7.776982, 7.768600, sd 0.0055 -- move
+*fold* as well as seed, and fold difficulty is likely the larger term, so
+their spread bounds something else rather than this. A real tolerance is
+still owed; [#1](https://github.com/matsengrp/viral-dasm/issues/1) asks for
+one as its own subissue.
 
 Those were one-time claims about the port, and the pipeline that builds the
 paper's figures should not carry the apparatus that made them.

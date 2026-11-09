@@ -7,19 +7,24 @@ import torch
 from dasm2.config import (
     EncoderConfig,
     HeadConfig,
+    IdentityEncoderConfig,
     ModelConfig,
     SelectionFactorProjectionConfig,
 )
 from dasm2.heads.factory import HEAD_REGISTRY
 from dasm2.heads.types import HeadType
 from dasm2.models.core.base import CoreModel
+from dasm2.models.core.identity import IdentityEncoder
 from dasm2.models.core.sf_projection import SelectionFactorProjection
 from dasm2.models.core.transformer import TransformerEncoder
 
-#: One encoder. ESM2, MPNN light-attention and the identity passthrough went
-#: with their core models (#4); the paper trains the codon transformer.
+#: Two encoders, one per head. The codon transformer carries the models named
+#: for their parameter counts; the identity passthrough carries the
+#: context-independent baseline, whose head has no encoder to speak of. ESM2
+#: and MPNN light-attention went with their core models.
 ENCODER_REGISTRY: Dict[str, Type[torch.nn.Module]] = {
     "TransformerEncoder": TransformerEncoder,
+    "IdentityEncoder": IdentityEncoder,
 }
 
 
@@ -28,9 +33,8 @@ def create_model_from_config(
 ) -> CoreModel:
     """Create a complete model from configuration.
 
-    Uses ESM2CoreModel when encoder is ESM2EncoderConfig,
-    MPNNCoreModel when encoder is MPNNLightAttentionEncoderConfig,
-    otherwise uses CoreModel (handles standard and concat-pos encoders).
+    One core model: CoreModel, which handles the standard and concat-pos
+    transformer encoders and the identity passthrough alike.
 
     Args:
         model_config: Model configuration with encoder and heads
@@ -172,7 +176,7 @@ def _create_sf_projection(
 
 
 def _create_encoder_from_config(
-    encoder_config: EncoderConfig,
+    encoder_config: Union[EncoderConfig, IdentityEncoderConfig],
     device: str,
 ) -> torch.nn.Module:
     """Create encoder from configuration using registry pattern.

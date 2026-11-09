@@ -283,6 +283,13 @@ BUILT_CORPUS_NAMES = tuple(n for n in CORPUS_NAMES if corpus(n).is_built_here)
 
 FULL_DEPTH = corpus("full_depth")
 
+#: The wiring smoke's corpus, and its md5. Not a :class:`Corpus`: it records
+#: no fold sizes and no row-order digest, because no result depends on its
+#: split. The smoke asks whether the whole path runs, not what it answers.
+SMOKE_CORPUS = Path(CONFIG["smoke_corpus"]["path"])
+SMOKE_CORPUS_MD5 = str(CONFIG["smoke_corpus"]["md5"])
+
+
 #: sha256 of the ``rates_table.csv`` inside each neutral archive the pipeline
 #: builds, keyed by era (``"pooled"`` for the unstratified fit). Pinned to the
 #: archives the paper trained against; see ``config.yaml`` for why it is the
@@ -378,6 +385,85 @@ def parquet_cache_budget_gb(parquet_path: str | Path) -> float:
     return math.ceil(parquet_cache_row_groups(sizes) * decoded / 1e7) / 100
 
 
+def corpus_max_aa_seq_len(parquet_path: str | Path) -> int:
+    """The corpus's longest amino-acid sequence, from its own Parquet footer.
+
+    ``ci-484k``'s head sizes a ``[max_aa_seq_len, 20, 20]`` parameter from
+    this number, so it is read from the file the run trains against rather
+    than written down anywhere. A table shorter than the sequence raises
+    ``IndexError`` on the first batch; a longer one allocates rows that can
+    never receive a gradient and quietly changes the effective parameter
+    count the model is named for.
+
+    The *writer* measured it, at the length it actually wrote, so this cannot
+    drift from the corpus the way a constant would.
+
+    Raises:
+        KeyError: If the file carries no ``max_aa_seq_len``, which a Parquet
+            prepared by this pipeline always does.
+    """
+    from dasm2.data.parquet_backend import read_parquet_file_metadata
+
+    metadata = read_parquet_file_metadata(Path(parquet_path))
+    try:
+        return int(metadata["max_aa_seq_len"])
+    except KeyError:
+        raise KeyError(
+            f"{parquet_path} carries no `max_aa_seq_len` in its footer "
+            f"metadata, so there is nothing to size a per-site head's "
+            f"parameter table from. Every Parquet "
+            f"`scripts/prepare_viral_parquet.py` writes has one."
+        ) from None
+
+
+#: The checkpoint a finished run is selected by. At :data:`NUM_CYCLES` 1 the
+#: trainer writes exactly one per output directory.
+BEST_CHECKPOINT_GLOB = f"*_cycle{NUM_CYCLES - 1}_best_*.zip"
+
+
+def select_checkpoint(output_dir: str | Path) -> Path:
+    """The one best-validation checkpoint a finished run left behind.
+
+    A function rather than a rule: ``scripts/read_run.py`` needs the path for
+    its checksum column, so a separate rule would run the same glob in two
+    processes and let them disagree.
+
+    Deliberately not a pattern match on the filename. Checkpoint names carry
+    a config-metadata hash and a run id, so a directory holding two attempts
+    offers no lexical order that means anything -- the reason
+    ``train.py::latest_resumable`` sorts by mtime. Here the answer is that
+    there should only ever be one, so two is reported rather than resolved.
+
+    A resumed run still leaves one: the trainer writes a cycle's best only
+    when that cycle ends, and an attempt killed partway through never gets
+    there. Two means two attempts each ran a cycle to completion in the same
+    directory, which is a different mistake.
+
+    Raises:
+        FileNotFoundError: If the directory holds no best checkpoint, which
+            means the run never finished a cycle.
+        RuntimeError: If it holds more than one, which means two attempts
+            shared an output directory and the selected weights would depend
+            on which this glob returned first.
+    """
+    found = sorted(Path(output_dir).glob(BEST_CHECKPOINT_GLOB))
+    if not found:
+        raise FileNotFoundError(
+            f"no {BEST_CHECKPOINT_GLOB} under {output_dir}. The trainer writes "
+            f"one at the end of each cycle, so a run that reached its stop has "
+            f"one; this directory holds a run that did not."
+        )
+    if len(found) > 1:
+        listing = "\n  ".join(p.name for p in found)
+        raise RuntimeError(
+            f"{len(found)} best checkpoints under {output_dir}:\n  {listing}\n"
+            f"Two attempts shared this directory. Which one is 'the' selected "
+            f"checkpoint is then a question about glob order, so it is raised "
+            f"rather than answered: move or remove the stale attempt."
+        )
+    return found[0]
+
+
 def _check_config() -> None:
     """Fail at import on a config that cannot describe a run.
 
@@ -428,6 +514,10 @@ def _check_config() -> None:
                 f"{name} is read pinned from {spec.path} but records no md5, "
                 f"so nothing identifies the file this pipeline was run against."
             )
+    if len(SMOKE_CORPUS_MD5) != 32:
+        raise ValueError(
+            f"smoke_corpus.md5 is {len(SMOKE_CORPUS_MD5)} hex characters; md5 gives 32."
+        )
 
 
 _check_config()
