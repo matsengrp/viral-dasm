@@ -42,7 +42,7 @@ import dasm2  # noqa: F401  (imported for its side effects; see test_import_orde
 
 from check_params import never_gradient_params
 from check_run import failures_for
-from gpu_slot import cards_with_another_users_process
+from gpu_slot import _normalise_uuid, cards_with_another_users_process
 from read_run import BUDGET_STOP_REASON, replay
 
 from dasm2.config import TrainingConfig
@@ -279,6 +279,32 @@ def test_an_unanswerable_nvidia_smi_excludes_every_card():
         0,
         1,
     }
+
+
+def test_a_cards_physical_index_is_not_its_torch_ordinal():
+    """The silent misroute ``claim_card`` has to avoid.
+
+    ``nvidia-smi`` numbers every card on the host; torch numbers only what
+    ``CUDA_VISIBLE_DEVICES`` leaves visible, from zero. Under ``2,3`` the card
+    locked as physical 2 is ``cuda:0``, so yielding the physical index would
+    send the run to a card the lock does not name -- possibly another user's.
+    Locking on the physical index and yielding the ordinal keeps both right.
+    """
+    uuids = ["GPU-aaa", "GPU-bbb", "GPU-ccc", "GPU-ddd"]
+    # What `torch_ordinals_by_uuid` returns under CUDA_VISIBLE_DEVICES=2,3.
+    ordinals = {"ccc": 0, "ddd": 1}
+
+    physical = 2
+    assert ordinals[_normalise_uuid(uuids[physical])] == 0
+    assert ordinals[_normalise_uuid(uuids[3])] == 1
+    # The hidden cards are addressable by neither name.
+    assert _normalise_uuid(uuids[0]) not in ordinals
+
+
+def test_uuid_spellings_from_nvidia_smi_and_torch_agree():
+    """``nvidia-smi`` prefixes ``GPU-`` and torch does not; case varies too."""
+    assert _normalise_uuid("GPU-47648ED2-D435") == "47648ed2-d435"
+    assert _normalise_uuid("47648ed2-d435") == "47648ed2-d435"
 
 
 def _touch_checkpoint(directory: Path, stem: str) -> Path:

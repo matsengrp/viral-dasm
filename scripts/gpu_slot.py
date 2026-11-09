@@ -11,6 +11,16 @@ through as ``--device cuda:{slot}``.
 imports ``dasm2.train_command``, and so torch, at module scope, so by the time
 any code here could set the variable torch has already enumerated the devices.
 
+**A card is identified by its UUID, never by an index.** ``nvidia-smi``
+numbers every physical card on the host; torch numbers only the cards
+``CUDA_VISIBLE_DEVICES`` leaves visible, from zero. The two agree only when
+that variable is unset, and the disagreement is not safely loud: with
+``CUDA_VISIBLE_DEVICES=2,3``, ``cuda:0`` is physical card 2, so a lock naming
+card 0 would guard one card while the run used another -- and could land on
+another user's. So the lock is keyed on the physical index, which every
+process on the host agrees about, while what is yielded is the torch ordinal
+for that same UUID. A card torch cannot address is not a candidate.
+
 **The claim is held by the training process itself** rather than by a wrapper,
 so the lock's lifetime is the run's lifetime and release-on-exit is a ``with``
 block rather than a signal handler someone has to get right.
@@ -123,6 +133,31 @@ def _stale(lock_file: Path) -> bool:
     return not Path("/proc", str(pid)).exists()
 
 
+def torch_ordinals_by_uuid() -> dict[str, int]:
+    """Map each card's UUID to the ordinal torch addresses it by.
+
+    ``nvidia-smi`` reports ``GPU-<uuid>``; torch reports the bare UUID. Both
+    are normalised to lowercase hex with no prefix. Cards outside
+    ``CUDA_VISIBLE_DEVICES`` are simply absent, which is what makes this the
+    filter for "can this process actually use that card".
+    """
+    import torch
+
+    if not torch.cuda.is_available():
+        return {}
+    ordinals: dict[str, int] = {}
+    for ordinal in range(torch.cuda.device_count()):
+        uuid = getattr(torch.cuda.get_device_properties(ordinal), "uuid", None)
+        if uuid is not None:
+            ordinals[_normalise_uuid(str(uuid))] = ordinal
+    return ordinals
+
+
+def _normalise_uuid(uuid: str) -> str:
+    """``GPU-47648ED2-...`` and ``47648ed2-...`` to one spelling."""
+    return uuid.strip().removeprefix("GPU-").removeprefix("gpu-").lower()
+
+
 def candidate_cards() -> list[int]:
     """Cards this user may take, least used first.
 
@@ -139,14 +174,25 @@ def candidate_cards() -> list[int]:
         return []
     apps = _nvidia_smi("compute-apps=gpu_uuid,pid")
     excluded = cards_with_another_users_process(apps, uuids, str(os.getuid()))
-    allowed = [i for i in range(len(uuids)) if i not in excluded]
+    visible = torch_ordinals_by_uuid()
+    allowed = [
+        i
+        for i in range(len(uuids))
+        if i not in excluded and _normalise_uuid(uuids[i]) in visible
+    ]
     ranked = rank_cuda_gpus_by_usage(allowed=allowed)
+    ranked = [i for i in ranked if i in allowed]
     return ranked if ranked else allowed
 
 
 @contextmanager
 def claim_card(lock_dir: Path, job_name: str) -> Iterator[int]:
-    """Hold one card for the duration of the block, and yield its index.
+    """Hold one card for the duration of the block, and yield its ordinal.
+
+    The lock is named for the card's **physical** index, which every process
+    on the host agrees about. What is yielded is the **torch** ordinal for
+    that same card, which is what ``cuda:{n}`` means inside this process. See
+    this module's docstring for why those are not the same number.
 
     Args:
         lock_dir: Shared directory holding one lock file per card. Created if
@@ -155,7 +201,7 @@ def claim_card(lock_dir: Path, job_name: str) -> Iterator[int]:
             stuck lock names what is holding it.
 
     Yields:
-        The card index, to be passed on as ``cuda:{index}``.
+        The torch device ordinal, to be passed on as ``cuda:{ordinal}``.
 
     Raises:
         RuntimeError: If no card is both free of another user's work and
@@ -166,11 +212,15 @@ def claim_card(lock_dir: Path, job_name: str) -> Iterator[int]:
     if not cards:
         raise RuntimeError(
             f"no GPU is available for {job_name}. Either nvidia-smi could not "
-            f"be queried, or every card carries a process this user does not "
-            f"own. A card whose occupant cannot be identified is treated as "
-            f"taken, so this also fires when the driver reports a process "
-            f"whose pid resolves to nothing."
+            f"be queried, every card carries a process this user does not "
+            f"own, or CUDA_VISIBLE_DEVICES hides the cards that are free. A "
+            f"card whose occupant cannot be identified is treated as taken, "
+            f"so this also fires when the driver reports a process whose pid "
+            f"resolves to nothing."
         )
+
+    uuids = _nvidia_smi("gpu=uuid") or []
+    ordinals = torch_ordinals_by_uuid()
 
     held: Path | None = None
     card: int | None = None
@@ -195,6 +245,6 @@ def claim_card(lock_dir: Path, job_name: str) -> Iterator[int]:
         )
 
     try:
-        yield card
+        yield ordinals[_normalise_uuid(uuids[card])]
     finally:
         held.unlink(missing_ok=True)
