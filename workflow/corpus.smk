@@ -17,6 +17,22 @@ wildcard. That is what pins lambda across the ladder: a per-corpus rebuild
 would let the neutral model move with the corpus, which is the one thing a
 depth contrast cannot afford.
 
+**Every rule that runs a script declares that script's code**: the
+script itself, its direct imports of repository code, and ``config.yaml``
+wherever ``scripts/lib.py`` is required, since ``lib`` reads and validates it
+at import rather than importing it. Direct imports only -- a glob over
+``dasm2`` would also make a comment edit anywhere in it invalidate the
+corpora, and with them the training runs below. What covers the residual
+transitive risk is ``check_corpus``, which gates each corpus's row-order
+digest. ``tests/test_rule_inputs.py`` holds every rule to this.
+
+Two consequences worth knowing. ``validate_tests`` is the exception: it runs
+pytest over all of ``dasm2`` and declares none of it, because declaring that
+*is* the glob above; it declares every test file instead and leans on the
+suite's own assertions. And ``config.yaml`` is declared whole, Snakemake
+having no way to depend on a subset of its keys, so editing an unrelated key
+rebuilds every corpus.
+
 GISAID: every file under ``PARQUET_DIR``, ``NEUTRAL_DIR`` and ``ERA_MAP_DIR``
 is GISAID-derived and stays on the cluster.
 """
@@ -66,10 +82,9 @@ rule corpora:
 rule build_neutral:
     """Build the gene's three TabularRates archives: both eras plus pooled.
 
-    The builder and ``scov2_rates.py`` are declared inputs, not just implied by
-    the shell command. Snakemake's staleness check sees only what is declared,
-    and the gene-aware rate selection in ``scov2_rates.py`` is the
-    correctness-critical part: a fix there has to invalidate these archives.
+    The gene-aware rate selection in ``scov2_rates.py`` is the
+    correctness-critical part, and it is declared below so that a fix there
+    invalidates these archives.
     """
     input:
         script="scripts/build_era_neutral_models.py",
@@ -99,7 +114,13 @@ rule verify_neutral:
     """
     input:
         script="scripts/verify_era_neutral_models.py",
+        # It rebuilds the expected rates through the builder's own
+        # `BUILD_VARIANTS`, `archive_name` and `build_inputs`, so a change to
+        # how the archives are named or assembled changes what this checks.
+        builder="scripts/build_era_neutral_models.py",
         rates_lib="dasm2/neutral/scov2_rates.py",
+        zip_lib="dasm2/serialization/zip_io.py",
+        dasm2_init="dasm2/__init__.py",
         config="config.yaml",
         lib="scripts/lib.py",
         zips=NEUTRAL_ZIPS,
@@ -159,6 +180,11 @@ rule render_era_map:
     input:
         template=ERA_TEMPLATE,
         era_lib="scripts/write_era_config.py",
+        # `write_era_config` takes `archive_name` from the builder, so the
+        # paths this map names move when that function does.
+        builder="scripts/build_era_neutral_models.py",
+        config="config.yaml",
+        lib="scripts/lib.py",
         zips=NEUTRAL_ZIPS,
         verified=f"{VALIDATION_DIR}/neutral_verified_{GENE}.done",
     output:
@@ -225,15 +251,37 @@ rule prepare_parquet:
         tested=f"{VALIDATION_DIR}/tests_passed.done",
         config="config.yaml",
         lib="scripts/lib.py",
-        # The data the corpus is made of. It belongs in `input` rather than
-        # only in `params` because mat-pcp rebuilds its tree in place, so the
-        # file can change under a corpus that already exists.
-        pcp=lambda wc: str(corpus(wc.corpus).source_pcp),
+        # The data the corpus is made of, declared so the DAG records what
+        # this was built from -- and `ancient`, so a new mtime on it does not
+        # rebuild. The file is far above snakemake's 1 MB checksum threshold,
+        # so only its mtime is compared; mat-pcp re-emits its tree in place,
+        # and a byte-identical re-emit would otherwise rebuild every corpus
+        # and, under M3, retrain on them.
+        #
+        # A re-emit that genuinely changed the data must not rebuild here
+        # either: a regenerated corpus is a different 90/10 split of the
+        # paper's data. `check_corpus` is what catches that, and it declares
+        # this same file un-ancient so it reruns and fails on the pins. To
+        # rebuild on purpose, update them in `config.yaml`, which is small
+        # enough to be content-tracked and does trigger.
+        pcp=lambda wc: ancient(str(corpus(wc.corpus).source_pcp)),
         # The code that decides the row-group layout and the `nt_rates` /
-        # `nt_csps` columns. `build_neutral` declares its `dasm2` dependencies;
-        # without these the same standard was not applied here.
+        # `nt_csps` columns.
         writer="dasm2/data/parquet_writer.py",
         rates="dasm2/neutral/tabular_rates.py",
+        # The rest of the read-convert-write path: the backend and row
+        # converter the rows go through, the seam identity and segment handler
+        # that decide what a row is, and the sha256 recorded in the metadata.
+        backend="dasm2/data/parquet_backend.py",
+        registry="dasm2/data/registry.py",
+        segment_handlers="dasm2/data/segment_handlers.py",
+        local="dasm2/data/local.py",
+        # Imported for its side effects: the package `__init__` calls
+        # `use_system_arrow_pool()` and `disable_mha_fastpath()` at import.
+        # This declares the file holding those two calls, not the modules
+        # implementing them -- direct imports only, as above. See
+        # `tests/test_import_order.py`.
+        dasm2_init="dasm2/__init__.py",
     output:
         parquet=f"{PARQUET_DIR}/{{corpus}}.parquet",
         summary=f"{PARQUET_DIR}/{{corpus}}_era_rows.json",
@@ -254,16 +302,28 @@ rule check_corpus:
     Every later milestone inherits this. It is the reason a rebuilt corpus
     cannot silently become a different 90/10 split of the paper's data.
 
-    A built corpus depends on the file ``prepare_parquet`` writes; a pinned one
-    depends on nothing, because the file is an input this pipeline receives.
+    **This rule watches both files it reads, and neither is ancient.** It is
+    the cheap guard, so it is the one that should rerun when anything moves.
+    The Parquet was previously declared only for corpora built here, leaving
+    the received ``full_depth`` -- the corpus most of the paper trains on --
+    unwatched. The source PCP was read and gated by ``check_corpus.py`` and
+    declared nowhere at all, which is the gap that matters most: mat-pcp
+    re-emits its tree in place, and ``source_pcp_md5`` is the pin that catches
+    it. Both files are far above snakemake's 1 MB checksum threshold, so a
+    re-emit moves their mtime and this rule reruns, whether or not the bytes
+    changed. That is the intended trade -- minutes of hashing against a stale
+    pass on the paper's own split.
+
+    A missing received Parquet now raises ``MissingInputException`` at DAG
+    build rather than being reported by ``check_corpus.py`` itself. Both
+    abort; this one aborts before the corpora are built rather than after.
     """
     input:
         script="scripts/check_corpus.py",
         config="config.yaml",
         lib="scripts/lib.py",
-        parquet=lambda wc: (
-            [str(corpus(wc.corpus).path)] if corpus(wc.corpus).is_built_here else []
-        ),
+        parquet=lambda wc: str(corpus(wc.corpus).path),
+        source_pcp=lambda wc: str(corpus(wc.corpus).source_pcp),
     output:
         report=f"{ARTIFACT_ROOT}/corpus_guard/{{corpus}}.json",
         membership=f"{ARTIFACT_ROOT}/corpus_guard/{{corpus}}_fold0_membership.npz",
@@ -294,6 +354,9 @@ rule audit_censor:
     input:
         script="scripts/audit_censor.py",
         masking_lib="dasm2/sequence/masking.py",
+        constants_lib="dasm2/sequence/constants.py",
+        io_lib="dasm2/io.py",
+        dasm2_init="dasm2/__init__.py",
         config="config.yaml",
         lib="scripts/lib.py",
     output:
