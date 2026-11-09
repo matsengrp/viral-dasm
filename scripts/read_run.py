@@ -51,12 +51,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 # `lib` first: it is what puts this repository's root on `sys.path`.
 from lib import ARTIFACT_ROOT, select_checkpoint
-from runs import MAX_TRAIN_STEPS, MODELS
+from runs import BUDGET_STOP_REASON, MAX_TRAIN_STEPS, MODELS
 
 # `dasm2` next, above anything that pulls pyarrow in -- pandas does.
 import dasm2  # noqa: F401  (imported for its side effects)
 
 from dasm2.training.log_reader import (
+    LOG_EXTENSION,
+    META_EXTENSION,
     find_training_logs,
     get_run_eval_losses,
     read_log,
@@ -80,11 +82,6 @@ REPLAY_DELTAS = {
 #: this run have ended under the ladder's rule", which is the comparison the
 #: derived columns exist to make.
 EARLY_STOPPING_PATIENCE = 30
-
-#: What ``read_run`` writes when the run left no stop event at all. There is
-#: no such reason string in ``dasm2/training/logging.py``; this names the
-#: condition for a reader of ``data/runs.csv``.
-BUDGET_STOP_REASON = "max_train_steps budget"
 
 
 def replay(losses: list[float], steps: list[int], delta: float) -> dict:
@@ -168,8 +165,13 @@ def read_run(model: str, corpus_name: str, run_dir: Path) -> dict:
     # the same in every attempt of one run, and the first is the one that
     # started from scratch.
     first_log = find_training_logs(run_dir)[0]
+    if not first_log.name.endswith(LOG_EXTENSION):
+        raise SystemExit(
+            f"{first_log} is not named like a training log, so the metadata "
+            f"path cannot be derived from it."
+        )
     meta = read_metadata(
-        first_log.with_name(first_log.name.replace("_log.jsonl", "_meta.yaml"))
+        first_log.with_name(first_log.name.removesuffix(LOG_EXTENSION) + META_EXTENSION)
     )
 
     row = {
@@ -219,7 +221,15 @@ def main() -> None:
     print(f"  stopped at step {row['steps_to_stop']:,}: {row['stop_reason']}")
     print(
         f"  best val {row['best_val_loss_logged']:.6f} at step "
-        f"{row['best_step_logged']:,}; saved {row['best_val_loss_saved']:.6f}"
+        f"{row['best_step_logged']:,}; saved "
+        # None when no attempt logged a `training_end`, which is what a
+        # killed run leaves behind. Formatting it would raise after the row
+        # had already been written.
+        + (
+            "n/a"
+            if row["best_val_loss_saved"] is None
+            else f"{row['best_val_loss_saved']:.6f}"
+        )
     )
     print(
         f"  {row['data_passes']:.1f} data passes, "

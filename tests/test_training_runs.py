@@ -24,6 +24,8 @@ control is eleven aggregate scalars, inlined.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -36,14 +38,14 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 import render_config
 from lib import select_checkpoint
-from runs import MAX_TRAIN_STEPS, MODELS, RUNS, run_id
+from runs import BUDGET_STOP_REASON, MAX_TRAIN_STEPS, MODELS, RUNS, run_id
 
 import dasm2  # noqa: F401  (imported for its side effects; see test_import_order)
 
 from check_params import never_gradient_params
 from check_run import failures_for
 from gpu_slot import _normalise_uuid, cards_with_another_users_process
-from read_run import BUDGET_STOP_REASON, replay
+from read_run import replay
 
 from dasm2.config import TrainingConfig
 from dasm2.models.factory import create_model_from_config
@@ -209,13 +211,17 @@ def test_a_budget_stop_fails():
     assert "budget" in failure
 
 
-def test_a_patience_stop_fails_even_though_its_message_says_lr():
-    """The reason a prefix test replaces the substring test.
+def test_a_patience_stop_is_refused():
+    """A run that ended on patience ended under a rule the ladder does not share.
 
-    ``_should_stop_early`` appends ``min_delta=...`` to the patience message,
-    so a patience stop's reason can contain the letters ``LR`` -- and
-    patience is checked *before* the floor, so a run that stops improving
-    ends under a different rule than the one the paper reports.
+    Every template sets ``early_stopping_patience: null``, so this cannot
+    happen to these runs -- but a template edited back to a number would end
+    one arm by patience and the others by the floor, which is an asymmetry
+    inside a size comparison. The gate refuses it rather than assuming the
+    template.
+
+    The reason string is the trainer's own, verbatim from
+    ``_should_stop_early``.
     """
     patience = FLOOR_STOP_ROW | {
         "steps_to_stop": 300000,
@@ -225,6 +231,23 @@ def test_a_patience_stop_fails_even_though_its_message_says_lr():
     }
     (failure,) = failures_for(patience)
     assert "not on the learning-rate floor" in failure
+
+
+def test_a_stop_at_the_budget_is_reported_as_a_budget_stop():
+    """Branch order, pinned: steps decide before the reason does.
+
+    A run that stopped on patience at exactly ``MAX_TRAIN_STEPS`` is reported
+    as a budget stop, because the step count is checked first. Both fail the
+    gate, so nothing is let through; this pins which message a reader gets.
+    """
+    at_budget = FLOOR_STOP_ROW | {
+        "steps_to_stop": MAX_TRAIN_STEPS,
+        "stop_reason": (
+            "no improvement for 30 evaluations (patience=30, min_delta=0.001)"
+        ),
+    }
+    (failure,) = failures_for(at_budget)
+    assert "budget" in failure
 
 
 def test_a_coarser_threshold_keeps_an_earlier_best_and_can_stop_sooner():
@@ -281,30 +304,105 @@ def test_an_unanswerable_nvidia_smi_excludes_every_card():
     }
 
 
-def test_a_cards_physical_index_is_not_its_torch_ordinal():
-    """The silent misroute ``claim_card`` has to avoid.
+def test_torch_ordinals_are_a_dense_normalised_map_of_the_visible_cards():
+    """The real map ``claim_card`` resolves a physical index through.
 
     ``nvidia-smi`` numbers every card on the host; torch numbers only what
     ``CUDA_VISIBLE_DEVICES`` leaves visible, from zero. Under ``2,3`` the card
     locked as physical 2 is ``cuda:0``, so yielding the physical index would
-    send the run to a card the lock does not name -- possibly another user's.
-    Locking on the physical index and yielding the ordinal keeps both right.
-    """
-    uuids = ["GPU-aaa", "GPU-bbb", "GPU-ccc", "GPU-ddd"]
-    # What `torch_ordinals_by_uuid` returns under CUDA_VISIBLE_DEVICES=2,3.
-    ordinals = {"ccc": 0, "ddd": 1}
+    send a run to a card the lock does not name -- possibly another user's.
 
-    physical = 2
-    assert ordinals[_normalise_uuid(uuids[physical])] == 0
-    assert ordinals[_normalise_uuid(uuids[3])] == 1
-    # The hidden cards are addressable by neither name.
-    assert _normalise_uuid(uuids[0]) not in ordinals
+    This calls the real ``torch_ordinals_by_uuid`` rather than restating a map
+    in the test, which is the only way the assertion can fail for that defect.
+    """
+    torch = pytest.importorskip("torch")
+    if not torch.cuda.is_available():
+        pytest.skip("no CUDA device to enumerate")
+
+    from gpu_slot import torch_ordinals_by_uuid
+
+    ordinals = torch_ordinals_by_uuid()
+    assert len(ordinals) == torch.cuda.device_count()
+    # Dense and zero-based: these are torch ordinals, not host indices.
+    assert sorted(ordinals.values()) == list(range(torch.cuda.device_count()))
+    # Normalised, so an `nvidia-smi` "GPU-<uuid>" looks the same key up.
+    for key in ordinals:
+        assert key == _normalise_uuid(key)
+        assert not key.startswith("GPU-")
 
 
 def test_uuid_spellings_from_nvidia_smi_and_torch_agree():
     """``nvidia-smi`` prefixes ``GPU-`` and torch does not; case varies too."""
     assert _normalise_uuid("GPU-47648ED2-D435") == "47648ed2-d435"
     assert _normalise_uuid("47648ed2-d435") == "47648ed2-d435"
+
+
+def test_the_lock_loop_gives_one_card_to_one_claimant(tmp_path):
+    """Two claims on one free card: the second must not get it.
+
+    This is the invariant the whole module exists for -- `--resources gpu=N`
+    counts jobs, it does not name cards, so nothing but the lock stops two
+    runs landing on one GPU.
+    """
+    from gpu_slot import _claim_one
+
+    lock = tmp_path / "gpu_0.lock"
+    assert _claim_one(lock, "first") is True
+    assert _claim_one(lock, "second") is False
+    assert "first" in lock.read_text()
+
+
+def test_a_lock_held_by_a_live_process_is_never_stolen(tmp_path):
+    """A live holder's lock is not stale, whoever asks."""
+    from gpu_slot import _claim_one, _stale
+
+    lock = tmp_path / "gpu_0.lock"
+    # This process is alive by construction.
+    lock.write_text(f"someone-else {os.getpid()}")
+    assert _stale(lock) is False
+    assert _claim_one(lock, "me") is False
+
+
+def test_an_unparsable_lock_counts_as_live(tmp_path):
+    """The safe direction: a truncated lock is not a free card.
+
+    Reading it as stale would hand a card to a second run while the first is
+    using it. The cost of being wrong this way is a lock cleared by hand.
+    """
+    from gpu_slot import _claim_one, _stale
+
+    lock = tmp_path / "gpu_0.lock"
+    lock.write_text("")
+    assert _stale(lock) is False
+    assert _claim_one(lock, "me") is False
+
+
+def test_a_dead_holders_lock_is_reclaimed(tmp_path):
+    """A preempted run must not keep a card out of service forever."""
+    from gpu_slot import _claim_one
+
+    lock = tmp_path / "gpu_0.lock"
+    # Pid 2^22 is above the default pid_max, so it cannot be running.
+    lock.write_text("dead-run 4194304")
+    assert _claim_one(lock, "me") is True
+    assert "me" in lock.read_text()
+
+
+def test_a_run_that_logged_no_stop_event_below_budget_is_not_called_capped():
+    """A killed run and a capped run are different failures.
+
+    ``read_run`` writes the budget literal whenever the stop event is absent,
+    and a killed attempt is missing it too. Below the budget the absence
+    means the run never finished, and reporting "budget" would send a reader
+    looking for the wrong thing.
+    """
+    killed = FLOOR_STOP_ROW | {
+        "steps_to_stop": 143000,
+        "stop_reason": BUDGET_STOP_REASON,
+    }
+    (failure,) = failures_for(killed)
+    assert "did not finish" in failure
+    assert "budget" not in failure.split("did not finish")[0]
 
 
 def _touch_checkpoint(directory: Path, stem: str) -> Path:
@@ -350,12 +448,17 @@ def test_the_readout_row_carries_every_column_the_table_writes(tmp_path: Path):
         row["model"], row["corpus"] = model, corpus_name
         # `runs_table` joins the two files, so the scored sidecar has to exist
         # and has to agree with the row on the keys both carry.
+        row["checkpoint"] = f"runs/{run}/{run}_cycle0_best_x.zip"
+        # `runs_table` also checks that the scored file is this run's, and
+        # that the saved best is the logged argmin.
+        row["best_val_loss_saved"] = row["best_val_loss_logged"]
         scored = {
             "best_val_loss_logged": row["best_val_loss_logged"],
             "best_step_logged": row["best_step_logged"],
             "train_loss_eval_mode": 0,
             "train_positions": 0,
             "gap": 0,
+            "scored_checkpoint": Path(row["checkpoint"]).name,
         }
         (rows_dir / f"{run}_train_eval.json").write_text(json.dumps(scored))
         (rows_dir / f"{run}.json").write_text(json.dumps(row))
@@ -364,8 +467,6 @@ def test_the_readout_row_carries_every_column_the_table_writes(tmp_path: Path):
     stray = rows_dir / f"{run_id(*RUNS[0])}.json"
     row = json.loads(stray.read_text()) | {"best_val_loss_at_min_delta_1e5": 0}
     stray.write_text(json.dumps(row))
-
-    import subprocess
 
     result = subprocess.run(
         [

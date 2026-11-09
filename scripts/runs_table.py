@@ -93,6 +93,27 @@ def main() -> None:
                     f"log, so they disagree only if one is stale -- rerun "
                     f"whichever is older rather than joining them."
                 )
+        # The losses can match while the files describe different runs: a
+        # retrained arm that reached the same best would pass the check above.
+        # The checkpoint name carries the run id, so it does not.
+        if scored["scored_checkpoint"] != Path(row["checkpoint"]).name:
+            raise SystemExit(
+                f"{scored_path} scored {scored['scored_checkpoint']!r} but "
+                f"{path} names {Path(row['checkpoint']).name!r}. One of them "
+                f"predates a retrain; rerun it rather than joining them."
+            )
+        # `min_delta` is 0 for every run, which is what makes the saved best
+        # and the curve's argmin the same number. If that ever stops holding,
+        # `gap` is computed against a loss no checkpoint has.
+        saved = row["best_val_loss_saved"]
+        if saved is not None and saved != row["best_val_loss_logged"]:
+            raise SystemExit(
+                f"{path}: the saved best {saved!r} is not the logged argmin "
+                f"{row['best_val_loss_logged']!r}. At "
+                f"`early_stopping_min_delta: 0` they are the same number, so "
+                f"this run did not train under the stopping rule the table "
+                f"assumes and its `gap` compares two different checkpoints."
+            )
         row.update({key: scored[key] for key in TRAIN_EVAL_COLUMNS})
 
         unexpected = sorted(set(row) - set(COLUMNS))

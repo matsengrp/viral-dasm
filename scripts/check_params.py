@@ -98,7 +98,11 @@ def never_gradient_params(model, max_aa_seq_len: int) -> tuple[int, list[str]]:
 
 
 def check_paths(config) -> list[str]:
-    """The five censoring fields, against ``config.yaml`` and against disk."""
+    """The four censoring *paths*, against ``config.yaml`` and against disk.
+
+    ``censor_mode`` is the fifth censoring field and is checked by the caller,
+    which compares it to a value rather than to a path.
+    """
     failures = []
     for key in (
         "censored_mutations_file",

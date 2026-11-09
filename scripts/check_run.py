@@ -23,9 +23,13 @@ template sets that to ``null``, so no run here can stop that way and the two
 remaining outcomes are the floor and the budget. The check still reports a
 patience stop rather than assuming it away: a template edited back to a
 number would otherwise end an arm by a rule the size comparison does not
-share. Its message can contain the letters ``LR`` (``min_delta=...`` is
-appended to it), which is why the test below is on the ``LR `` prefix rather
-than on a substring.
+share. The test below is on the ``LR `` *prefix* rather than a substring
+because the floor is identified by how its message begins
+(``f"LR {lr:.2e} < {floor:.2e}"``, ``trainer.py``), and a reason that merely
+mentions a learning rate somewhere is not a floor stop. The patience message
+is ``no improvement for N evaluations (patience=P, min_delta=D)``, all
+lowercase, so no current reason collides -- the prefix is the rule that
+stays correct if one ever does.
 
 This is a gate, not a readout: the row is already written when this runs, so
 a run that fails here stops its own branch of the DAG with its curve in hand
@@ -42,7 +46,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from runs import MAX_TRAIN_STEPS
+from runs import BUDGET_STOP_REASON, MAX_TRAIN_STEPS
 
 #: The learning-rate floor message's prefix, as ``trainer.py`` formats it:
 #: ``f"LR {current_lr:.2e} < {self.min_learning_rate:.2e}"``.
@@ -51,10 +55,24 @@ FLOOR_PREFIX = "LR "
 
 def failures_for(row: dict) -> list[str]:
     """Why this run's ending is not the one the paper reports, if it is not."""
-    reason = str(row.get("stop_reason", ""))
-    steps = row.get("steps_to_stop")
+    reason = str(row["stop_reason"])
+    steps = row["steps_to_stop"]
     if reason.startswith(FLOOR_PREFIX):
         return []
+    if reason == BUDGET_STOP_REASON and steps != MAX_TRAIN_STEPS:
+        # `read_run` writes the budget literal whenever the stop event is
+        # missing, and a killed attempt is missing it too. Below the budget,
+        # the absence means the run never finished rather than that it ran
+        # out of steps, and saying "budget" would send a reader looking for
+        # the wrong thing.
+        return [
+            (
+                f"this run logged no stop event and ended at {steps:,} of "
+                f"{MAX_TRAIN_STEPS:,} steps, so it did not finish -- it was "
+                f"killed, or it is still running. Its row describes a partial "
+                f"curve. Resume it rather than reading it."
+            )
+        ]
     if steps == MAX_TRAIN_STEPS:
         return [
             (
@@ -68,9 +86,9 @@ def failures_for(row: dict) -> list[str]:
     return [
         (
             f"this run stopped for {reason!r}, not on the learning-rate floor. "
-            f"Patience is checked before the floor is, so a run that stops "
-            f"improving ends after about three plateau reductions rather than "
-            f"ten -- a different stopping rule, reached by accident."
+            f"Every template sets `early_stopping_patience: null` so that each "
+            f"arm ends under the same rule; a run that ended under a different "
+            f"one is not comparable to the others, whatever the reason reads."
         )
     ]
 

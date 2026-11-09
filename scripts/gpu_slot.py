@@ -25,10 +25,12 @@ for that same UUID. A card torch cannot address is not a candidate.
 so the lock's lifetime is the run's lifetime and release-on-exit is a ``with``
 block rather than a signal handler someone has to get right.
 
-The lock loop is ``dasm2-experiments``' ``dasm2/utils/gpu_dispatch.py::
-acquire_gpu_slot``: an ``O_CREAT | O_EXCL`` create under a shared directory,
-which works on NFS where ``flock`` does not. What is new here is the filter
-below.
+The lock itself is an ``O_CREAT | O_EXCL`` create under a shared directory,
+which works on NFS where ``flock`` does not.
+
+**The lock is host-local.** :func:`_stale` resolves a pid against this
+host's ``/proc``, so a live lock written by another host would read as
+stale, and the file name carries no hostname. One host at a time.
 """
 
 from __future__ import annotations
@@ -125,7 +127,13 @@ def cards_with_another_users_process(
 
 
 def _stale(lock_file: Path) -> bool:
-    """Whether a lock file names a pid that is no longer running."""
+    """Whether a lock file names a pid that is no longer running.
+
+    An unreadable or unparsable lock counts as *live*, not stale. Treating a
+    truncated file as free would let a second run take a card a first one is
+    using; the cost of the safe direction is a lock someone clears by hand.
+    A recycled pid also reads as live, which is the same safe direction.
+    """
     try:
         pid = int(lock_file.read_text().strip().split()[-1])
     except (OSError, ValueError, IndexError):
@@ -158,12 +166,19 @@ def _normalise_uuid(uuid: str) -> str:
     return uuid.strip().removeprefix("GPU-").removeprefix("gpu-").lower()
 
 
-def candidate_cards() -> list[int]:
-    """Cards this user may take, least used first.
+def candidate_cards() -> tuple[list[int], list[str]]:
+    """Cards this user may take, least used first, and the host's uuid list.
 
     Order comes from ``dasm2.utils.device.rank_cuda_gpus_by_usage``, which
     ranks on utilization, then memory, then process count. The filter is
-    :func:`cards_with_another_users_process`.
+    :func:`cards_with_another_users_process`, plus "torch can address it":
+    a card ``CUDA_VISIBLE_DEVICES`` hides has no ordinal to hand back.
+
+    Returns both the candidate indices and the uuid list they index into, so
+    a caller never re-queries ``nvidia-smi`` to turn an index back into a
+    uuid. Two queries can disagree -- the driver can fail on the second, or a
+    card can change state between them -- and an index resolved against the
+    wrong list is the one error this module exists to prevent.
     """
     from dasm2.utils.device import rank_cuda_gpus_by_usage
 
@@ -171,7 +186,7 @@ def candidate_cards() -> list[int]:
 
     uuids = _nvidia_smi("gpu=uuid")
     if uuids is None:
-        return []
+        return [], []
     apps = _nvidia_smi("compute-apps=gpu_uuid,pid")
     excluded = cards_with_another_users_process(apps, uuids, str(os.getuid()))
     visible = torch_ordinals_by_uuid()
@@ -180,9 +195,47 @@ def candidate_cards() -> list[int]:
         for i in range(len(uuids))
         if i not in excluded and _normalise_uuid(uuids[i]) in visible
     ]
-    ranked = rank_cuda_gpus_by_usage(allowed=allowed)
-    ranked = [i for i in ranked if i in allowed]
-    return ranked if ranked else allowed
+    # `rank_cuda_gpus_by_usage` takes `allowed`, but it is re-filtered rather
+    # than trusted: an unranked order would otherwise reach the caller as if
+    # it had been ranked, and ranking is what keeps two launches off one card
+    # when neither holds a lock yet.
+    ranked = [i for i in rank_cuda_gpus_by_usage(allowed=allowed) if i in allowed]
+    return (ranked or allowed), uuids
+
+
+def _claim_one(lock_file: Path, job_name: str) -> bool:
+    """Take one card's lock, clearing a dead holder's, without a race.
+
+    The obvious form -- ``if exists() and _stale(): unlink()`` then an
+    ``O_EXCL`` create -- is not atomic. Two processes can both judge the same
+    lock stale; the first unlinks and creates, the second then unlinks *that
+    live lock* and creates its own, and both train on one card. Here the
+    unlink is conditional on the file still being the one that was judged, by
+    comparing ``st_ino`` before and after: a lock replaced in between is a
+    different inode, so the loser leaves it alone and moves to another card.
+    """
+    try:
+        before = lock_file.stat().st_ino
+    except FileNotFoundError:
+        before = None
+    if before is not None:
+        if not _stale(lock_file):
+            return False
+        try:
+            # Only unlink if nothing replaced it since the staleness verdict.
+            if lock_file.stat().st_ino == before:
+                lock_file.unlink()
+        except (FileNotFoundError, OSError):
+            return False
+    try:
+        fd = os.open(str(lock_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return False
+    try:
+        os.write(fd, f"{job_name} {os.getpid()}".encode())
+    finally:
+        os.close(fd)
+    return True
 
 
 @contextmanager
@@ -208,7 +261,7 @@ def claim_card(lock_dir: Path, job_name: str) -> Iterator[int]:
             unlocked.
     """
     lock_dir.mkdir(parents=True, exist_ok=True)
-    cards = candidate_cards()
+    cards, uuids = candidate_cards()
     if not cards:
         raise RuntimeError(
             f"no GPU is available for {job_name}. Either nvidia-smi could not "
@@ -219,25 +272,17 @@ def claim_card(lock_dir: Path, job_name: str) -> Iterator[int]:
             f"resolves to nothing."
         )
 
-    uuids = _nvidia_smi("gpu=uuid") or []
     ordinals = torch_ordinals_by_uuid()
 
     held: Path | None = None
     card: int | None = None
     for candidate in cards:
         lock_file = lock_dir / f"gpu_{candidate}.lock"
-        if lock_file.exists() and _stale(lock_file):
-            lock_file.unlink(missing_ok=True)
-        try:
-            fd = os.open(str(lock_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError:
-            continue
-        os.write(fd, f"{job_name} {os.getpid()}".encode())
-        os.close(fd)
-        held, card = lock_file, candidate
-        break
+        if _claim_one(lock_file, job_name):
+            held, card = lock_file, candidate
+            break
 
-    if held is None or card is None:
+    if held is None:
         raise RuntimeError(
             f"every candidate card {cards} is already locked under {lock_dir} "
             f"by another run of this pipeline. Snakemake's `--resources gpu=` "
@@ -245,6 +290,13 @@ def claim_card(lock_dir: Path, job_name: str) -> Iterator[int]:
         )
 
     try:
-        yield ordinals[_normalise_uuid(uuids[card])]
+        uuid = _normalise_uuid(uuids[card])
+        if uuid not in ordinals:
+            raise RuntimeError(
+                f"card {card} ({uuid}) was a candidate but torch cannot "
+                f"address it. CUDA_VISIBLE_DEVICES changed between the two "
+                f"queries, which makes every index here untrustworthy."
+            )
+        yield ordinals[uuid]
     finally:
         held.unlink(missing_ok=True)

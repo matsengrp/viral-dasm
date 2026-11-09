@@ -49,6 +49,7 @@ from lib import (
     assert_dasm2_is_this_repo,
 )
 
+from dasm2.config import load_config_from_yaml
 from dasm2.train_command import train_model
 
 assert_dasm2_is_this_repo()
@@ -137,6 +138,18 @@ def main() -> None:
             cv_num_folds=args.cv_num_folds,
             cv_seed=args.cv_seed,
             resume=str(resume) if resume is not None else None,
+        )
+
+    # `data` is keyed by head name, so a `--head` the config does not declare
+    # hands the trainer a dataset no task consumes: it trains nothing, for
+    # days, without failing. Checked here rather than trusted from the
+    # Snakefile's `HEAD_OF`, which is the thing that could be wrong.
+    declared = {task.head_type for task in load_config_from_yaml(args.config).tasks}
+    if args.head not in declared:
+        raise SystemExit(
+            f"--head {args.head} is not a task in {args.config}, which "
+            f"declares {sorted(declared)}. The data dict is keyed by head "
+            f"name, so this would train nothing rather than fail."
         )
 
     # The lock is held for exactly as long as training runs: the `with` block

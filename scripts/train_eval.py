@@ -49,7 +49,9 @@ from eval_common import (
     evaluate,
     head_key_of,
 )
+from gpu_slot import claim_card
 from lib import (
+    ARTIFACT_ROOT,
     CV_FOLD_INDEX,
     CV_NUM_FOLDS,
     CV_SEED,
@@ -59,6 +61,10 @@ from lib import (
 from dasm2.config import CvSplitConfig, load_config_from_yaml
 from dasm2.serialization.checkpoints import load_model_only
 from dasm2.training.log_reader import get_run_eval_losses
+
+#: The same directory `scripts/train.py` locks, so a scoring pass and a
+#: training run can never both take one card.
+GPU_LOCK_DIR = Path(ARTIFACT_ROOT) / ".gpu_locks"
 
 
 def main() -> None:
@@ -74,16 +80,20 @@ def main() -> None:
     parser.add_argument(
         "--num-workers",
         type=int,
-        default=6,
+        default=None,
         help=(
-            "DataLoader workers for the training pass. Matches the templates' "
-            "`num_dataloader_workers`; 0 makes the pass dataloader-bound."
+            "DataLoader workers for the training pass. Defaults to the run's "
+            "own `num_dataloader_workers`, so it cannot drift from what "
+            "training used; 0 makes the pass dataloader-bound."
         ),
     )
     args = parser.parse_args()
 
     config = load_config_from_yaml(args.config)
     batch_size = batch_size_for(config, args.batch_size)
+    workers = (
+        config.num_dataloader_workers if args.num_workers is None else args.num_workers
+    )
     checkpoint = select_checkpoint(args.run_dir)
 
     frame = get_run_eval_losses(args.run_dir)
@@ -103,23 +113,32 @@ def main() -> None:
     print(
         f"{args.model}/{args.corpus}: scoring {checkpoint.name} on the full "
         f"training split of fold {CV_FOLD_INDEX} of {CV_NUM_FOLDS}, batch "
-        f"{batch_size}, {args.num_workers} worker(s)",
+        f"{batch_size}, {workers} worker(s)",
         flush=True,
     )
 
     loader = build_sequential_loader(
-        config, args.parquet, cv_split, batch_size, "train", args.num_workers
+        config, args.parquet, cv_split, batch_size, "train", workers
     )
 
-    module = load_model_only(str(checkpoint), device=args.device)
-    try:
-        train_loss, positions = evaluate(
-            module, head_key_of(module), loader, args.device
-        )
-    finally:
-        del module
-        if args.device.startswith("cuda"):
-            torch.cuda.empty_cache()
+    def score(device: str) -> tuple[float, int]:
+        module = load_model_only(str(checkpoint), device=device)
+        try:
+            return evaluate(module, head_key_of(module), loader, device)
+        finally:
+            del module
+            if device.startswith("cuda"):
+                torch.cuda.empty_cache()
+
+    # A full training pass is GPU work of the same shape as training, so it
+    # takes a card the same way `scripts/train.py` does. Bare "cuda" is the
+    # *current* device -- card 0 absent CUDA_VISIBLE_DEVICES -- which is
+    # whichever card a live multi-day run happens to hold.
+    if args.device == "cuda":
+        with claim_card(GPU_LOCK_DIR, f"train_eval_{args.model}_{args.corpus}") as card:
+            train_loss, positions = score(f"cuda:{card}")
+    else:
+        train_loss, positions = score(args.device)
 
     row = {
         "model": args.model,
@@ -130,9 +149,12 @@ def main() -> None:
         # mismatch against `read_run`'s row is visible rather than silent.
         "best_val_loss_logged": best_val_loss,
         "best_step_logged": best_step,
-        # Positive means the model fits its training rows better than the
-        # held-out ones, which is the ordinary direction.
-        "gap": best_val_loss - train_loss,
+        # train minus val, the sign `2026-09-21-v12-replicate-training` and
+        # `1863-v12-size-ladder-dense` both report ("train-minus-val gap"), so
+        # a number here can be read beside theirs. Negative is the ordinary
+        # direction: the model fits rows it trained on better than held-out
+        # ones.
+        "gap": train_loss - best_val_loss,
         "scored_checkpoint": checkpoint.name,
     }
 

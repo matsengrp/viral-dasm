@@ -35,7 +35,7 @@ def _(mo):
 
     **The four depths are not comparable by loss.** Each thinned corpus is
     its own Parquet with its own fold 0, so the four hold out *different*
-    validation rows — 159,412 at full depth against 37,639, 21,445 and 5,335.
+    validation rows; the status table below gives each one's count.
     A lower loss on a smaller corpus is partly a statement about which rows
     were held out. Panel B plots them because the shape of each descent is
     worth seeing, not because the levels can be read against each other; the
@@ -113,13 +113,13 @@ def _(MODELS, RUNS, RUN_DIR, get_run_eval_losses, pd, run_id):
 
 
 @app.cell
-def _(CURVES, MISSING, mo):
+def _(CURVES, MISSING, RUNS, mo):
     mo.md(
         "**No run has logged an evaluation yet.**"
         if CURVES.empty
         else (
-            f"{CURVES['run'].nunique()} of 7 runs have logged evaluations."
-            + (f" Not started: {', '.join(MISSING)}." if MISSING else " All seven.")
+            f"{CURVES['run'].nunique()} of {len(RUNS)} runs have logged evaluations."
+            + (f" Not started: {', '.join(MISSING)}." if MISSING else " All of them.")
         )
     )
     return

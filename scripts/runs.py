@@ -59,15 +59,22 @@ RUNS: tuple[tuple[str, str], ...] = (
 
 #: A budget guard, not the stopping rule. Every run is meant to stop when
 #: ``ReduceLROnPlateau`` has driven the learning rate below 1e-6; this is the
-#: value all three reference campaigns used, and it does bite -- three arms of
-#: the capacity scan stopped on it, which is why that campaign raised its
-#: combined arm to 700,000.
+#: value the reference campaigns used, and it does bite: an arm can reach it
+#: before the floor, which is what `check_run.py` refuses.
 #:
 #: A run that exhausts it leaves **no log record at all**: ``trainer.py``
 #: breaks on ``self._cycle_step >= budget.max_train_steps`` before
 #: ``_should_stop_early`` is called, and ``log_early_stopping`` fires only
 #: inside the branch that call opens. ``scripts/check_run.py`` detects the
 #: absence rather than a reason string.
+#: What ``read_run`` writes as a run's reason when it left no stop event at
+#: all. There is no such reason string in ``dasm2/training/logging.py``: the
+#: trainer breaks on the step budget *before* ``_should_stop_early`` runs, so
+#: the budget case is an absence rather than a record. It lives here because
+#: ``read_run`` writes it and ``check_run`` matches on it, and a constant two
+#: modules spell separately is one they can disagree about.
+BUDGET_STOP_REASON = "max_train_steps budget"
+
 MAX_TRAIN_STEPS = 500_000
 
 #: Evaluations cadence, in optimizer steps. The reference curves have one

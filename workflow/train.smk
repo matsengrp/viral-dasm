@@ -233,6 +233,7 @@ rule smoke:
         gpu_slot="scripts/gpu_slot.py",
         lib="scripts/lib.py",
         config_yaml="config.yaml",
+        dasm2_config="dasm2/config.py",
         train_command="dasm2/train_command.py",
         dasm2_init="dasm2/__init__.py",
         # Not `ancient()`, unlike the training corpora: at 866 KB this file
@@ -307,6 +308,7 @@ rule train:
         gpu_slot="scripts/gpu_slot.py",
         lib="scripts/lib.py",
         config="config.yaml",
+        dasm2_config="dasm2/config.py",
         train_command="dasm2/train_command.py",
         dasm2_init="dasm2/__init__.py",
         rendered=f"{CONFIG_DIR}/{{model}}_{{corpus}}.yaml",
@@ -339,11 +341,16 @@ rule train:
         " --output-dir {params.outdir}"
         " --head {params.head}"
         " --device cuda"
-        " > {log} 2>&1"
+        # Appended, not truncated: `train.py` resumes from its latest
+        # checkpoint, and `>` would discard everything the killed attempt
+        # printed. The trainer's own JSONL is per attempt and unaffected.
+        " >> {log} 2>&1"
 
 
 rule read_run:
     """One finished run, as one row, entirely from its own log."""
+    wildcard_constraints:
+        corpus="|".join(CORPUS_NAMES),
     input:
         script="scripts/read_run.py",
         lib="scripts/lib.py",
@@ -412,9 +419,12 @@ rule train_eval:
 
     Takes a GPU: a full training pass is several times a validation pass.
     """
+    wildcard_constraints:
+        corpus="|".join(CORPUS_NAMES),
     input:
         script="scripts/train_eval.py",
         eval_common="scripts/eval_common.py",
+        gpu_slot="scripts/gpu_slot.py",
         lib="scripts/lib.py",
         config="config.yaml",
         dasm2_config="dasm2/config.py",
@@ -466,6 +476,13 @@ rule runs_table:
         ),
         train_eval=expand(
             f"{READOUT_DIR}/{{run}}_train_eval.json",
+            run=[run_id(m, c) for m, c in RUNS],
+        ),
+        # The gate, not just the row. Without this a run that stopped on the
+        # step budget still reaches `data/runs.csv`, which is tracked, and
+        # only `models` would notice afterwards.
+        guards=expand(
+            f"{ARTIFACT_ROOT}/run_guard/{{run}}.json",
             run=[run_id(m, c) for m, c in RUNS],
         ),
     output:
