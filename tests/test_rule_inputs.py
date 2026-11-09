@@ -66,6 +66,7 @@ ENTRY_POINTS = {
     "train": "scripts/train.py",
     "read_run": "scripts/read_run.py",
     "check_run": "scripts/check_run.py",
+    "train_eval": "scripts/train_eval.py",
     "runs_table": "scripts/runs_table.py",
 }
 

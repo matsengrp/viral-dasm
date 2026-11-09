@@ -393,6 +393,69 @@ rule check_run:
         " > {log} 2>&1"
 
 
+rule train_eval:
+    """Score one run's best checkpoint on its own training split, dropout off.
+
+    The trainer's ``avg_train_loss`` is a running mean taken with dropout
+    active and with the weights moving across the averaging window, so the
+    gap between it and ``val_loss`` mixes a generalization gap with a dropout
+    penalty. This recomputes the training side the way the validation side is
+    already computed -- ``module.eval()``, a full deterministic pass, the
+    trainer's own denominator -- which is what lets a larger model fitting
+    its *training* rows worse be read as an optimization failure rather than
+    a capacity limit.
+
+    Downstream of ``train`` and declared separately from ``read_run``, whose
+    contract is that every number in it came out of the run's own log. This
+    one is a second pass over the corpus, so it gets its own file and
+    ``runs_table`` joins the two.
+
+    Takes a GPU: a full training pass is several times a validation pass.
+    """
+    input:
+        script="scripts/train_eval.py",
+        eval_common="scripts/eval_common.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        dasm2_config="dasm2/config.py",
+        checkpoints="dasm2/serialization/checkpoints.py",
+        log_reader="dasm2/training/log_reader.py",
+        dasm2_init="dasm2/__init__.py",
+        # What `eval_common` runs. Not reached by the entry-point check,
+        # which reads one file's imports, but this rule runs them all the
+        # same and a change to any of them changes the number it writes.
+        evolutionary_dataset="dasm2/data/evolutionary_dataset.py",
+        head_types="dasm2/heads/types.py",
+        whichmut_losses="dasm2/losses/whichmut_losses.py",
+        train_command="dasm2/train_command.py",
+        rendered=f"{CONFIG_DIR}/{{model}}_{{corpus}}.yaml",
+        done=f"{RUN_DIR}/{{model}}_{{corpus}}/training_complete.done",
+        parquet=lambda wc: ancient(str(corpus(wc.corpus).path)),
+    output:
+        row=f"{READOUT_DIR}/{{model}}_{{corpus}}_train_eval.json",
+    params:
+        outdir=f"{RUN_DIR}/{{model}}_{{corpus}}",
+        cache=lambda wc: (
+            "DASM2_PARQUET_CACHE_BUDGET_GB="
+            f"{corpus(wc.corpus).parquet_cache_budget_gb}"
+        ),
+    log:
+        f"{ARTIFACT_ROOT}/logs/train_eval_{{model}}_{{corpus}}.log",
+    resources:
+        mem_mb=TRAIN_MEM_MB,
+        gpu=1,
+    shell:
+        "{TRAIN_ENV} {params.cache} python {input.script}"
+        " --model {wildcards.model}"
+        " --corpus {wildcards.corpus}"
+        " --run-dir {params.outdir}"
+        " --config {input.rendered}"
+        " --parquet {input.parquet}"
+        " --output {output.row}"
+        " --device cuda"
+        " > {log} 2>&1"
+
+
 rule runs_table:
     """Gather the seven rows into the one table this repository commits."""
     input:
@@ -400,6 +463,10 @@ rule runs_table:
         runs="scripts/runs.py",
         rows=expand(
             f"{READOUT_DIR}/{{run}}.json", run=[run_id(m, c) for m, c in RUNS]
+        ),
+        train_eval=expand(
+            f"{READOUT_DIR}/{{run}}_train_eval.json",
+            run=[run_id(m, c) for m, c in RUNS],
         ),
     output:
         csv=RUNS_CSV,

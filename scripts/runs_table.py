@@ -48,9 +48,19 @@ COLUMNS = (
     "best_val_loss_at_min_delta_1e3",
     "best_step_at_min_delta_1e3",
     "patience_stop_step_at_min_delta_1e3",
+    "train_loss_eval_mode",
+    "train_positions",
+    "gap",
     "checkpoint",
     "checkpoint_sha256",
 )
+
+#: Keys `train_eval.py` repeats from the log so its file stands alone. They
+#: are checked against `read_run`'s row rather than written twice.
+TRAIN_EVAL_ECHOED = ("best_val_loss_logged", "best_step_logged")
+
+#: What `train_eval.py` contributes that `read_run.py` cannot.
+TRAIN_EVAL_COLUMNS = ("train_loss_eval_mode", "train_positions", "gap")
 
 
 def main() -> None:
@@ -59,15 +69,32 @@ def main() -> None:
         "--rows-dir",
         required=True,
         type=Path,
-        help="directory holding one <model>_<corpus>.json per run",
+        help=(
+            "directory holding one <model>_<corpus>.json and one "
+            "<model>_<corpus>_train_eval.json per run"
+        ),
     )
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
 
     rows = []
     for model, corpus_name in RUNS:
-        path = args.rows_dir / f"{run_id(model, corpus_name)}.json"
+        run = run_id(model, corpus_name)
+        path = args.rows_dir / f"{run}.json"
         row = json.loads(path.read_text())
+
+        scored_path = args.rows_dir / f"{run}_train_eval.json"
+        scored = json.loads(scored_path.read_text())
+        for key in TRAIN_EVAL_ECHOED:
+            if scored[key] != row[key]:
+                raise SystemExit(
+                    f"{scored_path} was scored against {key}={scored[key]!r} "
+                    f"but {path} records {row[key]!r}. The two read the same "
+                    f"log, so they disagree only if one is stale -- rerun "
+                    f"whichever is older rather than joining them."
+                )
+        row.update({key: scored[key] for key in TRAIN_EVAL_COLUMNS})
+
         unexpected = sorted(set(row) - set(COLUMNS))
         missing = sorted(set(COLUMNS) - set(row))
         if unexpected or missing:

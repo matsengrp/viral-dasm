@@ -52,3 +52,10 @@ line-length = 88
 # against the commit in dasm2/PROVENANCE.md meaningless, which is the one
 # thing that lets a reader check what the port changed.
 extend-exclude = ["dasm2"]
+
+[tool.ruff.lint.per-file-ignores]
+# A marimo cell is a function whose contract is to `return` the names later
+# cells read, so a cell that exports nothing ends in a bare `return`
+# (PLR1711), and a cell that renders a widget ends in that widget as a bare
+# expression (B018). Both are marimo's file format, not dead code.
+"notebooks/*.py" = ["PLR1711", "B018"]

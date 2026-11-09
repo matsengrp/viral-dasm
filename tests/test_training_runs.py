@@ -345,9 +345,20 @@ def test_the_readout_row_carries_every_column_the_table_writes(tmp_path: Path):
     rows_dir = tmp_path / "readout"
     rows_dir.mkdir()
     for model, corpus_name in RUNS:
+        run = run_id(model, corpus_name)
         row = dict.fromkeys(COLUMNS, 0)
         row["model"], row["corpus"] = model, corpus_name
-        (rows_dir / f"{run_id(model, corpus_name)}.json").write_text(json.dumps(row))
+        # `runs_table` joins the two files, so the scored sidecar has to exist
+        # and has to agree with the row on the keys both carry.
+        scored = {
+            "best_val_loss_logged": row["best_val_loss_logged"],
+            "best_step_logged": row["best_step_logged"],
+            "train_loss_eval_mode": 0,
+            "train_positions": 0,
+            "gap": 0,
+        }
+        (rows_dir / f"{run}_train_eval.json").write_text(json.dumps(scored))
+        (rows_dir / f"{run}.json").write_text(json.dumps(row))
 
     # One row grows a field nobody added to the table.
     stray = rows_dir / f"{run_id(*RUNS[0])}.json"
