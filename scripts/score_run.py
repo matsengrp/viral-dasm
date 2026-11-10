@@ -26,9 +26,10 @@ scores founders. Scoring other parent haplotypes needs a per-haplotype pass, and
 sequence in it, so a haplotype loop built on this class would return the first
 haplotype's table for every one of them, silently.
 
-GISAID-derived: the output is a per-site slice of GISAID counts joined to model
-predictions. It goes to the artifact root on the cluster, never to tracked
-``data/``.
+The output goes to the artifact root on the cluster because of its size -- 1.4M
+rows per run -- not because of the data rules. Counts, fitness effects and
+selection factors are publishable; the per-panel CSVs M5 draws from this table
+are what land in tracked ``results/``.
 """
 
 from __future__ import annotations

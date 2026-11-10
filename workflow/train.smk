@@ -29,7 +29,7 @@ corpora, which is where a regression in the corpus builder would do its
 damage. Every other rule here declares the code it runs, as #12 requires.
 
 GISAID: every run directory, rendered config and log under ``ARTIFACT_ROOT``
-is GISAID-derived and stays on the cluster. ``data/runs.csv`` is aggregate
+is GISAID-derived and stays on the cluster. ``results/runs.csv`` is aggregate
 per-run summary statistics and is tracked.
 """
 
@@ -51,7 +51,7 @@ SMOKE_DIR = f"{ARTIFACT_ROOT}/smoke"
 READOUT_DIR = f"{ARTIFACT_ROOT}/readout"
 
 #: The committed table every run lands one row in.
-RUNS_CSV = "data/runs.csv"
+RUNS_CSV = "results/runs.csv"
 
 #: The env every training rule needs.
 #:
@@ -120,7 +120,7 @@ wildcard_constraints:
 
 
 rule models:
-    """The seven runs, each checked and each a row in ``data/runs.csv``.
+    """The seven runs, each checked and each a row in ``results/runs.csv``.
 
     **The smokes are siblings here, not a precondition of ``train``.** Every
     input of ``smoke`` but two is already a direct input of ``train``, so the
@@ -479,7 +479,7 @@ rule runs_table:
             run=[run_id(m, c) for m, c in RUNS],
         ),
         # The gate, not just the row. Without this a run that stopped on the
-        # step budget still reaches `data/runs.csv`, which is tracked, and
+        # step budget still reaches `results/runs.csv`, which is tracked, and
         # only `models` would notice afterwards.
         guards=expand(
             f"{ARTIFACT_ROOT}/run_guard/{{run}}.json",

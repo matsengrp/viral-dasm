@@ -4,9 +4,12 @@ __pycache__/
 .snakemake/
 _ignore/
 
-# Pipeline outputs. Everything viral-dasm computes from mat-pcp PCPs is
-# GISAID-derived and stays on the cluster under the artifact root; nothing
-# here is a tracked product. The per-panel CSVs that *are* publishable are
-# committed under data/.
-results/
+# `results/` is deliberately NOT ignored. The repository's two tracked
+# directories split by direction: `data/` holds input the pipeline reads and
+# never writes, `results/` holds the small publishable tables it produces --
+# `runs.csv` and, from M5 on, one CSV per figure panel. Mutation counts,
+# fitness effects and selection factors are publishable; raw GISAID sequences
+# are not, and nothing here carries one. Everything large or intermediate --
+# corpora, checkpoints, the scored table, logs -- goes to the artifact root on
+# the cluster, which is outside this tree entirely.
 *.egg-info/

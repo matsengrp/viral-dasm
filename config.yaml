@@ -7,7 +7,7 @@
 #
 # GISAID: everything under `inputs` and `corpora` is GISAID-derived and stays
 # on the cluster. Nothing here is published; the pipeline's own outputs that
-# are publishable go to `data/`, which is tracked.
+# are publishable go to `results/`, which is tracked. `data/` is input only.
 
 # Where the pipeline writes. Large, and not in the repository.
 artifact_root: /fh/fast/matsen_e/shared/bcr-mut-sel/dasm2/experiments/viral-dasm
