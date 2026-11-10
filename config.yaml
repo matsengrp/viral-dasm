@@ -29,7 +29,7 @@ mat_pcp:
     reference_sequence_file: clade_founders/S/19A.fa
     censor_mode: both
     # The fitted mutation-rate tables, one per era plus the pooled fit. The
-    # era partition is viral-dasm's own choice (see `data/era_map.yaml`); these
+    # era partition is viral-dasm's own choice (see `data/eras-pre-omicron-omicron.yaml`); these
     # are the inputs it picks between, not the partition itself.
     master_table_file: glm/master_table.csv
     master_table_pre_omicron_file: glm/master_table_pre_omicron.csv

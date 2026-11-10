@@ -17,6 +17,22 @@ wildcard. That is what pins lambda across the ladder: a per-corpus rebuild
 would let the neutral model move with the corpus, which is the one thing a
 depth contrast cannot afford.
 
+**``ancient()`` tracks size, not importance.** Snakemake checksums an input
+only below ``--max-checksum-file-size``, 1,000,000 bytes by default, and falls
+back to mtime above it. mat-pcp re-emits its tree in place, so a byte-identical
+re-emit moves the mtime of every file it wrote: above the threshold that is a
+false rebuild, and here a false rebuild of the archives restages every corpus
+and every run trained on one. So a mat-pcp input above 1 MB is declared
+``ancient()`` and content is guarded downstream instead; one below it is
+declared plainly, where a re-emit that changes nothing is already a no-op and
+one that changes something should rebuild. The cost of ``ancient()`` is that
+it suppresses the content comparison too, not only the mtime one, so a
+genuinely changed ``annotated_counts.csv`` rebuilds nothing and no guard here
+catches it -- ``verify_neutral`` compares the archives against the master
+tables, which are declared plainly, and not against the annotations. ``rule train`` makes the same call
+for its own inputs, and ``workflow/score.smk`` deliberately makes the opposite
+one -- a rescore is minutes.
+
 **Every rule that runs a script declares that script's code**: the
 script itself, its direct imports of repository code, and ``config.yaml``
 wherever ``scripts/lib.py`` is required, since ``lib`` reads and validates it
@@ -92,20 +108,22 @@ rule build_neutral:
         tabular_lib="dasm2/neutral/tabular_rates.py",
         config="config.yaml",
         lib="scripts/lib.py",
-        # The two mat-pcp files the rates are fitted from. `config.yaml` gives
-        # the mat-pcp root and each file's name, not its content, so nothing
-        # but a declaration here puts them in snakemake's record.
+        # Every mat-pcp file the build reads. The master tables are the
+        # fitted rates themselves -- the archives are a repacking of them --
+        # and they are reached through `lib.master_table_path`, which picks its
+        # key out of a dict keyed by era, so no script names one as a literal.
+        # That is why they were missed until the check below learned to follow
+        # one hop into an imported module.
         #
-        # `ancient()` on the counts and not on the founder, because the 1 MB
-        # checksum threshold splits them. `annotated_counts.csv` is 748 MB, so
-        # only its mtime is compared, and mat-pcp re-emits its tree in place: a
-        # byte-identical re-emit would rebuild these archives, every corpus
-        # that carries one, and so every run trained on a corpus -- GPU-days
-        # for no change. The founder is 3,872 bytes and content-tracked, where
-        # a re-emit that changes nothing is already a no-op and one that
-        # changes the reference *should* rebuild.
+        # `ancient()` on the annotations alone; see this file's note on the
+        # checksum threshold. 748 MB there against 38,860 for each master table
+        # and 3,872 for the founder, so only the annotations are mtime-tracked
+        # and only they need it.
+        master_table=mat_pcp_path("master_table_file"),
+        master_table_pre_omicron=mat_pcp_path("master_table_pre_omicron_file"),
+        master_table_omicron=mat_pcp_path("master_table_omicron_file"),
         site_annotations=ancient(str(mat_pcp_path("site_annotations_file"))),
-        founder=str(mat_pcp_path("reference_sequence_file")),
+        founder=mat_pcp_path("reference_sequence_file"),
     output:
         zips=NEUTRAL_ZIPS,
     resources:
@@ -138,6 +156,12 @@ rule verify_neutral:
         config="config.yaml",
         lib="scripts/lib.py",
         zips=NEUTRAL_ZIPS,
+        # It re-reads the tables the build read and compares them against the
+        # archives, so the same declarations apply here.
+        master_table=mat_pcp_path("master_table_file"),
+        master_table_pre_omicron=mat_pcp_path("master_table_pre_omicron_file"),
+        master_table_omicron=mat_pcp_path("master_table_omicron_file"),
+        site_annotations=ancient(str(mat_pcp_path("site_annotations_file"))),
     output:
         done=f"{VALIDATION_DIR}/neutral_verified_{GENE}.done",
     resources:
@@ -201,11 +225,6 @@ rule render_era_map:
         lib="scripts/lib.py",
         zips=NEUTRAL_ZIPS,
         verified=f"{VALIDATION_DIR}/neutral_verified_{GENE}.done",
-        # The era partition the map is cut at. 426 bytes, so content-tracked:
-        # a re-emit that changes nothing costs nothing, and one that moves a
-        # boundary rebuilds the map -- which is right, since the boundary is
-        # what the map is.
-        era_fit_summary=str(mat_pcp_path("era_fit_summary_file")),
     output:
         era_map=ERA_MAP,
     run:
@@ -379,15 +398,17 @@ rule audit_censor:
         config="config.yaml",
         lib="scripts/lib.py",
         # The tables whose effect is being measured. None is `ancient()`: all
-        # four are under the 1 MB checksum threshold, so a re-emit that
-        # changes nothing triggers nothing, and the audit is the one rule here
-        # that *should* re-run when the censoring changes -- that is the
-        # question it answers, and nothing downstream reads its answer, so
-        # re-running it costs minutes and nothing else.
-        censored_mutations=str(mat_pcp_path("censored_mutations_file")),
-        censored_clades=str(mat_pcp_path("censored_clades_file")),
-        masked_nt_sites=str(mat_pcp_path("masked_nt_sites_file")),
-        reference_sequence=str(mat_pcp_path("reference_sequence_file")),
+        # four are 224 to 33,824 bytes and so content-tracked, and the audit is
+        # the one rule here that *should* re-run when the censoring changes --
+        # that is the question it answers. `rule corpora` requires this report
+        # to exist but no rule reads its contents, so re-running it costs one
+        # job and restages nothing. `rule train` declares the same four files
+        # `ancient()`, which is the opposite call for the opposite reason:
+        # there a rerun is GPU-days.
+        censored_mutations=mat_pcp_path("censored_mutations_file"),
+        censored_clades=mat_pcp_path("censored_clades_file"),
+        masked_nt_sites=mat_pcp_path("masked_nt_sites_file"),
+        reference_sequence=mat_pcp_path("reference_sequence_file"),
     output:
         json=f"{ARTIFACT_ROOT}/audit/{GENE}.json",
     resources:

@@ -33,9 +33,21 @@ configs/      training-config templates, rendered from config.yaml
 scripts/      the pipeline's own code: builders, guards, renderers
 dasm2/        a vendored fork of the model-training code (see its PROVENANCE.md)
 tests/        what has to hold for the rest of it to mean anything
-data/         the publishable numbers behind each figure
-results/      pipeline outputs (not tracked; they live under artifact_root)
+data/         input the pipeline reads and never writes
+results/      the publishable tables it writes, tracked
 ```
+
+The two data directories split by direction, not by provenance. `data/` holds
+input a reader may edit -- today just the era template. `results/` holds what
+the pipeline produces and the repository keeps: `runs.csv`, and from M5 one
+CSV per figure panel. Everything large or intermediate -- corpora,
+checkpoints, the scored table, logs -- goes under `artifact_root` on the
+cluster, outside this tree.
+
+What may be tracked is a data rule, not a size rule: mutation counts, fitness
+effects and selection factors are publishable, raw GISAID sequences are not.
+Nothing in `results/` carries a sequence. `selection_factors.parquet` is kept
+out because it is 1,425,760 rows per run, not because of the rules.
 
 ## Running it
 
