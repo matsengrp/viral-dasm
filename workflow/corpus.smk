@@ -92,6 +92,20 @@ rule build_neutral:
         tabular_lib="dasm2/neutral/tabular_rates.py",
         config="config.yaml",
         lib="scripts/lib.py",
+        # The two mat-pcp files the rates are fitted from. `config.yaml` gives
+        # the mat-pcp root and each file's name, not its content, so nothing
+        # but a declaration here puts them in snakemake's record.
+        #
+        # `ancient()` on the counts and not on the founder, because the 1 MB
+        # checksum threshold splits them. `annotated_counts.csv` is 748 MB, so
+        # only its mtime is compared, and mat-pcp re-emits its tree in place: a
+        # byte-identical re-emit would rebuild these archives, every corpus
+        # that carries one, and so every run trained on a corpus -- GPU-days
+        # for no change. The founder is 3,872 bytes and content-tracked, where
+        # a re-emit that changes nothing is already a no-op and one that
+        # changes the reference *should* rebuild.
+        site_annotations=ancient(str(mat_pcp_path("site_annotations_file"))),
+        founder=str(mat_pcp_path("reference_sequence_file")),
     output:
         zips=NEUTRAL_ZIPS,
     resources:
@@ -187,6 +201,11 @@ rule render_era_map:
         lib="scripts/lib.py",
         zips=NEUTRAL_ZIPS,
         verified=f"{VALIDATION_DIR}/neutral_verified_{GENE}.done",
+        # The era partition the map is cut at. 426 bytes, so content-tracked:
+        # a re-emit that changes nothing costs nothing, and one that moves a
+        # boundary rebuilds the map -- which is right, since the boundary is
+        # what the map is.
+        era_fit_summary=str(mat_pcp_path("era_fit_summary_file")),
     output:
         era_map=ERA_MAP,
     run:
@@ -359,6 +378,16 @@ rule audit_censor:
         dasm2_init="dasm2/__init__.py",
         config="config.yaml",
         lib="scripts/lib.py",
+        # The tables whose effect is being measured. None is `ancient()`: all
+        # four are under the 1 MB checksum threshold, so a re-emit that
+        # changes nothing triggers nothing, and the audit is the one rule here
+        # that *should* re-run when the censoring changes -- that is the
+        # question it answers, and nothing downstream reads its answer, so
+        # re-running it costs minutes and nothing else.
+        censored_mutations=str(mat_pcp_path("censored_mutations_file")),
+        censored_clades=str(mat_pcp_path("censored_clades_file")),
+        masked_nt_sites=str(mat_pcp_path("masked_nt_sites_file")),
+        reference_sequence=str(mat_pcp_path("reference_sequence_file")),
     output:
         json=f"{ARTIFACT_ROOT}/audit/{GENE}.json",
     resources:

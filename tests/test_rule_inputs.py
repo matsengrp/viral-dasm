@@ -31,6 +31,31 @@ it at import, so no walk of the import graph could reach it.
 
 **Extra declarations pass.** This asserts imports are a subset of
 declarations, not equality.
+
+**The data a script opens is checked too, where the path is one
+``config.yaml`` names.** Code reaches this repository's own files by importing
+them, and the import walk above is what finds those. It reaches mat-pcp's files
+by calling ``lib.mat_pcp_path("<key>")``, which no import walk can see: the key
+is a string, and ``config.yaml`` gives the mat-pcp root and each file's name
+rather than its content. A rule that reads one of those and does not declare it
+has the same defect -- re-emit the table, and the rule reports nothing to be
+done -- and it is the defect this file's own subject matter made easy to miss,
+``rule score`` having read six of them while declaring three.
+
+The declared side is the key as the rule's own input block spells it, or as a
+module-level helper the block names does: ``founders=founder_fastas`` is how a
+rule declares a directory's *contents*, which is what ``config.yaml`` names the
+directory for. The same one-hop boundary as above applies on the reading side:
+a key reached only through a ``lib`` helper -- ``clade_roster()`` calls
+``mat_pcp_path("clade_founders_dir")`` -- is not seen here, and a key passed as
+a variable, as ``check_params.py`` does in a loop, is not seen at all. What is
+checked is every key an entry point names as a literal.
+
+**A path written down is not a file read.** ``scripts/render_config.py``
+renders four of these paths into a training config and never opens them, so the
+rendered config follows ``config.yaml`` and not the tables. Those keys are
+listed in :data:`PATH_ONLY_KEYS` with the reason, and each listing is itself
+asserted against the script.
 """
 
 from __future__ import annotations
@@ -39,7 +64,7 @@ import ast
 import functools
 import re
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import pytest
@@ -94,6 +119,41 @@ DELIBERATE_EXEMPTIONS = {
 CONFIG_PATH = "config.yaml"
 LIB_PATH = "scripts/lib.py"
 
+#: ``lib.mat_pcp_path`` -- the one way a script names a mat-pcp file. Matched
+#: as a call with a literal first argument, so the key cannot be picked up out
+#: of a docstring or an error message that happens to quote it.
+MAT_PCP_CALL = "mat_pcp_path"
+
+
+@dataclass(frozen=True)
+class PathOnly:
+    """Keys an entry point names without opening the files they point at."""
+
+    keys: frozenset[str]
+    reason: str
+
+
+#: Per entry point, the keys whose *path* it uses and whose *content* cannot
+#: reach its output. Listing one here is a claim about the script, and
+#: ``test_path_only_keys_are_still_named`` holds the claim to the script.
+PATH_ONLY_KEYS = {
+    "scripts/render_config.py": PathOnly(
+        frozenset(
+            {
+                "censored_mutations_file",
+                "censored_clades_file",
+                "masked_nt_sites_file",
+                "reference_sequence_file",
+            }
+        ),
+        "it writes these four paths into the rendered training config as "
+        "strings and never opens the files, so the rendered config follows "
+        "`config.yaml` and not the tables. Declaring them would also put "
+        "mat-pcp's tree upstream of a `train` input, which is the false "
+        "rebuild this file exists to prevent",
+    ),
+}
+
 #: ``{input.key}`` in a shell command. The first one is the script python runs.
 INPUT_REF = re.compile(r"\{input\.([A-Za-z_][A-Za-z0-9_]*)\}")
 
@@ -132,6 +192,7 @@ class ParsedRule:
     shellcmd: str | None = None
     norun: bool = False
     run_imports: frozenset[str] = frozenset()
+    mat_pcp_keys: frozenset[str] = frozenset()
 
 
 def _to_python(path: Path) -> str:
@@ -162,6 +223,56 @@ def _literal_strings(decorator: ast.Call) -> dict[str, str]:
         if isinstance(value, str):
             found[key] = value
     return found
+
+
+def mat_pcp_keys_in(node: ast.AST) -> set[str]:
+    """The mat-pcp keys ``mat_pcp_path("<key>")`` names anywhere under ``node``.
+
+    Both spellings count: ``mat_pcp_path(...)`` where the function is imported
+    by name, and ``lib.mat_pcp_path(...)`` where the module is. A key computed
+    rather than written out is skipped, which is a real blind spot and is
+    recorded in this file's docstring.
+    """
+    keys: set[str] = set()
+    for child in ast.walk(node):
+        if not isinstance(child, ast.Call) or not child.args:
+            continue
+        func = child.func
+        called = (
+            func.attr
+            if isinstance(func, ast.Attribute)
+            else func.id
+            if isinstance(func, ast.Name)
+            else None
+        )
+        if called != MAT_PCP_CALL:
+            continue
+        try:
+            key = ast.literal_eval(child.args[0])
+        except (ValueError, TypeError):
+            continue
+        if isinstance(key, str):
+            keys.add(key)
+    return keys
+
+
+def _declared_mat_pcp_keys(
+    decorator: ast.Call, helpers: dict[str, frozenset[str]]
+) -> set[str]:
+    """The keys an ``@workflow.input(...)`` decorator declares.
+
+    Written out in the block, or reached by a module-level helper the block
+    names. The helper case is not a convenience: ``config.yaml`` gives a
+    directory, so a rule that wants its contents has to glob, and the glob is
+    the function. Resolving it is what makes ``founders=founder_fastas`` a
+    declaration of ``clade_founders_dir`` rather than an opaque callable.
+    """
+    keys = mat_pcp_keys_in(decorator)
+    values = list(decorator.args) + [k.value for k in decorator.keywords]
+    for value in values:
+        if isinstance(value, ast.Name):
+            keys |= helpers.get(value.id, frozenset())
+    return keys
 
 
 @functools.cache
@@ -199,40 +310,49 @@ def parsed_rules() -> dict[str, ParsedRule]:
             f"Teach this parser to read derived rules before adding one."
         )
 
+        # Module-level helpers first, since a rule may name one defined
+        # below it. A rule is a function carrying `@workflow.rule(name=...)`;
+        # everything else at this level is the file's own code.
+        helpers = {
+            node.name: frozenset(mat_pcp_keys_in(node))
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef) and not _rule_name(node)
+        }
+
         for node in tree.body:
             if not isinstance(node, ast.FunctionDef):
                 continue
-            name: str | None = None
+            name = _rule_name(node)
             rule = ParsedRule()
             for decorator in node.decorator_list:
                 if not isinstance(decorator, ast.Call):
                     continue
                 func = decorator.func
                 attr = func.attr if isinstance(func, ast.Attribute) else None
-                if attr == "rule":
-                    name = _literal_strings(decorator).get("name")
-                elif attr == "input":
-                    rule = ParsedRule(
-                        {**rule.inputs, **_literal_strings(decorator)},
-                        rule.shellcmd,
-                        rule.norun,
-                        rule.run_imports,
+                if attr == "input":
+                    rule = replace(
+                        rule,
+                        inputs={**rule.inputs, **_literal_strings(decorator)},
+                        mat_pcp_keys=rule.mat_pcp_keys
+                        | frozenset(_declared_mat_pcp_keys(decorator, helpers)),
                     )
                 elif attr == "shellcmd":
                     shell = _literal_strings(decorator).get("#0")
-                    rule = ParsedRule(rule.inputs, shell, rule.norun, rule.run_imports)
+                    rule = replace(rule, shellcmd=shell)
                 elif attr == "norun":
-                    rule = ParsedRule(
-                        rule.inputs, rule.shellcmd, True, rule.run_imports
-                    )
+                    rule = replace(rule, norun=True)
             if name is not None:
-                found[name] = ParsedRule(
-                    rule.inputs,
-                    rule.shellcmd,
-                    rule.norun,
-                    frozenset(_imports_in(node)),
-                )
+                found[name] = replace(rule, run_imports=frozenset(_imports_in(node)))
     return found
+
+
+def _rule_name(node: ast.FunctionDef) -> str | None:
+    """The rule a function defines, or None if it is not a rule at all."""
+    for decorator in node.decorator_list:
+        func = decorator.func if isinstance(decorator, ast.Call) else None
+        if isinstance(func, ast.Attribute) and func.attr == "rule":
+            return _literal_strings(decorator).get("name")
+    return None
 
 
 def _imports_in(node: ast.AST) -> set[str]:
@@ -331,6 +451,52 @@ def test_rule_declares_the_code_it_runs(rule: str):
         f"Snakemake tracks only declared inputs, so editing {them} leaves "
         f"this rule reporting nothing to be done and its outputs produced by "
         f"code that no longer exists. Add {them} to the rule's input block."
+    )
+
+
+@pytest.mark.parametrize("rule", sorted(ENTRY_POINTS))
+def test_rule_declares_the_mat_pcp_files_it_reads(rule: str):
+    """The same subset check, for the data side.
+
+    Unlike the import check this one can pass vacuously -- most entry points
+    name no mat-pcp file -- so what keeps it honest is
+    ``test_path_only_keys_are_still_named`` below and the fact that the keys
+    are read out of the script rather than listed here.
+    """
+    entry_point = ENTRY_POINTS[rule]
+    read = mat_pcp_keys_in(ast.parse((REPO_ROOT / entry_point).read_text()))
+    exempt = PATH_ONLY_KEYS.get(entry_point)
+    if exempt is not None:
+        read -= exempt.keys
+    missing = sorted(read - parsed_rules()[rule].mat_pcp_keys)
+    them = "it" if len(missing) == 1 else "them"
+    assert not missing, (
+        f"rule {rule} runs {entry_point}, which reads mat-pcp's "
+        f"{', '.join(missing)}, but does not declare {them}. `config.yaml` "
+        f"names the mat-pcp root and not the contents, so a re-emitted table "
+        f"leaves this rule reporting nothing to be done against an output "
+        f"built from the old one. Declare {them} with mat_pcp_path(...) in "
+        f"the input block, or -- for a directory -- with a helper that globs "
+        f"it; if the rule only writes the path down, add it to PATH_ONLY_KEYS "
+        f"with the reason."
+    )
+
+
+@pytest.mark.parametrize("entry_point", sorted(PATH_ONLY_KEYS))
+def test_path_only_keys_are_still_named(entry_point: str):
+    """An exemption describes a call the script still makes.
+
+    Without this, a key that stopped being used, or a script that started
+    opening the file instead of writing its path, would leave a standing
+    exemption behind -- and the second of those is the failure the exemption
+    would then hide.
+    """
+    named = mat_pcp_keys_in(ast.parse((REPO_ROOT / entry_point).read_text()))
+    stale = sorted(PATH_ONLY_KEYS[entry_point].keys - named)
+    assert not stale, (
+        f"{entry_point} is exempted for {stale} -- "
+        f"{PATH_ONLY_KEYS[entry_point].reason} -- but no longer names "
+        f"{'it' if len(stale) == 1 else 'them'} at all. Drop the entry."
     )
 
 
