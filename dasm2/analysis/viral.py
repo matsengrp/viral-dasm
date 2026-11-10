@@ -742,10 +742,13 @@ FITNESS_COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
 #
 # `ratio` is the raw log count ratio, and on this repository's v12 tables it is
 # *exactly* `log((actual_count + 0.5) / (expected_count + 0.5))`: checked
-# against all 9,140 clade-21J Spike rows, max absolute deviation 2.22e-16. So
-# it equals what :func:`compute_delta_fitness` recomputes at its default
-# pseudocount, and reading the shipped column instead removes the chance of a
-# pseudocount setting quietly redefining the quantity being correlated against.
+# against all 9,140 clade-21J Spike rows and equal to within one ulp, with over
+# 99% of them agreeing bit for bit. So it equals what
+# :func:`compute_delta_fitness` recomputes at its default pseudocount, and
+# reading the shipped column instead removes the chance of a pseudocount setting
+# quietly redefining the quantity being correlated against. The 0.5 is
+# load-bearing and the check discriminates: at 0.25, 0.75 or 1.0 the worst
+# disagreement is 0.41 to 0.69 rather than an ulp.
 #
 # `bayesian` shrinks that ratio toward zero using a fitted prior. It is the
 # better *estimate* of a single mutation's effect, but the shrinkage is itself

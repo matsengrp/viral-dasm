@@ -38,38 +38,7 @@ import json
 from pathlib import Path
 
 import lib
-
-#: mat-pcp writes this beside the founders when the clade set is complete. It
-#: is not a clade and must not be read as one.
-FOUNDER_SENTINEL = "founders.done"
-
-#: The pooled table's basename inside ``aamut_fitness_dir``.
-POOLED_BASENAME = "all_aamut_fitness.csv"
-
-#: Suffix mat-pcp gives each per-clade fitness table.
-FITNESS_SUFFIX = "_aamut_fitness.csv"
-
-
-def founder_clades(founders_dir: Path) -> set[str]:
-    """Clades with a founder FASTA, from ``{clade}.fa`` basenames."""
-    return {
-        path.stem
-        for path in sorted(founders_dir.glob("*.fa"))
-        if path.name != FOUNDER_SENTINEL
-    }
-
-
-def fitness_clades(fitness_dir: Path) -> set[str]:
-    """Clades with a per-clade fitness table, excluding the pooled one.
-
-    Globs the directory's own level rather than walking it, so the per-arm
-    refit subdirectories are not reached.
-    """
-    return {
-        path.name[: -len(FITNESS_SUFFIX)]
-        for path in sorted(fitness_dir.glob(f"*{FITNESS_SUFFIX}"))
-        if path.name != POOLED_BASENAME
-    }
+from lib import fitness_clades, founder_clades
 
 
 def censor_clades(clades_file: Path) -> set[str]:
@@ -126,16 +95,18 @@ def main() -> None:
         "n_clades": len(reference),
         "clades": sorted(reference),
         "roster_sizes": {name: len(roster) for name, roster in rosters.items()},
-        "passed": not failures,
-        "failures": failures,
     }
-    args.report.parent.mkdir(parents=True, exist_ok=True)
-    args.report.write_text(json.dumps(report, indent=2))
 
+    # The report is written only on success, and carries no `passed` field. A
+    # failure raises, snakemake deletes the output, and a `passed: false` file
+    # could therefore never exist -- a field whose only possible value is `true`
+    # invites a reader to check it and learn nothing.
     if failures:
         raise SystemExit(
             "clade guard failed:\n" + "\n".join(f"  - {f}" for f in failures)
         )
+    args.report.parent.mkdir(parents=True, exist_ok=True)
+    args.report.write_text(json.dumps(report, indent=2))
     print(f"clade guard passed: {len(reference)} clades agree across three rosters")
 
 
