@@ -37,6 +37,7 @@ from lib import (  # noqa: E402
 
 include: "workflow/corpus.smk"
 include: "workflow/train.smk"
+include: "workflow/score.smk"
 
 
 rule all:
@@ -50,3 +51,4 @@ rule all:
     input:
         rules.corpora.input,
         rules.models.input,
+        rules.scored.input,

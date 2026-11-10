@@ -100,6 +100,14 @@ TRAIN_MEM_MB = 24_000
 #: above the library default.
 SMOKE_MEM_MB = 8_000
 
+#: Peak RSS for one scoring pass, and for the concatenation. Measured at 1.3 GB
+#: for a full 56-clade pass (``ci-484k``, CPU, 1,425,760 rows) and 0.9 GB for
+#: the concatenation, which is streamed row group by row group and so is flat
+#: in the number of runs. Scoring reads no corpus -- 56 forward passes on one
+#: 1,273-codon sequence each -- so the row-group cache that dominates
+#: ``TRAIN_MEM_MB`` does not apply here.
+SCORE_MEM_MB = 4_000
+
 
 def run_id(model: str, corpus: str) -> str:
     """The stem every artifact of one run is named with.
