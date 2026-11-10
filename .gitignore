@@ -4,12 +4,5 @@ __pycache__/
 .snakemake/
 _ignore/
 
-# `results/` is deliberately NOT ignored. The repository's two tracked
-# directories split by direction: `data/` holds input the pipeline reads and
-# never writes, `results/` holds the small publishable tables it produces --
-# `runs.csv` and, from M5 on, one CSV per figure panel. Mutation counts,
-# fitness effects and selection factors are publishable; raw GISAID sequences
-# are not, and nothing here carries one. Everything large or intermediate --
-# corpora, checkpoints, the scored table, logs -- goes to the artifact root on
-# the cluster, which is outside this tree entirely.
+# `results/` is deliberately not ignored; see README's Layout for why.
 *.egg-info/

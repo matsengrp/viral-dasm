@@ -48,8 +48,18 @@ rule declares a directory's *contents*, which is what ``config.yaml`` names the
 directory for. The same one-hop boundary as above applies on the reading side:
 a key reached only through a ``lib`` helper -- ``clade_roster()`` calls
 ``mat_pcp_path("clade_founders_dir")`` -- is not seen here, and a key passed as
-a variable, as ``check_params.py`` does in a loop, is not seen at all. What is
-checked is every key an entry point names as a literal.
+a variable is not seen at all. What is checked is every key the code a rule
+actually runs names as a literal.
+
+That second blind spot has already cost something, so it is worth naming.
+``lib.master_table_path`` picks its key out of a dict keyed by era, so no
+script anywhere names ``master_table_file`` as a literal, and ``build_neutral``
+and ``verify_neutral`` both read the fitted rate tables while declaring
+neither. This check did not catch it -- a review did -- and the declarations
+are now written out by hand. ``check_params.py`` loops over
+``TRAINING_CONFIG_FILES`` the same way, which is harmless only because it
+compares paths rather than reading files. Resolving one hop into an imported
+module would close both; it is not done here.
 
 **A path written down is not a file read.** ``scripts/render_config.py``
 renders four of these paths into a training config and never opens them, so the
@@ -454,6 +464,43 @@ def test_rule_declares_the_code_it_runs(rule: str):
     )
 
 
+def _run_block_functions(rule: ParsedRule, entry_point: str) -> set[str] | None:
+    """The functions a ``run:`` block imports from its entry point, or None.
+
+    None for a ``shell:`` rule, which runs the module as a script and so
+    reaches its ``main()``. For a ``run:`` rule the distinction is load-bearing:
+    ``rule render_era_map`` imports ``build_era_map`` and ``render_era_config``
+    from ``scripts/write_era_config.py`` and never calls its ``main()``, which
+    is the only place that module reads ``era_fit_summary_file``. Scanning the
+    whole module would require the rule to declare a file it cannot read, and a
+    declaration like that is a false rebuild trigger -- the defect this file
+    exists to prevent, pointing the other way.
+    """
+    if rule.shellcmd is not None:
+        return None
+    module = Path(entry_point).stem
+    return {
+        name.split(".", 1)[1]
+        for name in rule.run_imports
+        if name.startswith(f"{module}.")
+    }
+
+
+def mat_pcp_keys_read_by(rule_name: str) -> set[str]:
+    """The mat-pcp keys the code this rule actually runs names as literals."""
+    rule = parsed_rules()[rule_name]
+    entry_point = ENTRY_POINTS[rule_name]
+    tree = ast.parse((REPO_ROOT / entry_point).read_text())
+    wanted = _run_block_functions(rule, entry_point)
+    if wanted is None:
+        return mat_pcp_keys_in(tree)
+    keys: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name in wanted:
+            keys |= mat_pcp_keys_in(node)
+    return keys
+
+
 @pytest.mark.parametrize("rule", sorted(ENTRY_POINTS))
 def test_rule_declares_the_mat_pcp_files_it_reads(rule: str):
     """The same subset check, for the data side.
@@ -464,7 +511,7 @@ def test_rule_declares_the_mat_pcp_files_it_reads(rule: str):
     are read out of the script rather than listed here.
     """
     entry_point = ENTRY_POINTS[rule]
-    read = mat_pcp_keys_in(ast.parse((REPO_ROOT / entry_point).read_text()))
+    read = mat_pcp_keys_read_by(rule)
     exempt = PATH_ONLY_KEYS.get(entry_point)
     if exempt is not None:
         read -= exempt.keys
