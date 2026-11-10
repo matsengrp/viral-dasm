@@ -425,3 +425,85 @@ mask file, and the training templates censor with that same key, so the codon
 branch read a file this pipeline does not configure. Auditing a mask no run
 uses would over-report the footprint while looking like a passing gate, so the
 branch is gone and the audit reads the key the templates name.
+
+## What came back for scoring (#16)
+
+The cuts above were traced against **training**, which never reads a fitness
+table. Scoring a finished checkpoint against mat-pcp's effects is a third code
+path, and `dasm2/analysis/` was absent entirely. Three files came from the same
+source commit:
+
+| module | upstream | here | what was taken |
+|---|---:|---:|---|
+| `analysis/__init__.py` | 1 | 1 | verbatim |
+| `analysis/viral.py` | 1,077 | 1,089 | every definition; comments revised |
+| `analysis/viral_fitness_eval.py` | 2,711 | 407 | 12 of its definitions |
+
+`viral.py` arrives whole because it is frame-in, frame-out: its only `dasm2`
+import is `sequence.constants`, it reads no path and loads no model, and the
+figure readouts need the same functions the scoring rule does. Twelve of its
+definitions belong to readouts this repository has not written yet; they are
+kept rather than cut so the file still diffs against the source commit.
+
+`viral_fitness_eval.py` is pruned hard, and along the two seams the rest of
+this fork already established.
+
+**No manifest resolution.** `MatPcpRun` and `FitnessSource` resolve data-central
+*nicknames* — `get_viral_pcp_config`, `list_fitness_datasets`, and a
+`pcp_nickname(gene, clade)` that composes `s2SpikeGisaid21J-2026-08-06-v12` — so
+vendoring them would restore the `viral_fitness_registry`, `discovery` and
+`manifests` modules the third cut removed and reverse `seam_identity`'s
+contract. `config.yaml` names the fitness directory, the pooled table and the
+founder directory; `scripts/check_clades.py` reads the clade roster out of those
+directories rather than restating it.
+
+**No checkpoint discovery.** `discover_checkpoints` assumes a
+`{dir}/{gene}/{run_id}/` layout and classifies `dasm2`'s own filenames, treating
+an unrecognised name as a legacy final save. `lib.select_checkpoint` already
+knows this pipeline's layout and raises instead of guessing.
+
+The run axis, the shift families and the effect-error families are not here.
+They compute per-figure readouts, so they belong with the figures.
+
+### The comment pass
+
+Measured the same way as the fourth cut: comparing the two files' definitions
+as ASTs with docstrings stripped, **all 34 are code-identical to the source
+commit** — 22 in `viral.py`, 12 in `viral_fitness_eval.py`. Every change is a
+comment or a docstring.
+
+No private issue reference survived: `viral.py` carried none, and of
+`viral_fitness_eval.py`'s nine, two sat in its module docstring and six in
+definitions that were not taken. The ninth named an experiment's site-class
+split, and is now stated as what the argument does.
+
+Three kinds of comment were rewritten rather than dropped.
+
+**Measurements that replicate here were re-measured here.** `FitnessEstimate`
+justified reading mat-pcp's shipped `delta_fitness_ratio` instead of
+recomputing it, on the strength of a v9 check: 9,140 clade-21J Spike rows, max
+deviation 8.9e-16, and the two estimates correlating at 0.984. Re-run against
+this repository's own v12 tables the same three numbers are 9,140 rows,
+2.22e-16 and 0.9825. The claim is this repository's now, not a number carried
+in from a dataset it does not read.
+
+**Data-vintage history became what v12 carries.** The alias table explained
+itself through mat-pcp's v1/v4/v9 schema changes. What matters here is narrower
+and sharper: the v12 tables spell the count column `expected_count` while every
+function below reads `predicted_count`, and `filter_merged_fitness` gates on a
+count column only `if ... in df.columns` — so an un-normalized frame passes the
+count filter on `actual_count` alone, with no error and a plausible row count.
+The comment now says that.
+
+**One rationale was false here.** `SelectionFactorSource._model` takes the
+dense-attention fallback because "these checkpoints were trained with flash
+attention". Every config in this repository sets `flash_attention: false`, so
+the fallback is belt and braces rather than the load path, and the comment says
+so.
+
+Two comments gained a warning the upstream file states elsewhere. The cache in
+`SelectionFactorSource` is keyed `(gene, run_id, clade)` and carries no
+sequence, so asking it for two parent haplotypes under one clade returns the
+first twice — silently. And `merge_and_filter` is an **inner** join, while the
+table this repository writes is a left join from the model grid; the docstring
+now says which of the two a caller is getting.

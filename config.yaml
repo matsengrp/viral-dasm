@@ -40,6 +40,27 @@ mat_pcp:
     # read from here rather than restated, so the corpus and the rate tables
     # cannot drift apart.
     era_fit_summary_file: glm/era_fit_summary.csv
+    # The counts-based amino-acid fitness effects every scored model is read
+    # against, and the founders the models are scored *on*.
+    #
+    # Full depth for every arm, the capped ones included. For the subsampling
+    # figure the full-depth counts estimate is the yardstick a thinned-corpus
+    # model is measured against, so the per-arm refits that also live under
+    # `aamut_fitness/` (`cap_5000_0/`, `cap_20000_0/`, `cap_50000_0/`) are a
+    # different comparison and are not read here. That is why the directory is
+    # globbed for `*_aamut_fitness.csv` at its top level rather than walked.
+    aamut_fitness_dir: aamut_fitness
+    # The clade-pooled table, which has no `cluster` column and carries
+    # `source_clade` instead. Named separately because it sits inside
+    # `aamut_fitness_dir` and the per-clade glob has to exclude it: its column
+    # order differs, so a glob that swept it in would read serine rows as
+    # clade-founder rows.
+    aamut_fitness_pooled_file: aamut_fitness/all_aamut_fitness.csv
+    # One `{clade}.fa` per clade. The clade roster is read from these files
+    # rather than restated anywhere, and `scripts/check_clades.py` requires the
+    # founders, the per-clade fitness tables and `censored_clades_file` to name
+    # the same set.
+    clade_founders_dir: clade_founders/S
     # The run's axes, spelled out rather than parsed back out of `manifest`.
     # They appear in every neutral archive's stem and in the era map's
     # `neutral_model_name`, which is the only record in a finished Parquet of
