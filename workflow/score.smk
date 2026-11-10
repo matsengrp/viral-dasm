@@ -12,9 +12,10 @@ A run is scored from its ``training_complete.done`` marker rather than from a
 checkpoint path, because ``lib.select_checkpoint`` resolves the checkpoint by
 glob and no rule declares one as an output.
 
-GISAID-derived: everything here is a per-site slice of GISAID counts joined to
-model predictions, so it stays under the artifact root. Nothing lands in
-tracked ``data/``.
+The table stays under the artifact root because of its size -- 1.4M rows per
+run -- not because of the data rules. Counts, fitness effects and selection
+factors are publishable; what M5 commits to tracked ``results/`` is one CSV
+per figure panel, drawn from this table.
 """
 
 from lib import FITNESS_SUFFIX

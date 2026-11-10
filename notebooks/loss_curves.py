@@ -49,7 +49,7 @@ def _(mo):
     the descent is visible, but the comparable number is
     `train_loss_eval_mode`, which the `train_eval` rule computes with a
     separate eval-mode pass over the training split once a run finishes. It
-    lands in `data/runs.csv`, not here.
+    lands in `results/runs.csv`, not here.
 
     **GISAID**: reads training logs under the artifact root. Keep any export
     of this notebook on the cluster.

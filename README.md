@@ -93,7 +93,7 @@ so the same row order is the same split.
 ## Training the models
 
 `snakemake models` trains the paper's seven models and writes one row per run
-into [`data/runs.csv`](data/runs.csv).
+into [`results/runs.csv`](results/runs.csv).
 
 | rule | what it produces |
 |---|---|
@@ -103,7 +103,7 @@ into [`data/runs.csv`](data/runs.csv).
 | `train` | one run, on one claimed GPU, to the learning-rate floor |
 | `read_run` | that run's endpoint, read out of its own log |
 | `check_run` | the gate: a run that stopped anywhere else fails here |
-| `runs_table` | the seven rows, gathered into `data/runs.csv` |
+| `runs_table` | the seven rows, gathered into `results/runs.csv` |
 
 **Seven runs, four architectures.** Three transformer sizes and the
 context-independent baseline at full depth, where the size ladder and the
@@ -140,7 +140,7 @@ loss. So two runs at one seed differing only in it descend identically, and
 the coarser one is a prefix of the finer one. At 0, the saved best is the
 validation curve's own minimum, and the two reference campaigns' thresholds
 (1e-4 and 1e-3) are recovered by replaying their rule over the run's recorded
-evaluations -- which is what `data/runs.csv`'s `*_at_min_delta_*` columns are.
+evaluations -- which is what `results/runs.csv`'s `*_at_min_delta_*` columns are.
 
 **One run per card, claimed by the training process.** `scripts/gpu_slot.py`
 ranks the cards by use, drops any carrying a process this user does not own --

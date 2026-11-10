@@ -1,6 +1,6 @@
 """Gather the seven per-run rows into the one table this repository commits.
 
-``data/runs.csv`` is aggregate summary statistics -- one row per run, every
+``results/runs.csv`` is aggregate summary statistics -- one row per run, every
 number read from that run's own log -- so it is publishable and tracked. The
 checkpoints it names stay under the artifact root until M7 decides what is
 released; the table records each one's path and sha256 so that decision has
