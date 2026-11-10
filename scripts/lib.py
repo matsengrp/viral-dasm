@@ -106,6 +106,14 @@ ARTIFACT_ROOT = Path(
 )
 GENE = CONFIG["mat_pcp"]["gene"]
 
+#: Where every process that takes a card writes its lock. One name, because the
+#: guarantee is that a training run and a scoring pass can never both hold one
+#: GPU, and that guarantee is only as strong as the agreement about the
+#: directory. ``scripts/train.py`` and ``scripts/train_eval.py`` still spell it
+#: themselves; they are frozen for the duration of the training campaign and
+#: adopt this on the first edit after it.
+GPU_LOCK_DIR = ARTIFACT_ROOT / ".gpu_locks"
+
 #: The mat-pcp run's axes. They appear in every neutral archive's stem and in
 #: the era map's ``neutral_model_name``, so they are read from ``config.yaml``
 #: rather than spelled a second time in the scripts that build those names.
@@ -165,6 +173,13 @@ SCORING_INPUT_FILES = frozenset(
     }
 )
 
+#: Suffix mat-pcp gives each per-clade amino-acid fitness table. Here rather
+#: than in the two scripts that glob for it, because ``check_clades.py``
+#: validates a roster that ``score_run.py`` then reads back by this suffix: two
+#: spellings could drift and leave the guard passing while the scorer opens a
+#: file that does not exist.
+FITNESS_SUFFIX = "_aamut_fitness.csv"
+
 
 def mat_pcp_path(key: str) -> Path:
     """One of the mat-pcp files ``config.yaml`` names.
@@ -181,6 +196,40 @@ def mat_pcp_path(key: str) -> Path:
             f"{key!r} is not a mat-pcp file; expected one of {sorted(allowed)}"
         )
     return Path(block["root"]) / block[key]
+
+
+def founder_clades(founders_dir: Path) -> set[str]:
+    """Clades with a founder FASTA, from ``{clade}.fa`` basenames."""
+    return {path.stem for path in founders_dir.glob("*.fa")}
+
+
+def clade_roster() -> list[str]:
+    """The clades to score, read from mat-pcp's founder FASTAs.
+
+    One function, because ``scripts/check_clades.py`` requires this roster to
+    match the fitness tables and the censor roster before any scoring job runs,
+    and a guard that validated a different reading of the directory from the one
+    the scorer uses would be no guard at all.
+    """
+    return sorted(founder_clades(mat_pcp_path("clade_founders_dir")))
+
+
+def fitness_clades(fitness_dir: Path) -> set[str]:
+    """Clades with a per-clade fitness table, excluding the pooled one.
+
+    Globs the directory's own level rather than walking it, so the per-arm refit
+    subdirectories are not reached. The pooled table has to be excluded by name:
+    ``all_aamut_fitness.csv`` ends in :data:`FITNESS_SUFFIX` like any clade's,
+    and its column order differs -- field 2 is ``clade_founder_aa`` where the
+    per-clade files carry ``gene`` -- so reading it as a clade reads a
+    single-letter residue as a gene name.
+    """
+    pooled = mat_pcp_path("aamut_fitness_pooled_file").name
+    return {
+        path.name[: -len(FITNESS_SUFFIX)]
+        for path in fitness_dir.glob(f"*{FITNESS_SUFFIX}")
+        if path.name != pooled
+    }
 
 
 def master_table_path(era: str | None) -> Path:

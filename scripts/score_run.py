@@ -34,6 +34,7 @@ predictions. It goes to the artifact root on the cluster, never to tracked
 from __future__ import annotations
 
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -41,9 +42,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 # `lib` first, so this repository's root is on `sys.path` before anything
 # imports `dasm2` and the vendored fork wins over an editable install.
 from lib import (
-    ARTIFACT_ROOT,
+    FITNESS_SUFFIX,
     GENE,
+    GPU_LOCK_DIR,
     assert_dasm2_is_this_repo,
+    clade_roster,
     mat_pcp_path,
     select_checkpoint,
 )
@@ -74,10 +77,6 @@ from dasm2.sequence.masking import (
     parse_masked_nt_sites_file,
 )
 
-#: The same directory `scripts/train.py` and `scripts/train_eval.py` lock, so a
-#: scoring pass and a training run can never both take one card.
-GPU_LOCK_DIR = Path(ARTIFACT_ROOT) / ".gpu_locks"
-
 #: Columns carried over from the per-clade fitness table.
 PER_CLADE_VALUE_COLUMNS = [
     "actual_count",
@@ -87,7 +86,9 @@ PER_CLADE_VALUE_COLUMNS = [
     "uncertainty",
 ]
 
-#: Columns carried over from the clade-pooled table, suffixed on arrival.
+#: Columns carried over from the clade-pooled table. The four that collide with
+#: :data:`PER_CLADE_VALUE_COLUMNS` arrive suffixed ``_all``; ``source_clade``
+#: has no per-clade counterpart, so it arrives under its own name.
 POOLED_VALUE_COLUMNS = [
     "actual_count",
     "predicted_count",
@@ -95,9 +96,6 @@ POOLED_VALUE_COLUMNS = [
     "delta_fitness_bayesian",
     "source_clade",
 ]
-
-#: Suffix mat-pcp gives each per-clade fitness table.
-FITNESS_SUFFIX = "_aamut_fitness.csv"
 
 
 def founder_aa_sequence(clade: str, gene: str) -> str:
@@ -123,28 +121,25 @@ def founder_aa_sequence(clade: str, gene: str) -> str:
     return aa
 
 
+def codon_sites_of(nt_indices: Iterable[int]) -> set[int]:
+    """The 1-indexed codon sites a set of 0-indexed nucleotide indices touches.
+
+    mat-pcp flags nucleotides; this table is keyed by ``aa_site``. One flagged
+    nucleotide makes its whole codon unreadable as an amino-acid substitution,
+    so the mask is widened to the codon -- correct at this granularity even
+    though it would be too coarse for filtering PCPs. The ``+ 1`` is the
+    0-indexed-to-1-indexed step, and it lives here once because an off-by-one
+    applied to one of the two masks and not the other would shift a whole
+    column's worth of flags by a site with nothing raising.
+    """
+    return {int(index) // 3 + 1 for index in nt_indices}
+
+
 def globally_masked_sites() -> set[int]:
-    """Codon sites the global nucleotide mask covers.
-
-    ``parse_masked_nt_sites_file`` returns 0-indexed nucleotide indices;
-    ``aa_site`` is 1-indexed. One flagged nucleotide makes its whole codon
-    unreadable as an amino-acid substitution, so the mask is widened to the
-    codon -- correct at this granularity even though it would be too coarse for
-    filtering PCPs.
-    """
-    nt_indices = parse_masked_nt_sites_file(mat_pcp_path("masked_nt_sites_file"))
-    return {index // 3 + 1 for index in nt_indices}
-
-
-def clade_roster() -> list[str]:
-    """Clades to score, from the founder FASTAs.
-
-    ``scripts/check_clades.py`` has already required this roster to match the
-    fitness tables and the censor roster, so reading any one of the three gives
-    the same answer.
-    """
-    founders = mat_pcp_path("clade_founders_dir")
-    return sorted(path.stem for path in founders.glob("*.fa"))
+    """Codon sites the global nucleotide mask covers."""
+    return codon_sites_of(
+        parse_masked_nt_sites_file(mat_pcp_path("masked_nt_sites_file"))
+    )
 
 
 def per_clade_fitness(clade: str, gene: str, founder_aa: str) -> pd.DataFrame:
@@ -230,21 +225,17 @@ def main() -> None:
     parser.add_argument("--corpus", required=True)
     parser.add_argument("--run-dir", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--device", default="cuda")
-    parser.add_argument(
-        "--clades",
-        default=None,
-        help=(
-            "Comma-separated clades to score instead of the whole roster. For "
-            "the fast test only; a partial table is not the figure input."
-        ),
-    )
+    parser.add_argument("--device", default="cuda", choices=("cuda", "cpu"))
     args = parser.parse_args()
 
+    # No `--clades`: there is no partial-table mode. The whole roster or
+    # nothing, because a subset written to the rule's declared output is a
+    # figure input that looks complete and is not. The tests that score two
+    # clades call `score_clade` directly.
     gene = GENE
     checkpoint = select_checkpoint(args.run_dir)
     run_id = f"{args.model}_{args.corpus}"
-    clades = args.clades.split(",") if args.clades else clade_roster()
+    clades = clade_roster()
 
     masked = globally_masked_sites()
     censor_table = load_censor_table(
@@ -276,16 +267,15 @@ def main() -> None:
                         pooled=pooled,
                         masked=masked,
                         censored=censored_codon_sites(spec),
-                        censored_directional={
-                            int(idx) // 3 + 1 for idx in spec.directional[:, 0]
-                        },
+                        censored_directional=codon_sites_of(spec.directional[:, 0]),
                     )
                 )
-                # The per-clade frames are kept but the weights are not needed
-                # between clades; the cache would otherwise hold every clade's
-                # [L, 20] tensor for the whole pass.
-                source._factors.clear()
-                source._frames.clear()
+            # The source's per-clade caches are left alone. They hold a
+            # [1273, 20] tensor and its frame per clade, about 6 MB over the
+            # whole roster against a 1.3 GB pass, and each clade is visited
+            # once, so there is nothing to free and nothing to invalidate.
+            # `release()` drops the resident weights, which are the part worth
+            # freeing.
             return pd.concat(frames, ignore_index=True)
         finally:
             source.release()

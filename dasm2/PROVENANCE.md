@@ -481,11 +481,23 @@ Three kinds of comment were rewritten rather than dropped.
 
 **Measurements that replicate here were re-measured here.** `FitnessEstimate`
 justified reading mat-pcp's shipped `delta_fitness_ratio` instead of
-recomputing it, on the strength of a v9 check: 9,140 clade-21J Spike rows, max
-deviation 8.9e-16, and the two estimates correlating at 0.984. Re-run against
-this repository's own v12 tables the same three numbers are 9,140 rows,
-2.22e-16 and 0.9825. The claim is this repository's now, not a number carried
-in from a dataset it does not read.
+recomputing it, on the strength of a v9 check: 9,140 clade-21J Spike rows, a
+max deviation of 8.9e-16 from the pseudocount formula, and the two estimates
+correlating at 0.984. Re-run against this repository's own v12 tables: 9,140
+rows, agreement to within one ulp, and 0.9825. The claim is this repository's
+now, not a number carried in from a dataset it does not read.
+
+The middle number is stated as a tolerance rather than as a figure, because a
+max-over-9,140 rounding residual carries no information beyond "equal to float
+precision" — 8.9e-16 and 2.22e-16 are not two measurements of the same thing,
+and printing both invites a reader to think a precision moved. What is worth
+recording is that the comparison discriminates at all: at pseudocount 0.25,
+0.75 or 1.0 the worst disagreement is 0.41 to 0.69, so an ulp is a real result
+about the 0.5 and not a vacuous one. The row count is equal across versions for
+a structural reason, not because the number was copied: the row set is the
+single-nucleotide-accessible (site, mutant_aa) pairs off the 21J Spike founder,
+which no count filter touches, while the depth behind it did change (total
+expected count 485,015 in v9 against 525,368 in v12).
 
 **Data-vintage history became what v12 carries.** The alias table explained
 itself through mat-pcp's v1/v4/v9 schema changes. What matters here is narrower
