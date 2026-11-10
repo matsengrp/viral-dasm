@@ -153,6 +153,18 @@ NEUTRAL_BUILD_FILES = frozenset(
     }
 )
 
+#: The mat-pcp inputs the scoring stage reads. Two of the three are
+#: directories: the clade roster is read from their contents rather than
+#: restated in `config.yaml`, so adding a clade to the mat-pcp run cannot leave
+#: this pipeline scoring 56 of 57.
+SCORING_INPUT_FILES = frozenset(
+    {
+        "aamut_fitness_dir",
+        "aamut_fitness_pooled_file",
+        "clade_founders_dir",
+    }
+)
+
 
 def mat_pcp_path(key: str) -> Path:
     """One of the mat-pcp files ``config.yaml`` names.
@@ -163,7 +175,7 @@ def mat_pcp_path(key: str) -> Path:
             or building a neutral model from a table nobody meant.
     """
     block = CONFIG["mat_pcp"]
-    allowed = TRAINING_CONFIG_FILES | NEUTRAL_BUILD_FILES
+    allowed = TRAINING_CONFIG_FILES | NEUTRAL_BUILD_FILES | SCORING_INPUT_FILES
     if key not in allowed:
         raise KeyError(
             f"{key!r} is not a mat-pcp file; expected one of {sorted(allowed)}"
