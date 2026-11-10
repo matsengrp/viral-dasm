@@ -121,6 +121,10 @@ rule score:
         script="scripts/score_run.py",
         gpu_slot="scripts/gpu_slot.py",
         lib="scripts/lib.py",
+        # The founder reader, shared with the panel rules so that editing one
+        # side does not mark the other's outputs out of date. It is what reads
+        # `dasm2/io.py`, `conversion.py` and `scov2_rates.py` below.
+        founders="scripts/founders.py",
         config="config.yaml",
         guard=CLADE_GUARD,
         analysis_viral="dasm2/analysis/viral.py",
