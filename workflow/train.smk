@@ -38,6 +38,7 @@ from runs import (  # noqa: E402
     MAX_TRAIN_STEPS,
     MODEL_NAMES,
     RUNS,
+    SCORE_MEM_MB,
     SMOKE_EVAL_EVERY_STEPS,
     SMOKE_MEM_MB,
     SMOKE_STEPS,
