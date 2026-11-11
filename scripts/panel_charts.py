@@ -239,9 +239,19 @@ DMS_PREDICTOR_COLORS: dict[str, str] = {
     "DASM": DASM_PURPLE,
     "per-clade counts": COUNTS_GREY,
     "pooled counts": "#b0975f",
-    "BLOSUM62": "#5b8c7b",
-    "leaf frequency": "#3d7ea6",
+    "BLOSUM62": "#9ec4b8",
+    "leaf frequency": "#1f4e79",
 }
+
+#: Measured CIELAB separation of :data:`DMS_PREDICTOR_COLORS`, worst pair, as
+#: seen normally and simulated for deuteranopia: 28.7 and 21.3. The five
+#: lightnesses are 76, 63, 52, 33 and 32, which is the property that does the
+#: work -- three muted mid-tones at one lightness read as one colour to a
+#: deuteranope however different their hues are. An earlier palette put BLOSUM62
+#: at #5b8c7b and the leaf predictor at #3d7ea6, both near DASM purple's L* of
+#: 52, and the DASM/BLOSUM62 pair simulated to 12.6, which is indistinguishable.
+#: A new predictor added here should be checked the same way rather than chosen
+#: by hue.
 
 #: What each predictor id is called on a chart. The ids are join keys and CSV
 #: values -- `scripts/dms_models.py` writes them and `results/panels/dms/`
@@ -614,7 +624,16 @@ def homolog_correlation_panel(
                 "homolog:N",
                 title=None,
                 sort=list(homolog_order),
-                axis=alt.Axis(labelFontSize=PANEL_FONT_SIZE, labelAngle=-40),
+                axis=alt.Axis(
+                    labelFontSize=PANEL_FONT_SIZE,
+                    # -45 with the label right-aligned puts each label's end
+                    # under its own tick. Rotation is needed at all because a
+                    # homolog band is about a third of `DMS_BAR_WIDTH` and
+                    # "KP.3.1.1" is wider than that at this type size.
+                    labelAngle=-45,
+                    labelAlign="right",
+                    labelBaseline="middle",
+                ),
             ),
             xOffset=alt.XOffset("predictor:N", sort=predictors),
             y=alt.Y(f"{metric}:Q", title=DMS_BAR_METRIC_TITLES[metric], axis=axis),
@@ -630,6 +649,12 @@ def homolog_correlation_panel(
                     labelFontSize=PANEL_FONT_SIZE,
                     orient="top",
                     direction="horizontal",
+                    # Two columns, not one row. Vega sizes the saved canvas to
+                    # fit the legend, so a single row of four predictor names at
+                    # this type size is wider than the three cells and would
+                    # widen the image -- which misaligns the panel against its
+                    # neighbours in the composed figure.
+                    columns=2,
                 ),
             ),
             column=alt.Column(
