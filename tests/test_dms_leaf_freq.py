@@ -43,6 +43,7 @@ from founders import founder_aa_sequence
 
 from dasm2.neutral.scov2_rates import gene_nt_span
 from dasm2.sequence.constants import AA_STR_SORTED, STOP_CODONS
+from dasm2.sequence.conversion import translate_codon
 
 #: The clade panel C is drawn on, and the one the real-data checks here use. Its
 #: homolog is `panel_spec.SCATTER_HOMOLOG`'s, so a repoint moves both.
@@ -420,3 +421,63 @@ def test_the_written_table_carries_no_sample_name():
     assert not re.search(r"[^,\n]*\|EPI_ISL_\d+\|\d{4}-\d{2}-\d{2}", text)
     # And every field past the header is an integer, so no name of any form fits.
     assert re.fullmatch(r"[\d,\n]+", text[text.index("\n") + 1 :])
+
+
+@needs_mat_pcp
+def test_the_optimised_tally_equals_a_full_count():
+    """The optimisation itself, against a tally that counts every site.
+
+    `LeafTally` counts only the codons a leaf's path touches and fills the rest
+    in at the end. Asserting that its own rows sum to the leaf count is algebra,
+    since it is built that way -- what is worth checking is that the shortcut
+    agrees with reconstructing and translating each leaf whole.
+    """
+    sample = 150
+    optimised = dms_leaf_freq.LeafTally(CLADE)
+    lines = []
+    with dms_leaf_freq.sample_paths_path(CLADE).open() as handle:
+        for index, line in enumerate(handle):
+            if index >= sample:
+                break
+            lines.append(line)
+            optimised.add_leaf(line)
+
+    # The same leaves, counted the slow way: apply the path, translate all 1,273
+    # codons, tally every one.
+    start = gene_nt_span(lib.GENE)[0]
+    root = optimised.root_nt
+    brute = np.zeros((optimised.n_sites, len(AA_STR_SORTED)), dtype=np.int64)
+    for line in lines:
+        applied = {}
+        for _reference, site, mutant in dms_leaf_freq.iter_leaf_mutations(line):
+            offset = site - start
+            if 0 <= offset < len(root):
+                applied[offset] = mutant
+        sequence = [applied.get(i, base) for i, base in enumerate(root)]
+        for codon_site in range(optimised.n_sites):
+            residue = translate_codon("".join(sequence[3 * codon_site :][:3]))
+            if residue in AA_STR_SORTED:
+                brute[codon_site, AA_STR_SORTED.index(residue)] += 1
+
+    fast = optimised.frame()[list(AA_STR_SORTED)].to_numpy()
+    assert (fast == brute).all(), (
+        f"the deviation shortcut disagrees with a full count at "
+        f"{int((fast != brute).sum())} cells"
+    )
+    # Not a vacuous agreement: these leaves do deviate from 19A somewhere.
+    assert int(optimised.deviations.sum()) > 0
+
+
+@needs_mat_pcp
+def test_a_reordered_residue_column_is_refused(tmp_path, tally):
+    """The lookup is positional in both axes, not only in the row index."""
+    table = tally.frame()
+    reordered = tmp_path / "reordered.csv"
+    swapped = list(AA_STR_SORTED)
+    swapped[0], swapped[1] = swapped[1], swapped[0]
+    table[[dms_leaf_freq.SITE_COLUMN, *swapped]].to_csv(reordered, index=False)
+    # `read_counts` projects back to `AA_STR_SORTED`, so the frame it returns is
+    # the same whichever order the file carried.
+    assert dms_leaf_freq.read_counts(reordered).equals(
+        table.set_index(dms_leaf_freq.SITE_COLUMN)
+    )

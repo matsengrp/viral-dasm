@@ -193,20 +193,13 @@ class LeafTally:
         deviated = counts.sum(axis=1) + self.unreadable
         for site, residue in enumerate(self.root_aa):
             counts[site, AA_STR_TO_IDX[residue]] += self.n_leaves - deviated[site]
-        # Every site's residues sum to the leaf count, less the leaves whose
-        # codon there read outside the alphabet. This is the identity the
-        # deviation optimisation stands on, and the one assertion here that a
-        # mistake in it could actually break -- a negative-count guard cannot
-        # fire, since each leaf adds at most one increment per site by
-        # construction.
-        totals = counts.sum(axis=1) + self.unreadable
-        if not (totals == self.n_leaves).all():
-            bad = int(next(iter((totals != self.n_leaves).nonzero()[0])))
-            raise ValueError(
-                f"{self.clade}: site {bad + 1} tallies {int(totals[bad])} leaves "
-                f"against {self.n_leaves}, so a leaf was counted at more than one "
-                f"residue there or at none"
-            )
+        # No runtime check here. Every site's residues sum to the leaf count less
+        # its unreadable codons -- but `counts` is *built* to satisfy that, so
+        # asserting it is algebra rather than a test of anything, exactly as a
+        # negative-count guard would be: each leaf adds at most one increment per
+        # site because the codon sites it touches are a set. What can be checked
+        # is the optimisation itself, against a tally that counts every site of
+        # every leaf, and `tests/test_dms_leaf_freq.py` does that on a sample.
         table = pd.DataFrame(counts, columns=list(AA_STR_SORTED))
         table.insert(0, SITE_COLUMN, np.arange(1, self.n_sites + 1))
         return table
@@ -254,7 +247,10 @@ def read_counts(path: Path) -> pd.DataFrame:
             f"{path}: {SITE_COLUMN} is not 1..{len(table)} in order, which is what "
             f"the per-cell lookup indexes by position"
         )
-    return table.set_index(SITE_COLUMN)
+    # Projected, not just checked: `counts_at` indexes both axes positionally, so
+    # a CSV carrying the right headers in the wrong order -- or an extra column --
+    # would return some other residue's counts without raising.
+    return table[[SITE_COLUMN, *AA_STR_SORTED]].set_index(SITE_COLUMN)
 
 
 def counts_at(counts: pd.DataFrame, sites, residues):

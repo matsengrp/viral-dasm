@@ -326,7 +326,7 @@ DMS_CORRELATION_PANELS = (
 DMS_PROBABILITY_PANELS = ("panel_d_fitness_vs_probability",)
 
 
-#: Panel C's predictors, as a rule's ``{model}`` wildcard domain. Spelled here
+#: Panel C's predictors, in the order the panel groups them. Spelled here
 #: rather than imported from `scripts/dms_models.py`, which pulls pandas,
 #: Biopython and `dasm2`: this module is stdlib-plus-`lib` so that
 #: `workflow/figures.smk` stays cheap to parse. `tests/test_dms_models.py` pins

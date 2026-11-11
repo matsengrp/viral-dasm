@@ -196,8 +196,10 @@ already did the forward passes, so a panel rule reads
 | `agreement_mutations` | panels A, B and D: one mutation across the clades, one clade's cloud, the shift grid |
 | `agreement_ladders` | panels C and E: both correlations against the count cutoff |
 | `dms_leaf_counts` | one clade's per-site residue tally over its own tree leaves |
-| `dms_predictor_scores` | one reference predictor's score for every cell one assay measured |
+| `dms_blosum_scores` | BLOSUM62's score for every cell one assay measured |
+| `dms_leaf_scores` | the leaf frequency's score for every cell one assay measured |
 | `dms_predictor_summary` | `fig:dms` panel C's table: each predictor against the DMS, per homolog and stratum |
+| `dms_predictors` | panel C itself, drawn from that table |
 
 Each runs per `{selection}`, which names the models it draws. `figure` is
 `dasm-1077k` -- the largest transformer, which is what every panel of the paper

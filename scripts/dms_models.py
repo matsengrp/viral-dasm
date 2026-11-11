@@ -80,6 +80,22 @@ JOIN_KEY = ("aa_site", "mutant_aa")
 #: `scripts/founders.py` length-checks every founder against the same number.
 GENE_AA_LENGTH = GENE_NT_LENGTH[GENE] // 3
 
+
+def declared_cell_strata(strata: tuple[str, ...]) -> set[str]:
+    """The per-cell strata a manifest's declaration covers.
+
+    ``dms.ALL`` is a union label that no cell carries -- ``melt_dms`` labels every
+    cell ``single_nt`` or ``multi_nt`` -- so a predictor declaring it means both,
+    and comparing the declaration against a cell's own label needs the expansion.
+    Without it the natural way to say "I score everything" is refused by
+    :func:`join_scores`.
+    """
+    expanded = set(strata) - {dms.ALL}
+    if dms.ALL in strata:
+        expanded |= {dms.SINGLE_NT, dms.MULTI_NT}
+    return expanded
+
+
 #: The footer key one predictor's manifest is stored under. A top-level
 #: key-value entry, which is what `dasm2/data/parquet_backend.py` says every
 #: metadata reader goes through -- not pandas' ``DataFrame.attrs``, whose
@@ -349,7 +365,7 @@ def join_scores(
         # rows for coverage. Declaring more than it scores is allowed: that is
         # absence, which the summary reports as a smaller `n`.
         scored_strata = set(merged.loc[merged[manifest.model].notna(), "stratum"])
-        undeclared = sorted(scored_strata - set(manifest.strata))
+        undeclared = sorted(scored_strata - declared_cell_strata(manifest.strata))
         if undeclared:
             raise ValueError(
                 f"{manifest.model}: scores cells in {undeclared}, which its "

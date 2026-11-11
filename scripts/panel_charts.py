@@ -254,7 +254,7 @@ DMS_PREDICTOR_COLORS: dict[str, str] = {
 #: by hue.
 
 #: What each predictor id is called on a chart. The ids are join keys and CSV
-#: values -- `scripts/dms_models.py` writes them and `results/panels/dms/`
+#: values -- each predictor module defines its own and `results/panels/dms/`
 #: carries them -- while :data:`DMS_PREDICTOR_COLORS` is keyed by what a legend
 #: prints, so the two are mapped rather than conflated. ``leaf_logfreq`` prints
 #: as "leaf frequency" because a legend has no room to say which ratio it is and
@@ -565,7 +565,15 @@ def homolog_correlation_panel(
     too little data rather than a result. Here a negative r is a real statement
     about a predictor, so it is drawn.
 
+    Args:
+        metric: Which correlation column to draw, and so which axis title to
+            take from :data:`DMS_BAR_METRIC_TITLES`. Panel B's predictors are
+            readable linearly and take the default; panel C's leaf predictor is
+            not, and passes ``spearman_rho``.
+
     Raises:
+        KeyError: On a ``metric`` with no axis title, rather than drawing a
+            correlation under a title naming a different one.
         ValueError: If ``frame`` names a predictor with no colour, which Vega
             would otherwise recycle from the start of the range and give two
             predictors one hue; or if a homolog or stratum in ``frame`` is
@@ -576,11 +584,11 @@ def homolog_correlation_panel(
             f"{metric!r} has no axis title; expected one of "
             f"{sorted(DMS_BAR_METRIC_TITLES)}"
         )
-    missing_r = frame[metric].isna()
-    if missing_r.any():
-        rows = frame.loc[missing_r, ["homolog", "stratum", "predictor"]]
+    missing_metric = frame[metric].isna()
+    if missing_metric.any():
+        rows = frame.loc[missing_metric, ["homolog", "stratum", "predictor"]]
         raise ValueError(
-            f"{int(missing_r.sum())} rows carry no `{metric}`, which draws no "
+            f"{int(missing_metric.sum())} rows carry no `{metric}`, which draws no "
             f"bar and leaves a gap the legend still promises:\n"
             f"{rows.to_string(index=False)}\n"
             f"`within_clade_metrics` returns NaN below its `min_mutations`, so "

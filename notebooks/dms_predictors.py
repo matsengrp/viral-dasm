@@ -44,10 +44,9 @@ def _():
         if str(_path) not in sys.path:
             sys.path.insert(0, str(_path))
 
-    # `panels` before `pandas`, for the reason `subsampling_depth` gives: it
-    # imports `lib` and then `dasm2`, which moves Arrow off the bundled
-    # mimalloc, and `pandas` pulls pyarrow in transitively.
-    import panels
+    # `panel_charts` before `pandas`, for the reason `subsampling_depth` gives
+    # for `panels`: it imports `lib` and then `dasm2`, which moves Arrow off the
+    # bundled mimalloc, and `pandas` pulls pyarrow in transitively.
     import panel_charts as charts
     import panel_spec
 
@@ -57,7 +56,7 @@ def _():
 
     import pandas as pd
 
-    return charts, dms, dms_homologs, panel_spec, panels, pd
+    return charts, dms, dms_homologs, panel_spec, pd
 
 
 @app.cell
@@ -90,7 +89,7 @@ def _(charts, panel_spec, pd):
 
 
 @app.cell
-def _(charts, dms, dms_homologs, panel_spec, panels, plotted):
+def _(charts, dms, dms_homologs, panel_spec, plotted):
     panel_c = charts.save_panel(
         charts.homolog_correlation_panel(
             plotted,
@@ -113,7 +112,6 @@ def _(charts, dms, dms_homologs, panel_spec, panels, plotted):
     # No `write_panel_csv`: `scripts/dms_summary.py` wrote the table this panel
     # is a picture of, at the same stem. A second writer would be a second
     # definition of the same file.
-    _ = panels
     panel_c
     return
 

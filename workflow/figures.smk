@@ -305,7 +305,6 @@ rule dms_leaf_counts:
         clade="|".join(DMS_CLADES),
     input:
         script="scripts/dms_leaf_freq.py",
-        models="scripts/dms_models.py",
         dms="scripts/dms.py",
         spec="scripts/panel_spec.py",
         founder_reader="scripts/founders.py",

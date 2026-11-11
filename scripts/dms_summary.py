@@ -163,7 +163,11 @@ def _metrics(groups: dict[tuple[str, str, str], pd.DataFrame], suffix: str):
     )
 
 
-def summarize(merged: dict[str, pd.DataFrame], observed: dict[str, pd.Series]):
+def summarize(
+    merged: dict[str, pd.DataFrame],
+    observed: dict[str, pd.Series],
+    manifests: dict[str, dict[str, dict]],
+):
     """Every ``(homolog, predictor, stratum)`` row, from the joined frames.
 
     ``all`` is the **union** of the two strata the ``stratum`` column carries,
@@ -237,14 +241,25 @@ def summarize(merged: dict[str, pd.DataFrame], observed: dict[str, pd.Series]):
     # column is NaN, so an unjoined or unscored cell leaves the CSV reporting a
     # confident correlation over fewer mutations than the assay measured.
     for (homolog, predictor), rows in table.groupby(["homolog", "predictor"]):
-        measured = len(merged[homolog])
+        # Against the cells in the strata the predictor *declares*, not against
+        # every measured cell. A predictor may legitimately speak on a subset --
+        # `Manifest` calls that an absence rather than a zero, and `join_scores`
+        # allows it -- so comparing against the whole assay would refuse the first
+        # partial-coverage arm. What is still caught is the thing worth catching:
+        # a cell inside a declared stratum that failed to join, or whose score
+        # came back NaN, which `within_clade_metrics` drops rather than raising.
+        declared = dms_models.declared_cell_strata(
+            tuple(manifests[homolog][predictor]["strata"])
+        )
+        cells = merged[homolog]
+        expected = int(cells["stratum"].isin(declared).sum())
         reported = int(rows.set_index("stratum")["n_mutations"][dms.ALL])
-        if reported != measured:
+        if reported != expected:
             raise ValueError(
                 f"{homolog}/{predictor}: reports {reported} mutations against the "
-                f"{measured} cells the assay measured. A cell that failed to join, "
-                f"or a score that came back NaN, is dropped by "
-                f"`within_clade_metrics` rather than raising."
+                f"{expected} cells in the strata it declares ({sorted(declared)}). "
+                f"A cell that failed to join, or a score that came back NaN, is "
+                f"dropped by `within_clade_metrics` rather than raising."
             )
 
     ordered = pd.Categorical(
@@ -280,6 +295,7 @@ def main() -> None:
 
     merged: dict[str, pd.DataFrame] = {}
     observed: dict[str, pd.Series] = {}
+    manifests: dict[str, dict[str, dict]] = {}
     for homolog in dms_homologs():
         cells, _ = dms_models.homolog_cells(homolog)
         for_homolog = [
@@ -293,7 +309,7 @@ def main() -> None:
                 f"predictors passed. Skipping one would shorten the table rather "
                 f"than fail the rule."
             )
-        merged[homolog], _ = dms_models.join_scores(cells, for_homolog)
+        merged[homolog], manifests[homolog] = dms_models.join_scores(cells, for_homolog)
         clade = dms_dataset(homolog).clade
         if clade not in by_clade:
             raise SystemExit(
@@ -302,7 +318,7 @@ def main() -> None:
             )
         observed[homolog] = mutant_observed(merged[homolog], by_clade[clade])
 
-    table = summarize(merged, observed)
+    table = summarize(merged, observed, manifests)
     output = args.output or panel_csv_path(DMS_SELECTION, DMS_PREDICTOR_CORRELATIONS)
     output.parent.mkdir(parents=True, exist_ok=True)
     table.to_csv(output, index=False)

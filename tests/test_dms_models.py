@@ -309,3 +309,60 @@ def test_a_predictor_may_not_score_a_stratum_it_did_not_declare():
     )
     with pytest.raises(ValueError, match="does not declare"):
         dms_models.join_scores(cells, [(frame, narrowed)])
+
+
+def test_a_predictor_declaring_all_strata_is_not_refused():
+    """``all`` is a union label no cell carries, so it has to mean both.
+
+    It is the natural way for a predictor that scores everything to say so, and
+    before the expansion it passed `validate_scores` and then raised in the join
+    for scoring the two strata its own declaration covered.
+    """
+    assert dms_models.declared_cell_strata((dms.ALL,)) == {dms.SINGLE_NT, dms.MULTI_NT}
+    assert dms_models.declared_cell_strata((dms.SINGLE_NT,)) == {dms.SINGLE_NT}
+    assert dms_models.declared_cell_strata(dms.STRATA) == {dms.SINGLE_NT, dms.MULTI_NT}
+
+
+@needs_dms
+def test_a_predictor_scoring_everything_may_declare_all(tmp_path):
+    """The end-to-end form of the above, through the join."""
+    homolog = panel_spec.SCATTER_HOMOLOG
+    cells, _ = dms_models.homolog_cells(homolog)
+    frame, manifest, _ = dms_blosum.blosum62_scores(homolog)
+    all_only = dms_models.Manifest(
+        model=manifest.model,
+        strata=(dms.ALL,),
+        frame=manifest.frame,
+        input_sequence_sha256=manifest.input_sequence_sha256,
+    )
+    merged, _ = dms_models.join_scores(cells, [(frame, all_only)])
+    assert merged[dms_blosum.BLOSUM62].notna().all()
+
+
+def test_the_bar_panel_refuses_a_metric_it_has_no_axis_title_for():
+    """Otherwise a correlation is drawn under a title naming a different one."""
+    frame = pd.DataFrame(
+        {
+            "homolog": ["BA.1"],
+            "stratum": [dms.SINGLE_NT],
+            "predictor": ["BLOSUM62"],
+            "pearson_r": [0.2],
+        }
+    )
+    with pytest.raises(KeyError, match="no axis title"):
+        panel_charts.homolog_correlation_panel(
+            frame,
+            homolog_order=["BA.1"],
+            stratum_order=[dms.SINGLE_NT],
+            predictor_order=["BLOSUM62"],
+            metric="kendall_tau",
+        )
+    # And the two it does know are both drawable.
+    for metric in ("pearson_r", "spearman_rho"):
+        panel_charts.homolog_correlation_panel(
+            frame.assign(**{metric: 0.2}),
+            homolog_order=["BA.1"],
+            stratum_order=[dms.SINGLE_NT],
+            predictor_order=["BLOSUM62"],
+            metric=metric,
+        )
