@@ -89,7 +89,7 @@ def _(MODELS, SELECTION, TABLE_PATH, mo, panels):
     # Every clade these three panels need, read once: panel B's one clade and
     # the shift panel's four.
     CLADES = sorted({panels.SCATTER_CLADE, *panels.SHIFT_CLADES})
-    TABLE = panels.read_scored_table(TABLE_PATH, models=MODELS)
+    TABLE = panels.read_scored_table(TABLE_PATH, models=MODELS, clades=CLADES)
     SPEC = panels.BASE_SPEC
 
     # At cutoff zero, so the count filter below is the panels' own and the

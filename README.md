@@ -168,6 +168,45 @@ other rule declares the code it runs, including this one; what it leaves out is
 invalidate a finished multi-day run. The suite still runs ahead of the corpora,
 which is where a regression in the corpus builder would do its damage.
 
+## Drawing the figures
+
+`snakemake panels` draws `fig:agreement`'s five panels from the one scored
+table. Nothing in this stage infers and nothing takes a GPU: `rule score`
+already did the forward passes, so a panel rule reads
+`selection_factors.parquet`, filters it, correlates it and draws.
+
+| rule | what it produces |
+|---|---|
+| `agreement_mutations` | panels A, B and D: one mutation across the clades, one clade's cloud, the shift grid |
+| `agreement_ladders` | panels C and E: both correlations against the count cutoff |
+
+Each runs per `{selection}`, which names the models it draws. `figure` is
+`dasm-1077k` -- the largest transformer, which is what every panel of the paper
+shows -- and `fidelity` is `dasm-293k` and `dasm-85k`, the pair the published
+panels were drawn from, which is how the port is shown to compute what the old
+code computed. Both come out of one table and one `groupby`, so the second
+costs no rescoring.
+
+**Where the two kinds of output go.** The tables land in tracked
+`results/panels/<selection>/`, one CSV per panel holding exactly what that
+panel plots, with the filter spec as columns so a reader who opens one alone
+knows which cutoff and which clip produced it. The images go under
+`artifact_root`: a panel is a rebuildable picture of the CSV beside it.
+
+**The count cutoff is the x axis, not a setting.** Panels C and E sweep it, and
+the clade set is pinned across the rungs -- raising the floor removes the thin,
+poorly-measured clades first, so a sweep that let each rung keep its own clades
+would show r rising with the threshold even if no surviving clade moved.
+
+**The reverting exclusion comes from the censor audit, not from the table.**
+A comparison is only meaningful where the models trained normally, so masked,
+censored and reverting sites all come out. The first two are columns of the
+scored table. The third is not: `censored_directional` is the censor table's
+directional entries and a subset of `censored` by construction, so substituting
+it would add no exclusions at all while looking like the third layer.
+`audit/{gene}.json` is the source, derived by `rule audit_censor` from the
+corpus the models trained on.
+
 ## The vendored training code
 
 `dasm2/` is a one-way fork of the model-training code, taken once from a
