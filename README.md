@@ -87,6 +87,14 @@ outputs. mat-pcp's outputs are plain inputs here — this pipeline never reaches
 behind them to a tree, an alignment or a MAT, so a missing input stops the DAG
 at the mat-pcp target that produces it.
 
+**One input is not GISAID-derived.** `fig:dms` reads three published deep
+mutational scans — full-spike cell-entry measurements on BA.1, XBB.1.5 and
+KP.3.1.1 — which have their own papers and their own repositories. A reader
+without GISAID access can obtain them. `config.yaml`'s `dms` block names them
+by path and pins each one's md5, and this repository does not redistribute
+them: they belong to the groups that published them, and a reader who wants to
+rebuild that figure fetches them from those repositories.
+
 The trained checkpoints are parameters, not sequence, so they are published.
 Every figure depends on a checkpoint *path* that either a training rule or a
 fetch rule can supply, and the figures rebuild in minutes for a reader who is

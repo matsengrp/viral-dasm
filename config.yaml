@@ -5,9 +5,11 @@
 # exist. A reader with their own GISAID access edits this file to point at
 # their own mat-pcp run and the pipeline follows.
 #
-# GISAID: everything under `inputs` and `corpora` is GISAID-derived and stays
-# on the cluster. Nothing here is published; the pipeline's own outputs that
-# are publishable go to `results/`, which is tracked. `data/` is input only.
+# GISAID: everything under `mat_pcp`, `corpora` and `smoke_corpus` is
+# GISAID-derived and stays on the cluster. `dms` is the exception -- three
+# published datasets, which a reader can fetch themselves. Nothing
+# GISAID-derived is published; the pipeline's own outputs that are publishable
+# go to `results/`, which is tracked. `data/` is input only.
 
 # Where the pipeline writes. Large, and not in the repository.
 artifact_root: /fh/fast/matsen_e/shared/bcr-mut-sel/dasm2/experiments/viral-dasm
@@ -238,6 +240,44 @@ neutral_archives:
 smoke_corpus:
     path: /fh/fast/matsen_e/shared/bcr-mut-sel/dasm2/experiments/2026-09-02-v12-sampling-depth-ladder/fast_test/S/fast_test.parquet
     md5: 72b90961147b20649a9ca59ff148d998
+
+# The deep mutational scanning the model's fitness effects are compared against
+# in `fig:dms`: full-spike cell-entry measurements on three homologs, each
+# matched to the clade whose founder the model is scored on.
+#
+# The one block here that is NOT GISAID-derived. These are published datasets
+# with their own papers, so a reader without GISAID access can still rebuild
+# this figure, and the files may be redistributed. They are named as prepared
+# CSVs rather than as the repositories they came from: the preparation --
+# replicate averaging, the lasso shift, the `times_seen` filter -- belongs to
+# whoever published them, and repeating it here would be a second, divergent
+# definition of each dataset.
+#
+# `md5` is a gate, not a label, and it is the reason this block carries one at
+# all. EPIC #1's M5 records that KP.3.1.1 should be repointed at filtered
+# measurements, and that repoint replaces the file *at this same path*. Without
+# a digest every retained-mutation count this figure reports would go stale
+# silently, while the pipeline kept running.
+#
+# `clade` is the Nextstrain label this pipeline keys every table on, not the
+# Pango alias the papers use. `scripts/dms.py` requires each one to be in
+# `lib.clade_roster()`, so a homolog whose clade has no founder fails there
+# rather than joining to nothing.
+dms:
+    root: /fh/fast/matsen_e/shared/bcr-mut-sel/functional-data
+    homologs:
+        BA.1:
+            clade: 21K
+            file: haddox_spike_Omicron_BA1.csv
+            md5: 9f21c3ee991c1e7ea7a4362e510bc3c2
+        XBB.1.5:
+            clade: 23A
+            file: dadonaite2024_XBB15_cell_entry.csv
+            md5: 18c630548aa0e5d3b3a6e341bc8bbd26
+        KP.3.1.1:
+            clade: 24E
+            file: dadonaite2025_KP311_cell_entry.csv
+            md5: 6cb4e58c8e61831fac6f470325b68a7c
 
 # The split every reference run held out, and every model in the paper holds
 # out. Only the three numbers every arm shares live here; the resulting fold

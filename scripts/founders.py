@@ -56,6 +56,29 @@ def founder_aa_sequence(clade: str, gene: str) -> str:
     return aa
 
 
+def founder_nt_sequence(clade: str, gene: str) -> str:
+    """One clade's founder coding sequence, trimmed to its sense codons.
+
+    `fig:dms` splits every mutation on whether one nucleotide change to the
+    founder's *actual* codon reaches it, so that panel needs the nucleotides
+    rather than the translation. The FASTA carries the stop codon and the
+    indicator is over sense codons only, so the return is trimmed to three
+    times the translated length.
+
+    Here rather than in ``scripts/dms.py`` so there stays one reader of
+    ``clade_founders_dir``: a second one could drift from this module's
+    length check and index the wrong codon at every site past the first
+    disagreement, with nothing raising.
+
+    Raises:
+        ValueError: Through :func:`founder_aa_sequence`, if the translation's
+            length disagrees with ``GENE_NT_LENGTH``.
+    """
+    path = mat_pcp_path("clade_founders_dir") / f"{clade}.fa"
+    nt = read_fasta_first_sequence(path)
+    return nt[: 3 * len(founder_aa_sequence(clade, gene))]
+
+
 def founder_aa_sequences(clades, gene: str) -> dict[str, str]:
     """``{clade: founder}`` for several clades, in the order given."""
     return {clade: founder_aa_sequence(clade, gene) for clade in clades}
