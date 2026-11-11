@@ -63,8 +63,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 # `lib` first, so this repository's root is on `sys.path` before anything
 # imports `dasm2` and the vendored fork wins over an editable install.
 from lib import (  # noqa: F401  (`corpus` re-exported for the notebooks)
+    CORPUS_NAMES,
+    FULL_DEPTH,
     GENE,
     assert_dasm2_is_this_repo,
+    clade_roster,
     corpus,
     mat_pcp_path,
 )
@@ -96,6 +99,10 @@ from panel_spec import (  # noqa: F401  (re-exported for the notebooks)
     CANDIDATE_LABEL_SIDES,
     COUNT_LADDER,
     DEFAULT_SELECTION,
+    DEPTH_PANELS,
+    ECDF_CLADES,
+    ECDF_MAX_COUNT,
+    ECDF_POINTS,
     FIDELITY_MODELS,
     FIGURE_DIR,
     FIGURE_MODEL,
@@ -112,6 +119,7 @@ from panel_spec import (  # noqa: F401  (re-exported for the notebooks)
     SCATTER_CLADE,
     SELECTIONS,
     SHIFT_CLADES,
+    SUBSAMPLING_SELECTION,
     TABLE_COLUMNS,
     figure_candidates,
     figure_dir,
@@ -119,6 +127,7 @@ from panel_spec import (  # noqa: F401  (re-exported for the notebooks)
     panel_csv_path,
     parse_mutation,
     selection_models,
+    subsampling_caps,
 )
 
 from dasm2.analysis.viral import filter_merged_fitness
@@ -684,14 +693,26 @@ def with_count_noise_interval(
 
 
 def write_panel_csv(
-    frame: pd.DataFrame, stem: str, *, selection: str, spec: FilterSpec
+    frame: pd.DataFrame, stem: str, *, selection: str, spec: FilterSpec | None
 ) -> Path:
     """Write one panel's table to tracked ``results/panels/<selection>``.
 
     The filter spec rides along as columns rather than sitting in a sidecar:
     every number in the file moves with the cutoff and the clip, and a reader
     who opens the CSV alone should not have to find out which they were.
+
+    ``spec=None`` writes the frame unchanged, for a panel that has no filter to
+    declare. ``fig:subsampling``'s panels A and B are that case: they measure
+    the tree rather than a model, so there is no cutoff, no clip and no site
+    exclusion, and spec columns there would state six choices that were never
+    made. It is required rather than defaulted, so a panel that *does* filter
+    cannot omit it by forgetting.
     """
+    if spec is None:
+        path = panel_csv_path(selection, stem)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        frame.to_csv(path, index=False)
+        return path
     columns = spec.as_row()
     collisions = sorted(set(columns) & set(frame.columns))
     if collisions:
@@ -759,3 +780,150 @@ def shift_pair_founders(clades: Sequence[str] = SHIFT_CLADES) -> dict[str, str]:
     r = 0.
     """
     return founder_aa_sequences(clades, GENE)
+
+
+# ---------------------------------------------------------------------------
+# `fig:subsampling` panels A and B: the tree's sampling depth
+# ---------------------------------------------------------------------------
+#
+# Neither reads the scored table. These two panels are a measurement of the
+# corpus rather than of a model: panel A is how unevenly the clades are
+# sampled, and panel B is what that costs a clade's mutation counts. They take
+# no checkpoint, no GPU and no `selection_factors.parquet`, which is what lets
+# them be built while the models are still training.
+
+#: Decimals a share is written with. The denominator is a clade's spike grid,
+#: about 11,371 mutations, so one mutation moves a share by 8.8e-5 and six
+#: decimals is already finer than the smallest real step. The float's own 16
+#: digits record how a pandas version chose to print it, not what the tree
+#: says, and they are what makes a tracked table a diff on noise.
+SHARE_DECIMALS = 6
+
+#: The nucleotide-grid columns panels B reads. The grid is genome-wide --
+#: 87,734 rows for 21J against spike's 11,371 -- so `gene` is read to restrict
+#: it and the two counts are the statistic.
+NT_GRID_COLUMNS = ("actual_count", "expected_count", "gene")
+
+
+def clade_size_frame(counts_csv: Path) -> pd.DataFrame:
+    """Sequences per clade, for the clades this pipeline scores.
+
+    ``clade,n_sequences``, descending. The count is mat-pcp's own
+    ``mat/clade_counts.csv``, whose ``count`` is the line count of
+    ``mat/clades/{clade}_samples.txt`` -- the file the source panel walks --
+    so this is the cheaper route to the same heights and not a second
+    derivation of them.
+
+    **The table carries more clades than this pipeline scores**, and the extras
+    are dropped against :func:`lib.clade_roster` rather than passed through.
+    ``21A`` and ``25I`` have a count here, no founder FASTA, and no row in any
+    fitness table, so a panel drawn from the file as it stands would put two
+    bars beside 56 that every other table in the pipeline omits.
+
+    Raises:
+        ValueError: If a clade in the roster has no row in the counts table.
+            That direction is a real inconsistency rather than a known extra:
+            the roster is what gets scored, so a scored clade with no sequence
+            count means the two files describe different trees.
+    """
+    path = counts_csv
+    frame = pd.read_csv(path)
+    counts = dict(zip(frame["Nextstrain_clade_usher"], frame["count"], strict=True))
+
+    roster = clade_roster()
+    missing = sorted(clade for clade in roster if clade not in counts)
+    if missing:
+        raise ValueError(
+            f"{path}: no sequence count for {missing}, which this pipeline "
+            f"scores. The counts table and the founder roster describe "
+            f"different trees."
+        )
+
+    out = pd.DataFrame(
+        {"clade": roster, "n_sequences": [int(counts[c]) for c in roster]}
+    )
+    return out.sort_values("n_sequences", ascending=False, ignore_index=True)
+
+
+def _nt_grid(
+    ntmut_dir: Path, clade: str, arm: str, *, gene: str = GENE
+) -> pd.DataFrame:
+    """One clade's nucleotide grid at one sampling depth, restricted to a gene.
+
+    Full depth is the **top level** of ``ntmut_fitness_dir``; each thinned arm
+    is a subdirectory named for its corpus, so the arm axis is
+    :data:`lib.CORPUS_NAMES` and nothing spells the caps a second time.
+
+    ``gene`` is a semicolon-joined list where a site falls in more than one
+    reading frame, and is null on the intergenic rows, so the membership test
+    runs on ``fillna("")`` -- a bare ``split`` raises on those.
+    """
+    directory = ntmut_dir
+    if arm != FULL_DEPTH.name:
+        directory = directory / arm
+    frame = pd.read_csv(
+        directory / f"{clade}_ntmut_fitness.csv", usecols=list(NT_GRID_COLUMNS)
+    )
+    in_gene = frame["gene"].fillna("").str.split(";").apply(lambda g: gene in g)
+    return frame.loc[in_gene]
+
+
+def count_ecdf_frame(
+    ntmut_dir: Path,
+    clades: Iterable[str] = tuple(ECDF_CLADES),
+    *,
+    gene: str = GENE,
+    arms: Sequence[str] | None = None,
+) -> pd.DataFrame:
+    """The share of a clade's mutations carrying at least *x* counts.
+
+    ``clade,arm,x,share``, one curve per ``(clade, arm)``. The statistic is
+    ``max(actual_count, expected_count)``, the paper's "actual or expected
+    counts", evaluated on :data:`ECDF_POINTS` points from 0 to
+    :data:`ECDF_MAX_COUNT`.
+
+    **The population is the whole nucleotide grid**, every single-nucleotide
+    mutation away from the clade founder, and not the subset that clears the
+    accuracy threshold. The subset is *defined* by a threshold on these counts,
+    so its own curve would pass through 1.0 at exactly that threshold and be
+    truncated by construction -- it could not show what share of a clade's
+    mutations the threshold leaves out, which is the panel's question.
+
+    Raises:
+        ValueError: If a thinned arm's grid has a different number of rows from
+            the full-depth one. The grid is enumerated from the clade founder
+            and cannot depend on sampling depth, so a changed count means the
+            founder moved -- and the two curves would then be drawn over
+            different mutations with nothing saying so.
+    """
+    arms = tuple(CORPUS_NAMES) if arms is None else tuple(arms)
+    grid = np.linspace(0, ECDF_MAX_COUNT, ECDF_POINTS)
+    rows = []
+    for clade in clades:
+        n_full: int | None = None
+        for arm in arms:
+            frame = _nt_grid(ntmut_dir, clade, arm, gene=gene)
+            if arm == FULL_DEPTH.name:
+                n_full = len(frame)
+            elif n_full is not None and len(frame) != n_full:
+                raise ValueError(
+                    f"{arm}/{clade}: the {gene} nucleotide grid has "
+                    f"{len(frame)} rows against {n_full} at full depth. The "
+                    f"grid is enumerated from the clade founder and cannot "
+                    f"depend on sampling depth, so the founder moved."
+                )
+            counts = frame[["actual_count", "expected_count"]].max(axis=1).to_numpy()
+            rows.append(
+                pd.DataFrame(
+                    {
+                        "clade": clade,
+                        "arm": arm,
+                        "x": grid,
+                        "share": [
+                            round(float((counts >= x).mean()), SHARE_DECIMALS)
+                            for x in grid
+                        ],
+                    }
+                )
+            )
+    return pd.concat(rows, ignore_index=True)

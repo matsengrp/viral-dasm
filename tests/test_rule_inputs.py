@@ -116,6 +116,7 @@ ENTRY_POINTS = {
     "outlier_ranking": "notebooks/outlier_ranking.py",
     "background_effects": "notebooks/background_effects.py",
     "compose_within_clade_shifts": "notebooks/within_clade_shifts.py",
+    "subsampling_depth": "notebooks/subsampling_depth.py",
     # `fig:within_clade_shifts`' producers. These run scripts rather than
     # notebooks, like the producers above the panel block.
     "clade_backgrounds": "scripts/backgrounds.py",
@@ -127,7 +128,15 @@ ENTRY_POINTS = {
 #: Rules that execute nothing. Asserted, not asserted-by-assertion: each must
 #: carry snakemake's ``norun`` marker, so listing a rule here cannot excuse it
 #: from the import check while it quietly runs a shell command.
-AGGREGATORS = ("all", "corpora", "models", "scored", "panels", "figures")
+AGGREGATORS = (
+    "all",
+    "corpora",
+    "models",
+    "scored",
+    "panels",
+    "figures",
+    "subsampling",
+)
 
 #: Rules that do run code and are still not import-checked, with the reason.
 #: Each must carry a ``shellcmd``, so an entry here describes a real

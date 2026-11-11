@@ -1164,3 +1164,165 @@ def test_a_background_panel_refuses_a_third_background():
             y_domain=(0.0, 1.0),
             columns=4,
         )
+
+
+def test_the_scan_row_does_not_overlap_the_candidate_clades():
+    """The scan excludes the two the candidate panels cover, by construction."""
+    assert not set(panel_spec.SCAN_CLADES) & set(panel_spec.CANDIDATE_CLADES)
+
+
+# ---------------------------------------------------------------------------
+# `fig:subsampling` panels A and B
+# ---------------------------------------------------------------------------
+#
+# These read mat-pcp's count tables rather than a scored table, so they run
+# against the real tree or not at all -- there is no hand-built stand-in for
+# "how unevenly the clades are sampled". The grids are eight 24 MB CSVs, so the
+# eCDF is built once for the module.
+
+#: The counts measured from this mat-pcp run on 2026-11-10, which is what the
+#: panel claims. Pinned rather than recomputed: a changed share means the tree
+#: or the gene filter moved, and either should fail here rather than quietly
+#: redraw the paper's figure with different numbers.
+ECDF_SHARE_AT_THRESHOLD = {
+    ("21J", "full_depth"): 0.6236,
+    ("21J", "cap_50000_0"): 0.0615,
+    ("21J", "cap_20000_0"): 0.0406,
+    ("21J", "cap_5000_0"): 0.0003,
+    ("25C", "full_depth"): 0.0634,
+    ("25C", "cap_50000_0"): 0.0385,
+    ("25C", "cap_20000_0"): 0.0157,
+    ("25C", "cap_5000_0"): 0.0006,
+}
+
+#: 21J's spike nucleotide grid, of the 87,734 the genome-wide table holds.
+SPIKE_GRID_ROWS = {"21J": 11371, "25C": 11207}
+
+
+def _ntmut_dir() -> Path:
+    return lib.mat_pcp_path("ntmut_fitness_dir")
+
+
+@pytest.fixture(scope="module")
+def ecdf():
+    """Panel B's frame, built once: eight CSVs at about 24 MB each."""
+    if not _ntmut_dir().exists():
+        pytest.skip(f"{_ntmut_dir()} is not mounted")
+    return panels.count_ecdf_frame(_ntmut_dir())
+
+
+def test_the_nucleotide_grid_does_not_move_with_sampling_depth():
+    """A thinned arm counts the same mutations, or the founder moved.
+
+    The grid is enumerated from the clade founder, so its size cannot depend on
+    how many sequences were sampled. If it does, the two curves in a panel are
+    drawn over different mutations and the panel still looks fine -- which is
+    why `count_ecdf_frame` raises rather than warns, and why the row counts are
+    pinned here as well.
+    """
+    directory = _ntmut_dir()
+    if not directory.exists():
+        pytest.skip(f"{directory} is not mounted")
+    for clade, expected in SPIKE_GRID_ROWS.items():
+        sizes = {
+            arm: len(panels._nt_grid(directory, clade, arm)) for arm in lib.CORPUS_NAMES
+        }
+        assert set(sizes.values()) == {expected}, (
+            f"{clade}'s spike grid is {sizes}, not {expected} at every depth. "
+            f"The clade founder moved, so the depth curves would be drawn over "
+            f"different mutations."
+        )
+
+
+def test_the_ecdf_reproduces_the_measured_shares(ecdf):
+    """Panel B's headline, against the tree it is measured from."""
+    at_threshold = ecdf[ecdf["x"] == float(panels.PANEL_MIN_COUNT)]
+    assert not at_threshold.empty, (
+        f"the eCDF grid does not land on {panels.PANEL_MIN_COUNT}, so the "
+        f"panel's dotted threshold sits between two sampled points and the "
+        f"share a reader takes off the curve is interpolated."
+    )
+    measured = {
+        (row.clade, row.arm): row.share for row in at_threshold.itertuples(index=False)
+    }
+    assert set(measured) == set(ECDF_SHARE_AT_THRESHOLD)
+    for key, expected in ECDF_SHARE_AT_THRESHOLD.items():
+        assert measured[key] == pytest.approx(expected, abs=1e-3), (
+            f"{key[0]}/{key[1]} is {measured[key]:.4f} against the {expected} "
+            f"measured from this run. Re-measure rather than re-pinning."
+        )
+
+
+def test_no_cap_sits_above_full_depth(ecdf):
+    """Thinning cannot add counts.
+
+    Checked at every sampled x rather than at the threshold alone: a sign error
+    in the arm lookup, or a cap directory read for the wrong arm, would leave
+    the threshold's ordering intact while inverting the curves either side of
+    it.
+    """
+    for clade, rows in ecdf.groupby("clade"):
+        full = rows[rows["arm"] == "full_depth"].set_index("x")["share"]
+        for arm, arm_rows in rows[rows["arm"] != "full_depth"].groupby("arm"):
+            capped = arm_rows.set_index("x")["share"]
+            above = capped[capped > full + 1e-12]
+            assert above.empty, (
+                f"{clade}/{arm} is above full depth at x={list(above.index)}, "
+                f"so thinning the tree added counts."
+            )
+
+
+def test_panel_a_plots_the_roster_and_not_the_counts_table():
+    """The two clades the counts table carries and this pipeline does not score.
+
+    `mat/clade_counts.csv` has 58 rows; `21A` and `25I` have a sequence count,
+    no founder FASTA and no row in any fitness table. A panel drawn from the
+    file as it stands would put two bars beside 56 that every other table in
+    this pipeline omits.
+    """
+    counts_csv = lib.mat_pcp_path("clade_counts_file")
+    if not counts_csv.exists():
+        pytest.skip(f"{counts_csv} is not mounted")
+    assert counts_csv.name == "clade_counts.csv", (
+        "panel A must read `clade_counts.csv`. "
+        "`clade_counts_by_cutoff.csv` sits beside it with a `cutoff` column "
+        "holding the cutoff-date ladder and never this run's cutoff, so "
+        "reading it returns an empty frame rather than raising."
+    )
+    sizes = panels.clade_size_frame(counts_csv)
+    assert list(sizes.columns) == ["clade", "n_sequences"]
+    assert sorted(sizes["clade"]) == lib.clade_roster()
+    raw = pd.read_csv(counts_csv)
+    extra = sorted(set(raw["Nextstrain_clade_usher"]) - set(sizes["clade"]))
+    assert extra == ["21A", "25I"], (
+        f"the counts table's clades beyond the roster are {extra}, not the "
+        f"['21A', '25I'] measured when #24 was written. Re-measure: the "
+        f"roster and the counts table moved relative to each other."
+    )
+    assert sizes["n_sequences"].is_monotonic_decreasing
+
+
+def test_the_subsampling_directory_is_not_a_model_selection():
+    """`subsampling` names a directory, and must not name a wildcard value.
+
+    `SELECTIONS` is `rule panels`' wildcard domain. An entry there would let the
+    agreement rules resolve `selection=subsampling` and draw `fig:agreement`'s
+    panels into this figure's directory, which is a DAG that builds and a figure
+    that is wrong.
+    """
+    assert panel_spec.SUBSAMPLING_SELECTION not in panel_spec.SELECTIONS
+    assert panel_spec.SUBSAMPLING_MODEL in MODELS
+
+
+def test_the_subsampling_arms_are_the_corpora_the_pipeline_builds():
+    """Panel B's depth axis against the corpora, and the caps against their names.
+
+    `panel_spec` restates nothing here -- the arms *are* `lib.CORPUS_NAMES` and
+    the caps are read off those names -- so what this pins is that the reading
+    still works: a corpus renamed without `cap_<n>_<fold>` in it would drop
+    silently out of `subsampling_caps()` and take a rule off panel A.
+    """
+    assert panel_spec.subsampling_caps() == (50_000, 20_000, 5_000)
+    assert len(panel_spec.subsampling_caps()) == len(lib.CORPUS_NAMES) - 1
+    assert lib.CORPUS_NAMES[0] == lib.FULL_DEPTH.name
+    assert set(panel_spec.ECDF_CLADES) <= set(lib.clade_roster())
