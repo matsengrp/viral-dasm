@@ -32,7 +32,13 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS = sorted((REPO_ROOT / "scripts").glob("*.py"))
+#: Both orderings apply to a notebook as much as to a script: `marimo export`
+#: runs every cell, so a notebook a rule exports is pipeline code that reads a
+#: Parquet. The cell bodies are walked like any other module -- `ast.walk`
+#: reaches an import wherever it sits.
+SCRIPTS = sorted((REPO_ROOT / "scripts").glob("*.py")) + sorted(
+    (REPO_ROOT / "notebooks").glob("*.py")
+)
 
 #: Modules that pull pyarrow in, directly or transitively.
 ARROW_IMPORTERS = frozenset({"pyarrow", "pandas"})
