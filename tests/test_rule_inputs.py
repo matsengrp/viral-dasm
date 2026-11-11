@@ -106,12 +106,17 @@ ENTRY_POINTS = {
     "check_clades": "scripts/check_clades.py",
     "score": "scripts/score_run.py",
     "scored_table": "scripts/scored_table.py",
+    # The panel rules run a notebook as their script. `marimo export html`
+    # executes every cell, so the notebook is the entry point and its imports
+    # are the code the rule runs.
+    "agreement_mutations": "notebooks/agreement_mutations.py",
+    "agreement_ladders": "notebooks/agreement_ladders.py",
 }
 
 #: Rules that execute nothing. Asserted, not asserted-by-assertion: each must
 #: carry snakemake's ``norun`` marker, so listing a rule here cannot excuse it
 #: from the import check while it quietly runs a shell command.
-AGGREGATORS = ("all", "corpora", "models", "scored")
+AGGREGATORS = ("all", "corpora", "models", "scored", "panels")
 
 #: Rules that do run code and are still not import-checked, with the reason.
 #: Each must carry a ``shellcmd``, so an entry here describes a real

@@ -56,14 +56,30 @@ import pyarrow.parquet as pq
 from founders import founder_aa_sequences
 
 from dasm2.analysis.viral import filter_merged_fitness
-from dasm2.analysis.viral_fitness_eval import (
+
+# The statistics are re-exported rather than imported again in each notebook:
+# the panels then take their filter chain and their correlations from one
+# module, and a notebook cannot reach past it to a function this layer does not
+# intend them to use.
+from dasm2.analysis.viral_fitness_eval import (  # noqa: F401  (re-exported)
     CLIP_LOWER,
     COUNT_FILTER_MODE,
+    COUNT_NOISE_COVERAGE,
     DEFAULT_MIN_CLADE_MUTATIONS,
     FITNESS_METRICS,
+    LARGE_SHIFT_THRESHOLD,
+    adequate_clades,
+    apply_count_threshold,
     clip_axes,
+    count_ladder_adequacy,
+    identical_founder_pairs,
     poisson_effect_interval,
     poisson_effect_p_value,
+    shift_frame,
+    shift_pair_count_ladder,
+    shift_pair_metrics,
+    within_clade_count_ladder,
+    within_clade_metrics,
 )
 
 #: Where the panel images go: under the artifact root, not in the tree. A panel
@@ -96,6 +112,24 @@ CONTROL_MODEL = "ci-484k"
 #: `dasm-85k` is the ladder's `transformer`; the published panels C and E pool
 #: the two under one median.
 FIDELITY_MODELS: tuple[str, ...] = ("dasm-293k", "dasm-85k")
+
+#: The two model selections the panels are drawn for, and the one name each is
+#: built under. Two, because they answer different questions: `figure` is what
+#: `fig:agreement` publishes, and `fidelity` is the pair the published CSVs were
+#: drawn from, which is how the port is shown to compute what the old code
+#: computed. Both come out of one table and one `groupby`, so the second costs
+#: no rescoring.
+#:
+#: Panels C and E pool the models of their selection under one median, which is
+#: what the published numbers do -- so pooling is a property of the selection
+#: rather than a fixed groupby, or the fidelity gate could not be run at all.
+SELECTIONS: dict[str, tuple[str, ...]] = {
+    "figure": (FIGURE_MODEL,),
+    "fidelity": FIDELITY_MODELS,
+}
+
+#: The selection a rule builds unless it is asked for the other one.
+DEFAULT_SELECTION = "figure"
 
 #: The corpus arm every panel of this figure reads. The thinned arms are the
 #: subsampling figure's axis, and mixing one in here would confound the model
@@ -211,6 +245,27 @@ class FilterSpec:
 #: per-mutation panels re-apply :data:`PANEL_MIN_COUNT` to the same frames,
 #: which is what makes a dot in panel C and the cloud in panel B the same rows.
 BASE_SPEC = FilterSpec(min_count=0.0)
+
+
+def selection_models(selection: str) -> tuple[str, ...]:
+    """The models one selection draws, named so a typo fails here."""
+    if selection not in SELECTIONS:
+        raise KeyError(
+            f"{selection!r} is not a panel selection: {sorted(SELECTIONS)}. "
+            f"`figure` is what the paper publishes and `fidelity` is the pair "
+            f"the published CSVs were drawn from."
+        )
+    return SELECTIONS[selection]
+
+
+def figure_dir(selection: str) -> Path:
+    """Where one selection's panel images go."""
+    return FIGURE_DIR / selection
+
+
+def panel_csv_path(selection: str, stem: str) -> Path:
+    """Where one selection's panel table goes, in the tracked tree."""
+    return PANEL_CSV_DIR / selection / f"{stem}.csv"
 
 
 def reverting_sites_by_clade(audit_json: Path = AUDIT_JSON) -> dict[str, set[int]]:
@@ -507,15 +562,17 @@ def with_count_noise_interval(
     )
 
 
-def write_panel_csv(frame: pd.DataFrame, stem: str, *, spec: FilterSpec) -> Path:
-    """Write one panel's table to tracked ``results/panels``.
+def write_panel_csv(
+    frame: pd.DataFrame, stem: str, *, selection: str, spec: FilterSpec
+) -> Path:
+    """Write one panel's table to tracked ``results/panels/<selection>``.
 
     The filter spec rides along as columns rather than sitting in a sidecar:
     every number in the file moves with the cutoff and the clip, and a reader
     who opens the CSV alone should not have to find out which they were.
     """
-    PANEL_CSV_DIR.mkdir(parents=True, exist_ok=True)
-    path = PANEL_CSV_DIR / f"{stem}.csv"
+    path = panel_csv_path(selection, stem)
+    path.parent.mkdir(parents=True, exist_ok=True)
     frame.assign(**spec.as_row()).to_csv(path, index=False)
     return path
 
