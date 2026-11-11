@@ -60,22 +60,23 @@ def _(mo):
 
     # The rule passes the table in; a second spelling in a notebook is a path
     # that can drift from `workflow/score.smk`'s.
+    # Required, not defaulted. A fallback spelling of either path is a second
+    # spelling of a fact `workflow/figures.smk` already states, and the rule
+    # passes both in; missing one should stop here rather than quietly read a
+    # different file from the one the rule declared.
     _args = mo.cli_args()
-    TABLE_PATH = Path(
-        str(
-            _args.get("table")
-            or panels.ARTIFACT_ROOT / "scored" / "selection_factors.parquet"
-        )
-    )
+    TABLE_PATH = Path(str(_args["table"]))
+    AUDIT_PATH = Path(str(_args["audit"]))
     SELECTION = str(_args.get("selection") or panels.DEFAULT_SELECTION)
     MODELS = panels.selection_models(SELECTION)
-    # Panels A, B and D are per-model pictures, so they are drawn for the
-    # selection's first model; the CSVs carry every model in the selection, so
-    # the fidelity comparison has all of its rows.
+    # Panels A, B and D are per-model pictures, so both the panel and its CSV
+    # are the selection's first model. Only panels C and E pool a selection's
+    # models, which is what the published ladder numbers do.
     PANEL_MODEL = MODELS[0]
     return (
         MODELS,
         PANEL_MODEL,
+        AUDIT_PATH,
         SELECTION,
         TABLE_PATH,
         charts,
@@ -85,8 +86,8 @@ def _(mo):
 
 
 @app.cell
-def _(MODELS, SELECTION, TABLE_PATH, mo, panels):
-    REVERTING = panels.reverting_sites_by_clade()
+def _(AUDIT_PATH, MODELS, SELECTION, TABLE_PATH, mo, panels):
+    REVERTING = panels.reverting_sites_by_clade(AUDIT_PATH)
     # Every clade these three panels need, read once: panel B's one clade and
     # the shift panel's four.
     CLADES = sorted({panels.SCATTER_CLADE, *panels.SHIFT_CLADES})
@@ -108,7 +109,7 @@ def _(MODELS, SELECTION, TABLE_PATH, mo, panels):
         f"{sum(len(frame) for frame in BASE.values()):,} mutations before any "
         f"count cutoff."
     )
-    return BASE, CLADES, REVERTING, SPEC, TABLE
+    return BASE, REVERTING, SPEC
 
 
 @app.cell
@@ -131,16 +132,7 @@ def _(mo):
 
 
 @app.cell
-def _(
-    PANEL_MODEL,
-    REVERTING,
-    SELECTION,
-    SPEC,
-    TABLE_PATH,
-    charts,
-    mo,
-    panels,
-):
+def _(PANEL_MODEL, SELECTION, SPEC, TABLE_PATH, charts, mo, panels):
     LOOKUP = panels.with_count_noise_interval(
         panels.lookup_frame(
             # Read again over all clades: this panel's row set is wider than
@@ -148,7 +140,6 @@ def _(
             panels.read_scored_table(TABLE_PATH, models=[PANEL_MODEL]),
             mutation=panels.LOOKUP_MUTATION,
             model=PANEL_MODEL,
-            reverting_by_clade=REVERTING,
             spec=SPEC,
         ),
         spec=SPEC,
@@ -220,20 +211,12 @@ def _(mo, panels):
 
 
 @app.cell
-def _(
-    BASE,
-    PANEL_MODEL,
-    SELECTION,
-    SPEC,
-    charts,
-    panels,
-    pd,
-):
+def _(BASE, MODELS, PANEL_MODEL, SELECTION, SPEC, charts, panels, pd):
     _frames = {
         model: panels.apply_count_threshold(
             BASE[(model, panels.SCATTER_CLADE)], panels.PANEL_MIN_COUNT
         )
-        for model in {key[0] for key in BASE}
+        for model in MODELS
         if (model, panels.SCATTER_CLADE) in BASE
     }
     SCATTER_METRICS = pd.concat(

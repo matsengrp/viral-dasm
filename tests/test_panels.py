@@ -33,6 +33,7 @@ numpy = pytest.importorskip("numpy")
 import panels
 from runs import MODELS, RUNS
 
+from dasm2.analysis.viral_fitness_eval import COUNT_THRESHOLD_LADDER
 from dasm2.sequence.masking import censored_codon_sites, load_censor_table
 
 #: The canary clade for the reverting exclusion. Its reverting sites are the
@@ -96,19 +97,38 @@ def fake_table(seed: int = 0) -> pd.DataFrame:
                             "censored": site == 2,
                         }
                     )
-    frame = pd.DataFrame(rows)
-    return frame.assign(clade_founder_aa=frame["parent_aa"])
+    return pd.DataFrame(rows)
+
+
+def written_table(directory: Path, frame: pd.DataFrame) -> pd.DataFrame:
+    """``frame`` through Parquet and back through the real reader.
+
+    Every test reads its table this way rather than taking ``fake_table``
+    directly, so :func:`panels.read_scored_table` is on the tested path. It is
+    what renames ``parent_aa`` to ``clade_founder_aa``, and that rename is a
+    silent one to lose: the shift join's wildtype guard skips itself when the
+    column is absent rather than raising.
+    """
+    path = directory / "selection_factors.parquet"
+    frame.to_parquet(path, index=False)
+    return panels.read_scored_table(path, models=FAKE_MODELS)
 
 
 @pytest.fixture(scope="module")
-def table() -> pd.DataFrame:
-    return fake_table()
+def table(tmp_path_factory) -> pd.DataFrame:
+    return written_table(tmp_path_factory.mktemp("scored"), fake_table())
 
 
 @pytest.fixture(scope="module")
 def reverting() -> dict[str, set[int]]:
-    """Site 3 reverts in every clade, so each layer drops a different site."""
-    return {clade: {3} for clade in FAKE_CLADES}
+    """A different reverting site per clade.
+
+    Different per clade on purpose: with one shared set, a lookup hoisted out of
+    `base_frames`' clade loop -- which would score every clade against the first
+    clade's sites -- produces exactly the same frames, and nothing here would
+    notice.
+    """
+    return {clade: {3 + index} for index, clade in enumerate(FAKE_CLADES)}
 
 
 @pytest.fixture(scope="module")
@@ -132,13 +152,15 @@ def test_null_fitness_rows_are_dropped(table, frames):
     Counted from the table rather than from the chain that produced the frames:
     a drop that silently did nothing would otherwise pass.
     """
-    expected = len(
-        table[
-            (table["model"] == FAKE_MODELS[0])
-            & table["delta_fitness_ratio"].notna()
-            & ~table["is_synonymous"]
-            & ~table["aa_site"].isin({1, 2, 3})
-        ]
+    rows = table[
+        (table["model"] == FAKE_MODELS[0])
+        & table["delta_fitness_ratio"].notna()
+        & ~table["is_synonymous"]
+        & ~table["aa_site"].isin({1, 2})
+    ]
+    expected = sum(
+        len(frame[frame["aa_site"] != 3 + index])
+        for index, (_, frame) in enumerate(rows.groupby("clade", sort=False))
     )
     produced = sum(
         len(frame) for (model, _), frame in frames.items() if model == FAKE_MODELS[0]
@@ -147,17 +169,29 @@ def test_null_fitness_rows_are_dropped(table, frames):
     assert expected > 0, "the fixture produced no estimated rows to correlate"
 
 
-def test_every_layer_of_the_site_exclusion_fires(frames):
+def test_every_layer_of_the_site_exclusion_fires(frames, reverting):
     """All three site classes come out, and each is a different site.
 
-    Site 1 is globally masked, site 2 is censored and site 3 reverts. The first
-    two are columns of the table and the third is not, so a panel that read only
-    the table would keep site 3 -- a two-layer exclusion believing it ran three.
+    Site 1 is globally masked, site 2 is censored, and one site per clade
+    reverts. The first two are columns of the table and the third is not, so a
+    panel that read only the table would keep the reverting site -- a two-layer
+    exclusion believing it ran three.
+
+    Checked per clade against that clade's own set, and the other clades'
+    reverting sites are asserted *present*: a lookup hoisted out of
+    `base_frames`' loop would drop the first clade's site everywhere, which
+    reads as a stricter filter rather than as a wrong one.
     """
-    for frame in frames.values():
+    for (_, clade), frame in frames.items():
         assert not frame["globally_masked"].any()
         assert not frame["censored"].any()
-        assert 3 not in set(frame["aa_site"])
+        sites = set(frame["aa_site"])
+        assert not (sites & reverting[clade])
+        elsewhere = set.union(*(reverting[other] for other in FAKE_CLADES))
+        assert elsewhere - reverting[clade] <= sites, (
+            f"{clade} lost a site that reverts in another clade, which is what "
+            f"a reverting lookup hoisted out of the clade loop would do."
+        )
 
 
 def test_synonymous_rows_are_excluded(frames):
@@ -199,6 +233,12 @@ def test_the_cutoff_and_the_matching_rung_agree(frames):
     however small the gap; the correlations to 1e-10, which is float noise in
     two orderings of the same sum rather than a tolerance for disagreement.
     """
+    # The two invariants behind the claim, which the comparison below assumes
+    # rather than shows: the per-mutation panels' cutoff is a rung of the
+    # ladder, and the base frames carry no count filter for either to inherit.
+    assert panels.PANEL_MIN_COUNT in panels.COUNT_LADDER
+    assert panels.BASE_SPEC.min_count == 0
+
     base = panels.by_clade(frames, FAKE_MODELS[0])
     at_cutoff = {
         clade: panels.apply_count_threshold(frame, panels.PANEL_MIN_COUNT)
@@ -220,7 +260,7 @@ def test_the_cutoff_and_the_matching_rung_agree(frames):
         ).all()
 
 
-def test_the_shift_join_refuses_a_mismatched_wildtype(table, reverting):
+def test_the_shift_join_refuses_a_mismatched_wildtype(tmp_path, reverting):
     """D614G in one clade is never compared with E614G in another.
 
     The guard keys on ``clade_founder_aa`` and **silently does nothing when that
@@ -229,11 +269,15 @@ def test_the_shift_join_refuses_a_mismatched_wildtype(table, reverting):
     at a site whose founder differs between the clades, report more shared
     mutations than exist, and raise nothing.
     """
-    moved = table.copy()
-    at_site_five = (moved["clade"] == "21L") & (moved["aa_site"] == 5)
-    moved.loc[at_site_five, ["parent_aa", "clade_founder_aa"]] = "W"
+    moved = fake_table()
+    at_site_seven = (moved["clade"] == "21L") & (moved["aa_site"] == 7)
+    moved.loc[at_site_seven, "parent_aa"] = "W"
+    # Through the reader, which is what supplies `clade_founder_aa` at all. A
+    # hand-assigned column here would test the guard and not the rename.
+    read = written_table(tmp_path, moved)
+    assert (read["clade_founder_aa"] == read["parent_aa"]).all()
     frames = panels.base_frames(
-        moved, reverting_by_clade=reverting, models=[FAKE_MODELS[0]], clades=FAKE_CLADES
+        read, reverting_by_clade=reverting, models=[FAKE_MODELS[0]], clades=FAKE_CLADES
     )
     shift = panels.shift_frame(
         frames[(FAKE_MODELS[0], "21J")],
@@ -242,7 +286,7 @@ def test_the_shift_join_refuses_a_mismatched_wildtype(table, reverting):
         "21L",
         "delta_fitness_ratio",
     )
-    assert 5 not in set(shift["aa_site"])
+    assert 7 not in set(shift["aa_site"])
     assert len(shift) > 0, "the fixture paired nothing at all, so this proves nothing"
 
 
@@ -270,6 +314,19 @@ def test_identical_founders_drop_the_pair_rather_than_scoring_it(frames):
     )
     assert scored.empty
 
+    # And the mixed case, which an empty frame cannot distinguish from a drop
+    # that fired for some other reason: one pair shares a founder, the rest do
+    # not, and only that pair is missing.
+    mixed = dict.fromkeys(FAKE_CLADES, founder)
+    mixed["23A"] = "C" + founder[1:]
+    partial = panels.shift_pair_metrics(
+        panels.by_clade(frames, FAKE_MODELS[0]),
+        list(FAKE_CLADES),
+        "delta_fitness_ratio",
+        founders=mixed,
+    )
+    assert set(partial["pair_label"]) == {"21J\u219223A", "21L\u219223A"}
+
 
 def test_reverting_sites_raise_for_an_unmeasured_clade(reverting):
     """Absent means unmeasured, not "reverts nowhere".
@@ -292,9 +349,28 @@ def test_a_stale_audit_is_refused(tmp_path):
 
 
 def audit_or_skip() -> dict[str, set[int]]:
-    """This repository's own censor audit, or skip."""
-    if not panels.AUDIT_JSON.is_file():
-        message = f"{panels.AUDIT_JSON} does not exist; run `rule audit_censor`"
+    """This repository's own censor audit and the censor table, or skip.
+
+    Both, not just the audit: the canary compares the two, and a host with the
+    audit but no mat-pcp mount would otherwise error in the middle of the test
+    rather than say what is missing.
+
+    ``VIRAL_DASM_REQUIRE_AUDIT=1`` turns the skip into a failure, as
+    ``VIRAL_DASM_REQUIRE_CHECKPOINT`` does in `tests/test_score_run.py`. Set it
+    at merge time: the skip is right while a campaign is mid-flight, and after
+    it lands a silent ``s`` is the one outcome that looks like a pass.
+    """
+    missing = [
+        str(path)
+        for path in (
+            panels.AUDIT_JSON,
+            lib.mat_pcp_path("censored_mutations_file"),
+            lib.mat_pcp_path("censored_clades_file"),
+        )
+        if not path.is_file()
+    ]
+    if missing:
+        message = f"not readable here: {', '.join(missing)}"
         if os.environ.get("VIRAL_DASM_REQUIRE_AUDIT") == "1":
             pytest.fail(message)
         pytest.skip(message)
@@ -332,6 +408,21 @@ def test_censored_directional_is_not_the_reverting_exclusion():
     )
 
 
+def test_the_ladder_is_the_library_ladder():
+    """`scripts/panel_spec.py`'s rungs against the ones the filter applies.
+
+    The spec module is stdlib-only on purpose -- `workflow/figures.smk` imports
+    it to declare outputs, and a `.smk` is parsed on every snakemake invocation
+    -- so it restates the rungs as a literal rather than importing them. This is
+    what stops that literal drifting from the ladder `apply_count_threshold`
+    actually filters on, which would sweep one axis and label it another.
+    """
+    assert panels.COUNT_LADDER == list(
+        COUNT_THRESHOLD_LADDER[: len(panels.COUNT_LADDER)]
+    )
+    assert panels.PANEL_MIN_COUNT == panels.COUNT_LADDER[0]
+
+
 def test_panel_selections_name_runs_the_pipeline_trains():
     """A selection cannot name a model, or an arm, that has no run.
 
@@ -347,4 +438,7 @@ def test_panel_selections_name_runs_the_pipeline_trains():
                 f"({model!r}, {panels.ARM!r}) is not one of the seven runs"
             )
     assert panels.DEFAULT_SELECTION in panels.SELECTIONS
-    assert panels.SELECTIONS[panels.DEFAULT_SELECTION] == (panels.FIGURE_MODEL,)
+    # The published figure is one model, not a pooled median: panels C and E
+    # pool whatever their selection names, so a second model here would change
+    # what `fig:agreement` shows without changing any code.
+    assert len(panels.SELECTIONS[panels.DEFAULT_SELECTION]) == 1

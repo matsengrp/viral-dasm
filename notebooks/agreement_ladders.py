@@ -68,21 +68,21 @@ def _(mo):
 
     import pandas as pd
 
+    # Required, not defaulted. A fallback spelling of either path is a second
+    # spelling of a fact `workflow/figures.smk` already states, and the rule
+    # passes both in; missing one should stop here rather than quietly read a
+    # different file from the one the rule declared.
     _args = mo.cli_args()
-    TABLE_PATH = Path(
-        str(
-            _args.get("table")
-            or panels.ARTIFACT_ROOT / "scored" / "selection_factors.parquet"
-        )
-    )
+    TABLE_PATH = Path(str(_args["table"]))
+    AUDIT_PATH = Path(str(_args["audit"]))
     SELECTION = str(_args.get("selection") or panels.DEFAULT_SELECTION)
     MODELS = panels.selection_models(SELECTION)
-    return MODELS, SELECTION, TABLE_PATH, charts, panels, pd
+    return AUDIT_PATH, MODELS, SELECTION, TABLE_PATH, charts, panels, pd
 
 
 @app.cell
-def _(MODELS, SELECTION, TABLE_PATH, mo, panels):
-    REVERTING = panels.reverting_sites_by_clade()
+def _(AUDIT_PATH, MODELS, TABLE_PATH, mo, panels, SELECTION):
+    REVERTING = panels.reverting_sites_by_clade(AUDIT_PATH)
     SPEC = panels.BASE_SPEC
     # Panel C scores every clade that can be scored, so the roster is the
     # clade axis here rather than a selection; panel E draws pairs from the
@@ -101,11 +101,11 @@ def _(MODELS, SELECTION, TABLE_PATH, mo, panels):
         f"{len(CLADES)} clades, {len(BASE)} (model, clade) frames at cutoff "
         f"zero."
     )
-    return BASE, CLADES, REVERTING, SPEC, TABLE
+    return BASE, SPEC
 
 
 @app.cell
-def _(BASE, MODELS, SELECTION, SPEC, charts, mo, panels, pd):
+def _(BASE, MODELS, SPEC, mo, panels, pd):
     FOUNDERS = panels.shift_pair_founders()
     _within, _shift, _adequacy, _paired_by_model = [], [], [], {}
     for _model in MODELS:
