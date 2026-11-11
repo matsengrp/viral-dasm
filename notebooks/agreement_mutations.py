@@ -14,27 +14,25 @@ def _():
 @app.cell
 def _(mo):
     mo.md(r"""
-    # `fig:agreement`, panels A, B and D: the mutations behind the summary
+    # `fig:agreement` panels A, B and D
 
-    Three per-mutation views of one question — does a DASM's log selection
-    factor agree with mat-pcp's counts-based fitness effect?
+    *The DASM learns mutational effects and how they shift between clades.*
+    Three per-mutation panels of that figure, drawn from
+    `selection_factors.parquet`. No inference and no GPU: `rule score` did the
+    forward passes.
 
-    - **Panel A** traces one mutation across every clade that carries an
-      estimate of it, with the band the observed counts can support under
-      Poisson noise.
-    - **Panel B** is one clade's whole cloud, which is the data behind a
-      single dot of panel C.
-    - **Panel D** is the same comparison on *shifts*: how an effect moves
-      between two clades, one cell per clade pair.
+    | panel | what the paper shows |
+    |---|---|
+    | A | F456L across the clades, as an example of an effect that shifts |
+    | B | every mutation to the Delta (21J) founder, counts against DASM |
+    | D | shifts between four clades well separated on the tree |
 
-    Everything here reads `selection_factors.parquet` and runs no inference.
-    The statistics come from `scripts/panels.py`, the drawing from
-    `scripts/panel_charts.py`; this notebook is the layout and the
-    commentary.
+    Panels C and E are the count-threshold sweeps and live in
+    `agreement_ladders.py`.
 
-    **GISAID**: the table this reads is cluster-only. The panel CSVs it
-    writes are counts, fitness effects and selection factors, which are
-    publishable, and carry no sequence.
+    **GISAID**: the table this reads is cluster-only. The CSVs it writes are
+    counts, fitness effects and selection factors, which are publishable, and
+    carry no sequence.
     """)
     return
 
@@ -113,20 +111,19 @@ def _(AUDIT_PATH, MODELS, SELECTION, TABLE_PATH, mo, panels):
 
 
 @app.cell
-def _(mo):
-    mo.md(r"""
-    ## Panel A — one mutation across the clades
+def _(mo, panels):
+    mo.md(f"""
+    ## Panel A — F456L across the clades
 
-    Two series of one quantity: mat-pcp's counts-based effect and the DASM's
-    log selection factor, for a single mutation, in every clade that carries
-    an estimate of it. Not restricted to the clades the correlation panels
-    score — the point of this panel is to show *where* the two approaches
-    disagree, which is not confined to a selection.
+    The paper's example of a mutation whose effect shifts dramatically
+    between clades, and which the DASM predicts. Two series of one quantity:
+    mat-pcp's counts-based effect, and the DASM's log selection factor.
 
-    The grey band is what the observed count can support under Poisson noise
-    in that count alone, holding the expected count fixed, because both
-    estimates are anchored to the same neutral model and an error in that
-    expectation moves them together.
+    Clades with at least {panels.PANEL_MIN_COUNT} actual or expected counts of
+    the mutation, as the caption states. The grey band is what the observed
+    count alone can support under Poisson noise, holding the expected count
+    fixed — both estimates are anchored to the same neutral model, so an error
+    there moves them together.
     """)
     return
 
@@ -198,14 +195,16 @@ def _(PANEL_MODEL, SELECTION, SPEC, TABLE_PATH, charts, mo, panels):
 @app.cell
 def _(mo, panels):
     mo.md(f"""
-    ## Panel B — one clade's cloud
+    ## Panel B — the Delta ({panels.SCATTER_CLADE}) founder
 
-    Every surviving mutation in **{panels.SCATTER_CLADE}** at a cutoff of
-    {panels.PANEL_MIN_COUNT}, the DASM on x and the counts on y, on one
-    shared domain so the dashed `y = x` is a true 45 degrees and a point's
-    distance from it is the size of the disagreement. The firebrick line is
-    the least-squares fit; r and n in the corner are read from the same
-    table the CSV is written from.
+    The clade with the most mutation counts, at a cutoff of
+    {panels.PANEL_MIN_COUNT} actual or expected counts, which is the paper's
+    "mutational effects that are supported by the underlying counts". Both
+    estimates are clipped below at {panels.BASE_SPEC.clip_lower:g}, for the
+    limited dynamic range the caption notes.
+
+    One shared domain for both axes, so the dashed `y = x` is a true 45
+    degrees and a point's distance from it is the size of the disagreement.
     """)
     return
 
@@ -272,19 +271,20 @@ def _(BASE, MODELS, PANEL_MODEL, SELECTION, SPEC, charts, panels, pd):
 @app.cell
 def _(mo, panels):
     mo.md(f"""
-    ## Panel D — the same question about *shifts*
+    ## Panel D — shifts between clades
 
-    One cell per unordered clade pair drawn from
-    `{"`, `".join(panels.SHIFT_CLADES)}`, laid out like a pairplot: the
-    column is the earlier clade, the row is the later one. Both shifts are
-    `later − earlier`, over the mutations the two clades share whose
-    wildtype residue agrees — so D614G in one clade is never compared with
-    E614G in the other.
+    The paper's four clades separated by long branch lengths —
+    `{"`, `".join(panels.SHIFT_CLADES)}` — giving six pairs, laid out like a
+    pairplot: the column is the earlier clade, the row is the later one. A
+    mutation's shift is the difference of its effects in the two clades, over
+    the mutations they share whose wildtype residue agrees, so D614G in one
+    clade is never compared with E614G in the other.
 
-    **A pair whose founder is identical in this gene is dropped**, not
-    scored at zero: the model sees the same input twice, so no model can
-    shift between them, while mat-pcp's Δfitness still moves with each
-    clade's own tree counts.
+    Because shifts are differences of clipped estimates, a mutation sitting at
+    the clip in both clades has a shift of exactly zero. A pair whose founder
+    is identical in spike is dropped rather than scored at zero: the model sees
+    the same input twice, while mat-pcp's Δfitness still moves with each
+    clade's own counts.
     """)
     return
 
@@ -343,7 +343,6 @@ def _(
                 "mutant_aa",
                 "sf_shift",
                 "fitness_shift",
-                "concordant",
             ]
         ].assign(model=PANEL_MODEL, min_count=panels.PANEL_MIN_COUNT),
         "panel_d_shift_grid",
@@ -360,18 +359,6 @@ def _(
         ]
     )
     return SHIFTS, SHIFT_METRICS
-
-
-@app.cell
-def _(SCATTER_METRICS, SHIFT_METRICS, mo):
-    mo.vstack(
-        [
-            mo.md("### What the panels report"),
-            mo.ui.table(SCATTER_METRICS, selection=None),
-            mo.ui.table(SHIFT_METRICS, selection=None),
-        ]
-    )
-    return
 
 
 if __name__ == "__main__":

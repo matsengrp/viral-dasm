@@ -91,16 +91,13 @@ COUNT_FILTER_MODE: Literal["and", "or"] = "or"
 # together, so a rung is a single number and the `or` above still decides how
 # the two counts combine at it -- see :func:`apply_count_threshold`.
 #
-# 10 is the default filter, so the first rung reproduces every other number in
-# a readout rather than starting somewhere new. Above it the spacing is
-# geometric because that is how count precision improves: the standard error on
-# a log count ratio falls as 1/sqrt(n), so 10 -> 20 buys the same factor as
-# 50 -> 100, and equal *additive* steps would spend all four rungs in the
-# regime where nothing changes. 100 is the ceiling because the surviving
-# population is what pays for each rung: raising the floor sharpens the fitness
-# estimates that remain while shrinking their number, and past some point the
-# clade adequacy floor starts removing whole clades rather than trimming
-# mutations. Where that point falls is a property of the run, so the sweep
+# The spacing is geometric because that is how count precision improves: the
+# standard error on a log count ratio falls as 1/sqrt(n), so 10 -> 20 buys the
+# same factor as 50 -> 100, and equal *additive* steps would spend every rung in
+# the regime where nothing changes. Raising the floor sharpens the fitness
+# estimates that remain while shrinking their number, and past some point it
+# removes whole clades through the adequacy floor rather than trimming
+# mutations; where that point falls is a property of the run, so the sweep
 # reports the surviving counts per rung instead of asserting one here.
 COUNT_THRESHOLD_LADDER: list[int] = [10, 20, 50, 100]
 
@@ -108,12 +105,10 @@ COUNT_THRESHOLD_LADDER: list[int] = [10, 20, 50, 100]
 # 20 is a floor, not a sufficiency threshold: it exists because the alternative
 # is worse, not because 20 mutations make a solid correlation.
 #
-# What it is for: mat-pcp emits fitness for every clade, but the early ones have
-# almost no descendants, so their counts sit in the single digits on *both*
-# measures and nearly every row falls to the count filter. A clade left with no
-# rows contributes a NaN dot to a within-clade plot and an all-NaN pair to
-# every clade pair it appears in, so the floor has to be applied before a
-# correlation is taken rather than after.
+# What it is for: mat-pcp emits fitness for every clade, including clades the
+# count filter empties. A clade left with no rows contributes a NaN dot to a
+# within-clade panel and an all-NaN pair to every clade pair it appears in, so
+# the floor has to be applied before a correlation is taken rather than after.
 DEFAULT_MIN_CLADE_MUTATIONS = 20
 
 # Common lower bound applied to BOTH axes before anything is correlated or
@@ -123,9 +118,8 @@ DEFAULT_MIN_CLADE_MUTATIONS = 20
 # not meaningfully distinguishable but do dominate a least-squares fit and
 # squash the bulk of the cloud into a corner. Clamping both to one bound keeps
 # them on a single scale and keeps the correlation about the region where the
-# two measures actually carry information. -20 is beneath every observed value
-# and is therefore equivalent to no clipping, which is how a caller turns this
-# off.
+# two measures actually carry information. A bound beneath every observed value
+# is equivalent to no clipping, which is how a caller turns this off.
 #
 # Consequence worth knowing, and the reason `clip_axes` keeps `*_raw` columns:
 # every r moves with this bound, and cross-clade shifts are differences of
@@ -141,22 +135,16 @@ CLIP_LOWER = -4.0
 # the point colours contradict the number above them.
 SHIFT_EPS = 1e-10
 
-# A cross-clade shift correlation answers "does the model track how a
-# mutation's fitness *changed*". On a pair whose shared mutations all moved a
-# little, both axes are mostly counting noise and r measures the agreement of
-# two noise processes -- it comes out near zero and says nothing about the
-# model. This is the magnitude at which a pair's *counts-based* shift counts as
-# a real change rather than noise, and `shift_pair_metrics` reports how many
-# such mutations each pair holds.
+# The magnitude at which a clade pair's *counts-based* shift counts as a real
+# change rather than noise: 3 in log-ratio units, which is an e^3 ~ 20x change
+# in relative fitness.
 #
-# The threshold is on the counts-based shift, not the model's, because the
-# question is whether the *measurement* resolved a real change; a model can
-# predict a large shift that the counts never saw.
-#
-# 3 in log-ratio units is a ~20x change in relative fitness -- far outside what
-# count noise produces at these depths. Reported, never filtered on: no panel
-# here gates a pair on it, so the threshold can move without any correlation
-# being recomputed.
+# **No panel in this repository reads it.** Upstream gated which pairs entered a
+# shift panel on how many large shifts they held; that gate is not ported, so
+# `shift_pair_metrics` computes an `n_large_shifts` column nothing plots. The
+# constant stays because the column is produced inside a function vendored
+# code-identical, and it is reported rather than filtered on, so moving it
+# recomputes no correlation.
 LARGE_SHIFT_THRESHOLD = 3.0
 
 
@@ -952,11 +940,15 @@ COUNT_NOISE_COVERAGE = 0.95
 
 # mat-pcp's `delta_fitness_ratio` is `log((a + 0.5) / (e + 0.5))`, and the two
 # functions below take that pseudocount as a parameter rather than assuming it.
-# It is not a detail: an interval computed on `log(lambda / e)` while the
-# plotted point uses the pseudocount puts the point *outside its own band*
-# wherever the expected count is small -- the shift is `log((e + 0.5) / e)`,
-# which is 0.26 at e = 1.7 against a half-width of 0.23. Pass the pseudocount
-# the plotted metric actually uses and the point is inside by construction.
+# The two choices differ by `log((e + 0.5) / e)`, which is negligible at large
+# expected counts and is not at small ones: an interval on `log(lambda / e)`
+# drawn under a point that carries the pseudocount puts the point outside its
+# own band wherever the expected count is near 1.
+#
+# **Panel A passes 0, not this.** See `with_count_noise_interval` in
+# `scripts/panels.py` for why: the shifted estimand has a floor, so a zero count
+# that can rule nothing out would "reject" a strongly deleterious prediction.
+# This constant is the alternative, and nothing here uses it.
 RATIO_PSEUDOCOUNT = 0.5
 
 

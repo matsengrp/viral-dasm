@@ -14,34 +14,27 @@ def _():
 @app.cell
 def _(mo):
     mo.md(r"""
-    # `fig:agreement`, panels C and E: agreement against how well it was measured
+    # `fig:agreement` panels C and E
 
-    Two panels on one x axis, and the x axis is the **count cutoff** — the
-    minimum actual or expected count a mutation needs to enter a
-    correlation. **Panel C**: one dot per clade, the within-clade Pearson r.
-    **Panel E**: one dot per unordered clade pair, the r between ΔlogSF and
-    Δfitness over the mutations the two clades share. The grey dashes are
-    the medians.
+    The paper's two count-threshold sweeps: *the correlation increases as the
+    counts threshold increases*. **Panel C** is one dot per clade, the
+    within-clade Pearson r; **panel E** is one dot per clade pair, the r
+    between the two approaches' shifts. The grey dashes are the medians.
 
-    **What a rising curve means.** The same model, on a better-measured
-    subset of the same clades, agrees better with the counts. That is
-    evidence about the *yardstick*, not about the model: the distance from
-    r = 1 at the lowest rung was substantially noise in mat-pcp's estimate
-    rather than error in the DASM.
+    The x axis is the cutoff — the minimum actual or expected count a mutation
+    needs to enter a correlation — so a rising curve says the same model agrees
+    better with the counts on a better-measured subset of the same clades. That
+    is evidence about the yardstick rather than the model: the distance from
+    r = 1 at the lowest rung was substantially noise in mat-pcp's estimate.
 
-    **The clade set is pinned across the rungs.** Raising the floor removes
-    mutations, which removes whole clades through the adequacy floor — and
-    the clades it removes first are the thin, poorly-measured ones whose r
-    is lowest. A sweep that let each rung keep its own clade set would show
-    r rising with the threshold even if no surviving clade moved at all:
-    the trend would be survivorship. `count_ladder_adequacy` restricts every
-    rung to the clades that clear the floor at all of them, and reports what
-    each rung would have kept on its own, so the cost of the pairing is
-    visible rather than assumed.
+    **A clade contributes a dot only where it retains enough mutations**, and
+    the clade set is pinned across the rungs — every rung uses the clades that
+    clear the floor at *all* of them. Otherwise the thin, low-r clades would
+    drop out as the threshold rose and the trend would be survivorship rather
+    than precision.
 
-    **A pair thins faster than a clade.** A mutation leaves a pair as soon
-    as *either* side falls below the cutoff, so panel E's dots rest on fewer
-    mutations than panel C's at the same rung.
+    Panels A, B and D are the per-mutation panels and live in
+    `agreement_mutations.py`.
 
     **GISAID**: reads the cluster-only scored table; writes publishable
     aggregate statistics.
@@ -107,19 +100,19 @@ def _(AUDIT_PATH, MODELS, TABLE_PATH, mo, panels, SELECTION):
 @app.cell
 def _(BASE, MODELS, SPEC, mo, panels, pd):
     FOUNDERS = panels.shift_pair_founders()
-    _within, _shift, _adequacy, _paired_by_model = [], [], [], {}
+    _within, _shift, _paired_by_model = [], [], {}
     for _model in MODELS:
         _base = panels.by_clade(BASE, _model)
         if not _base:
             continue
-        # The paired clade set, and the per-rung adequacy it came from, kept so
-        # the pairing's cost can be named rather than assumed.
-        _paired, _adq = panels.count_ladder_adequacy(
+        # The clades that clear the mutation floor at every rung. The per-rung
+        # adequacy frame is not kept: how many clades survive the pairing is
+        # reported below, and nothing in the figure plots the rest of it.
+        _paired, _ = panels.count_ladder_adequacy(
             _base,
             thresholds=panels.COUNT_LADDER,
             min_mutations=SPEC.min_clade_mutations,
         )
-        _adequacy.append(_adq.assign(model=_model))
         _paired_by_model[_model] = list(_paired)
         if _paired:
             _within.append(
@@ -146,17 +139,16 @@ def _(BASE, MODELS, SPEC, mo, panels, pd):
 
     WITHIN_LADDER = pd.concat(_within, ignore_index=True)
     SHIFT_LADDER = pd.concat(_shift, ignore_index=True)
-    ADEQUACY = pd.concat(_adequacy, ignore_index=True)
     PAIRED_BY_MODEL = _paired_by_model
     mo.md(
         "\n".join(
-            f"- `{model}`: {len(clades)} clades clear the floor of "
-            f"{SPEC.min_clade_mutations} at every rung of "
-            f"{panels.COUNT_LADDER}"
+            f"- `{model}`: {len(clades)} clades retain at least "
+            f"{SPEC.min_clade_mutations} mutations at every rung of "
+            f"{panels.COUNT_LADDER}, and are the dots at all three"
             for model, clades in PAIRED_BY_MODEL.items()
         )
     )
-    return ADEQUACY, PAIRED_BY_MODEL, SHIFT_LADDER, WITHIN_LADDER
+    return SHIFT_LADDER, WITHIN_LADDER
 
 
 @app.cell
@@ -177,8 +169,13 @@ def _(SELECTION, SPEC, WITHIN_LADDER, charts, panels):
         "panel_c_within_clade_ladder",
         selection=SELECTION,
     )
+    # What the panel plots, and nothing else: one dot is (model, clade, rung)
+    # at a Pearson r, over `n_mutations` mutations. `within_clade_metrics` also
+    # returns `spearman_rho` and `regression_slope`, which no panel of this
+    # figure draws; they are recomputed from the table when a comparison wants
+    # them rather than committed beside numbers the figure does show.
     panels.write_panel_csv(
-        WITHIN_LADDER,
+        WITHIN_LADDER[["model", "clade", "min_count", "pearson_r", "n_mutations"]],
         "panel_c_within_clade_ladder",
         selection=SELECTION,
         spec=SPEC,
@@ -204,46 +201,18 @@ def _(SELECTION, SHIFT_LADDER, SPEC, charts, panels):
         "panel_e_shift_ladder",
         selection=SELECTION,
     )
+    # As panel C: the plotted quantity and the keys that identify a dot.
+    # `shift_pair_metrics`' other columns -- `spearman_rho`,
+    # `directional_concordance`, `n_large_shifts`, `sf_shift_is_constant` --
+    # are not drawn here, and `n_large_shifts` is the column whose gate this
+    # repository does not port at all.
     panels.write_panel_csv(
-        SHIFT_LADDER, "panel_e_shift_ladder", selection=SELECTION, spec=SPEC
+        SHIFT_LADDER[["model", "pair_label", "min_count", "pearson_r", "n_mutations"]],
+        "panel_e_shift_ladder",
+        selection=SELECTION,
+        spec=SPEC,
     )
     panel_e
-    return
-
-
-@app.cell
-def _(ADEQUACY, SHIFT_LADDER, WITHIN_LADDER, mo):
-    mo.vstack(
-        [
-            mo.md("""
-            ### What the panels report
-
-            `pearson_r` below zero is drawn on the floor and kept raw in the
-            CSVs: the sign of a correlation between two noise processes
-            carries no information, and left unclipped those dots stretch the
-            y axis over a region nothing is being claimed about.
-            """),
-            mo.ui.table(
-                WITHIN_LADDER.groupby(["model", "min_count"])["pearson_r"]
-                .agg(["median", "count"])
-                .reset_index(),
-                selection=None,
-            ),
-            mo.ui.table(
-                SHIFT_LADDER.groupby(["model", "min_count"])["pearson_r"]
-                .agg(["median", "count"])
-                .reset_index(),
-                selection=None,
-            ),
-            mo.md("#### What each rung would have kept on its own"),
-            mo.ui.table(
-                ADEQUACY.groupby(["model", "min_count"])["adequate"]
-                .agg(["sum", "count"])
-                .reset_index(),
-                selection=None,
-            ),
-        ]
-    )
     return
 
 
