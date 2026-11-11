@@ -191,6 +191,13 @@ PANEL_INPUT_FILES = frozenset(
 #: file that does not exist.
 FITNESS_SUFFIX = "_aamut_fitness.csv"
 
+#: Suffix mat-pcp gives each per-clade *nucleotide* fitness table, the grid
+#: `fig:subsampling`'s panel B is measured over. Here for the same reason as
+#: :data:`FITNESS_SUFFIX`: `workflow/figures.smk` declares these files as a
+#: rule's inputs and `scripts/panels.py` opens them, so two spellings could
+#: drift and leave the rule declaring a path nothing reads.
+NTMUT_SUFFIX = "_ntmut_fitness.csv"
+
 
 def mat_pcp_path(key: str) -> Path:
     """One of the mat-pcp files ``config.yaml`` names.
@@ -359,6 +366,24 @@ CORPUS_NAMES = tuple(CONFIG["corpora"])
 BUILT_CORPUS_NAMES = tuple(n for n in CORPUS_NAMES if corpus(n).is_built_here)
 
 FULL_DEPTH = corpus("full_depth")
+
+
+def cap_of(corpus_name: str) -> int:
+    """The per-clade cap a thinned corpus's name records.
+
+    ``cap_50000_0`` is a cap of 50,000. Read off the name rather than restated
+    in a table, so a cap cannot drift from the arm that was built -- and in one
+    place, because panel A draws a rule per cap and panel B labels a curve per
+    cap from the same number.
+    """
+    parts = corpus_name.split("_")
+    if len(parts) != 3 or parts[0] != "cap" or not parts[1].isdigit():
+        raise ValueError(
+            f"{corpus_name!r} is not a thinned corpus: a cap arm is named "
+            f"`cap_<n>_<fold>`, as `config.yaml`'s corpora block spells them."
+        )
+    return int(parts[1])
+
 
 #: The wiring smoke's corpus, and its md5. Not a :class:`Corpus`: it records
 #: no fold sizes and no row-order digest, because no result depends on its

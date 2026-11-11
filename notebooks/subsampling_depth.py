@@ -19,9 +19,9 @@ def _(mo):
     The paper's tradeoff, in two measurements of the tree. **Panel A** is how
     unevenly the clades are sampled: a few clades from early in the pandemic
     hold millions of sequences, most hold tens of thousands. **Panel B** is
-    what that costs — for a deep clade and a shallow one, the fraction of spike
-    mutations carrying at least X actual or expected counts, at full depth and
-    under each downsampling cap.
+    what that costs — for the deepest clade (21J, 4.3M sequences) and a much
+    shallower one (25C, 104k), the fraction of spike mutations carrying at
+    least X actual or expected counts, at full depth and under each cap.
 
     Dividing the data by clade is what makes a within-clade shift measurable,
     and it is also what leaves most mutations in most clades with too few
@@ -29,7 +29,8 @@ def _(mo):
 
     Neither panel takes a model: both read mat-pcp's count tables directly.
     Panels C and D — how well each approach recovers the full-tree effects when
-    trained on a thinned tree — are in `subsampling_ladder.py`.
+    trained on a thinned tree — need the thinned-arm models, and are added once
+    those are trained and scored.
 
     **GISAID**: reads cluster-only count tables; writes publishable per-clade
     counts and shares.
@@ -70,11 +71,11 @@ def _(mo):
     mo.md(r"""
     ## Panel A — sequences per clade
 
-    One bar per clade, one dashed rule per cap. Every clade above a rule is cut
+    One dot per clade, one dashed rule per cap. Every clade above a rule is cut
     back **to** it; every clade below is left untouched, which is what makes a
     cap arm a different intervention from taking a fixed fraction of every
-    clade. The y axis is logarithmic because the clades span 86 sequences to
-    4.3 million.
+    clade. The y axis is logarithmic because the clades span four orders of
+    magnitude.
     """)
     return
 
@@ -88,6 +89,9 @@ def _(CLADE_COUNTS, SELECTION, charts, mo, panels):
         charts.clade_size_panel(
             sizes,
             caps,
+            # Panel B's own two clades, so an arrow cannot point at a clade
+            # panel B does not draw.
+            highlight=tuple(panels.ECDF_CLADES),
             title=[f"Sequences per clade ({len(sizes)} clades)"],
         ),
         panels.DEPTH_PANELS[0],
@@ -121,8 +125,9 @@ def _(mo):
 
     The share of each clade's spike mutations carrying at least X actual or
     expected counts. The dotted rule is the accuracy threshold of 10, so where
-    a curve crosses it is the share of mutations that clade can estimate at
-    that depth.
+    a curve crosses it is the share of that clade's mutations with at least
+    that many counts — an upper bound on what is estimable, since scoring also
+    drops synonymous, masked and censored mutations.
 
     The population is the clade's **whole** nucleotide grid — every
     single-nucleotide mutation away from the founder — not the subset that

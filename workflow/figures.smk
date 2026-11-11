@@ -44,6 +44,7 @@ from panel_spec import (
     SHIFT_CLADES,
     SUBSAMPLING_SELECTION,
     figure_dir,
+    ntmut_grid_path,
     panel_csv_path,
 )
 
@@ -82,9 +83,7 @@ def ecdf_grid_files(*_):
     """
     root = mat_pcp_path("ntmut_fitness_dir")
     return [
-        str(root / f"{clade}_ntmut_fitness.csv")
-        if arm == "full_depth"
-        else str(root / arm / f"{clade}_ntmut_fitness.csv")
+        str(ntmut_grid_path(root, clade, arm))
         for clade in ECDF_CLADES
         for arm in CORPUS_NAMES
     ]
@@ -135,6 +134,7 @@ rule subsampling_depth:
         # The roster panel A plots, which `clade_size_frame` drops the counts
         # table's two extra clades against.
         clade_founders=founder_fastas,
+        founder_reader="scripts/founders.py",
     output:
         html=f"{NOTEBOOK_DIR}/subsampling_depth.html",
         panels=panel_outputs(DEPTH_PANELS, SUBSAMPLING_SELECTION),

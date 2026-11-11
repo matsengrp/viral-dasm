@@ -21,12 +21,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from lib import assert_dasm2_is_this_repo
+from lib import FULL_DEPTH, assert_dasm2_is_this_repo, cap_of
 
 import dasm2  # noqa: F401  (imported first for its side effects)
 
 assert_dasm2_is_this_repo()
 
+import math
 from collections.abc import Sequence
 
 import altair as alt
@@ -545,9 +546,12 @@ def lookup_panel_sizing(n_clades: int) -> dict[str, int]:
 #: Full depth against the three caps. One ink for the undisturbed tree and a
 #: light-to-dark blue ramp for the caps, so depth reads as one ordered channel:
 #: a reader follows the curves down as the cap tightens without consulting the
-#: legend. Deliberately not :data:`POINT_BLUE` and friends -- those three are
-#: the scatter's data-reference-fit roles, and reusing one here would imply a
-#: cap arm was a reference.
+#: legend. :data:`POINT_BLUE` and friends are the scatter's
+#: data-reference-fit roles, so a cap arm does not borrow one.
+#:
+#: One colour per cap arm, and :func:`check_cap_colours` enforces it: Vega
+#: recycles a ``range`` shorter than its ``domain`` without raising, so a
+#: fourth cap in `config.yaml` would silently give two arms one blue.
 DEPTH_INK = "#1a1a1a"
 CAP_BLUES = ("#6baed6", "#3182bd", "#08519c")
 
@@ -555,13 +559,56 @@ CAP_BLUES = ("#6baed6", "#3182bd", "#08519c")
 #: scatter roles use.
 THRESHOLD_ACCENT = "#d95f02"
 
-#: Panel A's bars. A cap is drawn as a rule across the whole panel rather than
-#: as a per-clade mark, because what it does is set one height for every clade
-#: above it.
+#: Panel A's geometry. A cap is drawn as a rule across the whole panel rather
+#: than as a per-clade mark, because what it does is set one height for every
+#: clade above it.
 CLADE_SIZE_WIDTH = 760
 CLADE_SIZE_HEIGHT = 230
 ECDF_PANEL_WIDTH = 300
 ECDF_PANEL_HEIGHT = 230
+
+#: Panel A's log domain, as multiples of the smallest and largest clade. A mark
+#: sitting exactly on a bound is drawn half outside the frame and an unclipped
+#: rule at the bound lands on the axis line, so neither end is tight; the top is
+#: the looser of the two because it carries the whole arrow over the tallest
+#: clade, head included, and not just that clade's dot.
+DOMAIN_FLOOR_PAD = 0.7
+DOMAIN_TOP_PAD = 3.0
+
+#: The arrow over a highlighted clade, in screen pixels above its dot's centre:
+#: the head's centre, then the staff's far end. The staff starts at the head's
+#: centre so its end is hidden under the head rather than floating past it.
+#:
+#: Pixels, not multiples, because a head of a fixed size needs a fixed gap --
+#: and on a log axis a multiplicative offset is a different number of pixels at
+#: every height. :func:`_raised` converts.
+ARROW_HEAD_PX = 15.0
+ARROW_TAIL_PX = 29.0
+ARROW_HEAD_SIZE = 110
+
+
+def check_cap_colours(caps: Sequence[object]) -> None:
+    """Refuse to draw more cap arms than :data:`CAP_BLUES` has colours."""
+    if len(caps) > len(CAP_BLUES):
+        raise ValueError(
+            f"{len(caps)} cap arms against {len(CAP_BLUES)} colours in "
+            f"CAP_BLUES. Vega recycles a short range without raising, so two "
+            f"arms would share a blue in panels A and B both."
+        )
+
+
+def _raised(values: pd.Series, pixels: float, *, per_decade: float) -> pd.Series:
+    """``values``, raised by ``pixels`` screen pixels on a log axis."""
+    return values * 10 ** (pixels / per_decade)
+
+
+def depth_label(arm: str) -> str:
+    """One sampling depth's label, in the one spelling both panels use.
+
+    Panel A labels its cap rules and panel B its curves, and a reader matches
+    the two by that label, so they are built here rather than in each.
+    """
+    return "full depth" if arm == FULL_DEPTH.name else f"cap {cap_of(arm):,}"
 
 
 def clade_size_panel(
@@ -569,14 +616,17 @@ def clade_size_panel(
     caps: Sequence[int],
     *,
     title: list[str],
+    highlight: Sequence[str] = (),
     width: int = CLADE_SIZE_WIDTH,
     height: int = CLADE_SIZE_HEIGHT,
 ) -> alt.LayerChart:
     """Panel A: sequences per clade, with one rule per downsampling cap.
 
-    A dot per clade on a log y axis.
+    A dot per clade on a log y axis, and an arrow over each clade in
+    ``highlight`` -- panel B's two, so a reader arriving from its titles finds
+    them here without counting along 56 ticks.
 
-    **A log y axis**, because the clades span 86 sequences to 4.3 million. On a
+    **A log y axis**, because the clades span four orders of magnitude. On a
     linear axis every clade but the largest five is a flat line against the
     axis, which is the opposite of the panel's point: the imbalance is the
     finding, and a reader has to be able to see where a cap falls among the
@@ -597,26 +647,38 @@ def clade_size_panel(
         ),
     )
     # One scale object and one field name for both layers. A layered chart
-    # shares a channel's scale, so a rule encoded on its own field -- or on a
-    # linear scale beside the bars' log one -- resolves to a domain that fits
-    # neither: the first draft drew no bars at all and collapsed the three caps
-    # onto one line at the top of the frame.
-    floor = max(1, int(frame["n_sequences"].min()))
-    ceiling = int(frame["n_sequences"].max())
-    y_enc = alt.Y(
-        "n_sequences:Q",
-        title="sequences",
-        scale=alt.Scale(type="log", domain=[floor, ceiling], nice=False),
-        axis=alt.Axis(
-            labelFontSize=PANEL_FONT_SIZE,
-            titleFontSize=PANEL_FONT_SIZE,
-            format="~s",
-        ),
+    # shares a channel's scale, so a rule encoded on its own field, or on a
+    # linear scale beside a log one, resolves to a domain that fits neither
+    # layer and draws both somewhere other than where the code reads.
+    #
+    # The domain spans the caps as well as the clades: a rule is not clipped to
+    # the plot, so a cap outside the clade range would be drawn outside the
+    # frame or not at all, with nothing raising.
+    check_cap_colours(caps)
+    bounds = [int(value) for value in frame["n_sequences"]] + [int(cap) for cap in caps]
+    floor = max(1.0, min(bounds) * DOMAIN_FLOOR_PAD)
+    ceiling = max(bounds) * DOMAIN_TOP_PAD
+    y_scale = alt.Scale(type="log", domain=[floor, ceiling], nice=False)
+    y_axis = alt.Axis(
+        labelFontSize=PANEL_FONT_SIZE,
+        titleFontSize=PANEL_FONT_SIZE,
+        format="~s",
     )
-    # A dot per clade, not a bar. A bar extends from its scale's zero, and a
-    # log scale has none, so bars silently do not render at all -- which is
-    # what the first draft of this panel did. The source panel draws dots for
-    # the same reason.
+
+    def y_of(field: str) -> alt.Y:
+        """One field on panel A's one y scale.
+
+        Every layer repeats the scale, the title and the axis. The arrow sits
+        at its own field rather than at the clade's count, and a layer that
+        named a field without restating the domain would make Vega resolve one
+        scale across two of them.
+        """
+        return alt.Y(f"{field}:Q", title="sequences", scale=y_scale, axis=y_axis)
+
+    y_enc = y_of("n_sequences")
+    # A dot per clade, not a bar. A bar extends from its scale's zero and a log
+    # scale has none, so a bar mark here draws nothing at all while the chart
+    # still builds, saves, and satisfies every assertion about it.
     dots = (
         alt.Chart(frame)
         .mark_point(color=DEPTH_INK, filled=True, size=70, opacity=0.9)
@@ -635,6 +697,7 @@ def clade_size_panel(
             "label": [f"cap {cap:,}" for cap in caps],
         }
     )
+
     rules = (
         alt.Chart(cap_frame)
         .mark_rule(strokeDash=[6, 4], strokeWidth=1.8)
@@ -654,7 +717,40 @@ def clade_size_panel(
             tooltip=[alt.Tooltip("label:N", title="Cap")],
         )
     )
-    return (dots + rules).properties(
+    layers = [dots, rules]
+    marked = frame[frame["clade"].isin(list(highlight))]
+    if len(marked):
+        # Pixels per decade, which is what lets the arrow be drawn to a pixel
+        # spec on a log axis.
+        per_decade = height / math.log10(ceiling / floor)
+        marked = marked.assign(
+            arrow_head=_raised(
+                marked["n_sequences"], ARROW_HEAD_PX, per_decade=per_decade
+            ),
+            arrow_tail=_raised(
+                marked["n_sequences"], ARROW_HEAD_PX, per_decade=per_decade
+            ),
+            arrow_end=_raised(
+                marked["n_sequences"], ARROW_TAIL_PX, per_decade=per_decade
+            ),
+        )
+        layers.append(
+            alt.Chart(marked)
+            .mark_rule(color=DEPTH_INK, strokeWidth=1.8)
+            .encode(x=x_enc, y=y_of("arrow_tail"), y2="arrow_end:Q")
+        )
+        layers.append(
+            alt.Chart(marked)
+            .mark_point(
+                shape="triangle-down",
+                filled=True,
+                size=ARROW_HEAD_SIZE,
+                color=DEPTH_INK,
+                opacity=1,
+            )
+            .encode(x=x_enc, y=y_of("arrow_head"))
+        )
+    return alt.layer(*layers).properties(
         width=width,
         height=height,
         title=alt.TitleParams(
@@ -671,26 +767,43 @@ def count_ecdf_panel(
     width: int = ECDF_PANEL_WIDTH,
     height: int = ECDF_PANEL_HEIGHT,
 ) -> alt.HConcatChart:
-    """Panel B: one eCDF per clade, one curve per sampling depth.
+    """Panel B: one complementary eCDF per clade, one curve per sampling depth.
 
-    A dotted rule marks the accuracy threshold, so the share of a clade's
-    mutations each depth still puts above it is read off the curve's height
-    where it crosses.
+    Each curve is the share of a clade's mutations carrying **at least** *x*
+    counts, so it falls from 1.0 rather than rising to it. A labelled rule
+    marks the accuracy threshold, and the curve's height where it crosses is
+    the share that depth still puts at or above the threshold.
 
-    Concatenated rather than faceted: the two panels carry different clades'
-    titles in the paper's own naming -- `21J (Delta)`, `25C (XFG)` -- and a
-    facet header would show the bare label this pipeline keys on.
+    Concatenated, so each view carries its clade's name in the paper's own
+    spelling -- `21J (Delta)`, `25C (XFG)` -- where a facet header would show
+    the bare label this pipeline keys on.
     """
-    arms = [arm for arm in frame["arm"].unique()]
-    caps = [arm for arm in arms if arm != "full_depth"]
-    domain = ["full depth"] + [f"cap {int(arm.split('_')[1]):,}" for arm in caps]
-    labelled = frame.assign(
-        depth=[
-            "full depth" if arm == "full_depth" else f"cap {int(arm.split('_')[1]):,}"
-            for arm in frame["arm"]
-        ]
-    )
+    arms = list(frame["arm"].unique())
+    caps = [arm for arm in arms if arm != FULL_DEPTH.name]
+    check_cap_colours(caps)
+    domain = [depth_label(FULL_DEPTH.name)] + [depth_label(arm) for arm in caps]
+    labelled = frame.assign(depth=[depth_label(arm) for arm in frame["arm"]])
     threshold_frame = pd.DataFrame({"x": [threshold]})
+
+    # One x scale for both views and for the rule. `hconcat` leaves position
+    # scales independent, so two clades whose grids ended at different counts
+    # would be drawn over different ranges side by side; and a rule with no
+    # scale of its own resolves against whichever field shares its name.
+    x_max = float(frame["x"].max())
+    if threshold > x_max:
+        raise ValueError(
+            f"the accuracy threshold {threshold:g} is past the end of the "
+            f"count grid ({x_max:g}), so the rule a reader takes the share off "
+            f"would be drawn outside the plot."
+        )
+    x_scale = alt.Scale(domain=[0, x_max], nice=False)
+    x_axis = alt.Axis(
+        labelFontSize=PANEL_FONT_SIZE,
+        titleFontSize=PANEL_FONT_SIZE,
+        # The threshold among the ticks: it is the one count on this axis a
+        # reader reads a number off, and the default run skips it.
+        values=sorted({0, int(threshold), *range(4, int(x_max) + 1, 4)}),
+    )
 
     panels = []
     for index, (clade, clade_title) in enumerate(clade_titles.items()):
@@ -699,23 +812,15 @@ def count_ecdf_panel(
             alt.Chart(rows)
             .mark_line(strokeWidth=2.2)
             .encode(
-                x=alt.X(
-                    "x:Q",
-                    title="X counts",
-                    scale=alt.Scale(domain=[0, float(rows["x"].max())], nice=False),
-                    axis=alt.Axis(
-                        labelFontSize=PANEL_FONT_SIZE, titleFontSize=PANEL_FONT_SIZE
-                    ),
-                ),
+                x=alt.X("x:Q", title=LADDER_X_TITLE, scale=x_scale, axis=x_axis),
                 y=alt.Y(
                     "share:Q",
-                    # Two lines, not one. The single-line spelling is taller
-                    # than the plot it labels at this panel size, and in an
-                    # hconcat that pushes the left view's plot down while its
-                    # title stays at the top of its box -- the two facet titles
-                    # then sit at visibly different heights.
+                    # Two lines: a one-line title is taller than the plot it
+                    # labels at this panel size, and in an hconcat that pushes
+                    # the left view's plot down while its title stays at the top
+                    # of its box, leaving the two titles at different heights.
                     title=(
-                        ["fraction of mutations", "with ≥ X counts"]
+                        ["fraction of mutations", "at or above that count"]
                         if index == 0
                         else None
                     ),
@@ -737,7 +842,7 @@ def count_ecdf_panel(
                 ),
                 tooltip=[
                     alt.Tooltip("depth:N", title="Depth"),
-                    alt.Tooltip("x:Q", title="X counts", format=".1f"),
+                    alt.Tooltip("x:Q", title="Count", format=".1f"),
                     alt.Tooltip("share:Q", title="Fraction", format=".4f"),
                 ],
             )
@@ -745,10 +850,28 @@ def count_ecdf_panel(
         rule = (
             alt.Chart(threshold_frame)
             .mark_rule(color=THRESHOLD_ACCENT, strokeDash=[2, 3], strokeWidth=1.6)
-            .encode(x=alt.X("x:Q"))
+            .encode(x=alt.X("x:Q", scale=x_scale, axis=x_axis))
+        )
+        # The rule says nothing about itself otherwise: it takes no legend
+        # entry, so a reader who has not read the caption sees an unexplained
+        # dotted line across the one panel they read a number off.
+        rule_label = (
+            alt.Chart(threshold_frame)
+            .mark_text(
+                color=THRESHOLD_ACCENT,
+                fontSize=PANEL_FONT_SIZE - 4,
+                align="left",
+                baseline="top",
+                dx=4,
+            )
+            .encode(
+                x=alt.X("x:Q", scale=x_scale, axis=x_axis),
+                y=alt.value(0.0),
+                text=alt.value(f"threshold {threshold:g}"),
+            )
         )
         panels.append(
-            (curves + rule).properties(
+            (curves + rule + rule_label).properties(
                 width=width,
                 height=height,
                 title=alt.TitleParams(

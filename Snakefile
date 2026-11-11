@@ -58,3 +58,4 @@ rule all:
         rules.models.input,
         rules.scored.input,
         rules.panels.input,
+        rules.subsampling.input,
