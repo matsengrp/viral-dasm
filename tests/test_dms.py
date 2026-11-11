@@ -40,20 +40,41 @@ import panel_spec
 #:
 #: That experiment pins 61 / 61 / 86 clade-masked sites for 21K / 23A / 24E and
 #: 17 global codons, read from `counts_all.csv`'s `exclude` and
-#: `masked_in_usher` columns. `config.yaml` does not name that file -- it is
-#: 563 MB and would be a second definition of "masked" beside the one the
-#: scored table carries -- so what is pinned here is what this pipeline can
-#: produce from the files it does read. The global count agrees; the per-clade
-#: ones do not, because a censor table is per mutation where `exclude` is per
-#: site.
+#: `masked_in_usher` columns. `config.yaml` does not name that file, so what is
+#: pinned here is what this pipeline can produce from the files it does read.
+#: The global count agrees; the per-clade ones do not.
+#:
+#: **The difference is which mutation-level file is widened, not the
+#: granularity.** `exclude` is per nucleotide mutation too -- `counts_all.csv`
+#: carries 9 rows per codon site per clade, and on 21K/S 51 of the 61 flagged
+#: sites are flagged on only some of their 9 rows -- so both masks collapse
+#: mutation-level flags to codon sites by the same `idx // 3 + 1`. They widen
+#: different files.
+#:
+#: The censor table is the better substrate here, and this is the reason:
+#: `scripts/render_config.py` passes exactly `censored_mutations_file`,
+#: `censored_clades_file` and `masked_nt_sites_file` into a `TrainingConfig`,
+#: and nothing passes `counts_all.csv`. So these are the layers the models were
+#: actually trained without, which is what a DMS comparison has to exclude.
 EXPECTED_GLOBAL_MASK_SITES = 17
 EXPECTED_CENSORED_SITES = {"21K": 20, "23A": 33, "24E": 49}
 
 
+#: The mat-pcp files these tests read. Resolved OUTSIDE the probe's `try`:
+#: `lib.mat_pcp_path` raises `KeyError` on a key this pipeline does not have,
+#: which is a config bug and must not come back as a skip.
+_MAT_PCP_INPUTS = (
+    lib.mat_pcp_path("clade_founders_dir"),
+    lib.mat_pcp_path("masked_nt_sites_file"),
+    lib.mat_pcp_path("censored_mutations_file"),
+    lib.mat_pcp_path("censored_clades_file"),
+)
+
+
 def _mat_pcp_readable() -> bool:
     try:
-        return lib.mat_pcp_path("clade_founders_dir").is_dir()
-    except (KeyError, OSError):
+        return all(path.exists() for path in _MAT_PCP_INPUTS)
+    except OSError:
         return False
 
 
@@ -62,12 +83,18 @@ needs_mat_pcp = pytest.mark.skipif(
 )
 
 
+#: Likewise resolved outside the probe, and non-empty: `all()` over an empty
+#: roster is True, which would turn every per-homolog test below into a pass
+#: over zero homologs.
+_DMS_PATHS = tuple(lib.dms_dataset(homolog).path for homolog in lib.dms_homologs())
+
+
 def _dms_readable() -> bool:
+    if not _DMS_PATHS:
+        return False
     try:
-        return all(
-            lib.dms_dataset(homolog).path.is_file() for homolog in lib.dms_homologs()
-        )
-    except (KeyError, OSError):
+        return all(path.is_file() for path in _DMS_PATHS)
+    except OSError:
         return False
 
 
@@ -96,7 +123,8 @@ def test_the_codon_mask_agrees_with_the_one_the_scored_table_was_built_with():
     them and not the other shifts a whole column of flags by a site, with
     nothing raising.
     """
-    score_run = pytest.importorskip("score_run")
+    import score_run
+
     assert dms.codon_sites_of([0, 1, 2, 3, 5, 3818]) == score_run.codon_sites_of(
         [0, 1, 2, 3, 5, 3818]
     )
@@ -114,12 +142,18 @@ def test_the_figures_exclusion_is_wider_than_the_loaders_mask():
     reversion sites were a subset of the two layers here, a panel built on this
     set alone would look right, so the test is that they are not.
     """
-    panels = pytest.importorskip("panels")
+    import panels
+
     audit = panel_spec.AUDIT_JSON
     if not audit.is_file():
         pytest.skip(f"no censor audit at {audit}")
     reverting = panels.reverting_sites_by_clade(audit)
     for clade in EXPECTED_CENSORED_SITES:
+        # Exactly two layers, so a third folded in here would fail even if the
+        # difference below stayed non-empty.
+        assert dms.unreadable_sites(clade) == (
+            dms.globally_masked_sites() | dms.censored_sites(clade)
+        )
         extra = panels.reverting_sites(reverting, clade) - dms.unreadable_sites(clade)
         assert extra, (
             f"{clade}: every reverting site is already in the loader's mask, so "
@@ -145,12 +179,45 @@ def test_the_strata_come_from_the_founders_codons():
 
     codons = list(iter_codons(founder_nt))
     assert len(indicator.columns) == len(codons)
+    assert "*" not in set(indicator.index)
 
-    # Position 0's codon is ATG (Met). One change reaches exactly the amino
-    # acids its nine single-nucleotide neighbours encode, which is a property
-    # of the codon table and of nothing else.
-    reachable = set(indicator.index[indicator[0]])
-    assert reachable == _one_change_away(codons[0])
+    # Every position, against an independent source (Biopython). Position 0
+    # alone would not discriminate: it is ATG, and methionine has one codon, so
+    # a codon-aware indicator and an amino-acid-only one agree there.
+    for position, codon in enumerate(codons):
+        reachable = set(indicator.index[indicator[position]])
+        assert reachable == _one_change_away(codon), f"position {position + 1}"
+
+    # The discriminating case, stated explicitly: at a six-codon residue the
+    # founder's actual codon reaches strictly fewer amino acids than the best
+    # synonymous codon would. An indicator built from the best case over
+    # synonymous realizations -- or from mat-pcp's coverage -- passes the loop
+    # above only if it happens to agree everywhere, and it does not here.
+    best_case_is_wider = False
+    for position, codon in enumerate(codons):
+        synonymous = _synonymous_codons(codon)
+        if len(synonymous) < 2:
+            continue
+        actual = _one_change_away(codon)
+        best_case = set().union(*(_one_change_away(alt) for alt in synonymous))
+        if best_case > actual:
+            assert set(indicator.index[indicator[position]]) == actual
+            best_case_is_wider = True
+            break
+    assert best_case_is_wider, (
+        "no site on this founder distinguishes the actual codon from the best "
+        "synonymous one, so this test cannot see that difference"
+    )
+
+
+def _synonymous_codons(codon: str) -> list[str]:
+    """Every codon encoding the same amino acid as ``codon``."""
+    from Bio.Seq import Seq
+
+    from dasm2.sequence.constants import CODONS
+
+    residue = str(Seq(codon).translate())
+    return [other for other in CODONS if str(Seq(other).translate()) == residue]
 
 
 def _one_change_away(codon: str) -> set[str]:
@@ -201,7 +268,7 @@ def test_masking_runs_before_the_loader_that_raises_on_a_mismatch():
     with tempfile.TemporaryDirectory() as scratch:
         path = Path(scratch) / "unmasked.csv"
         unmasked.to_csv(path, index=False)
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="WT amino acid mismatch"):
             from_multidms(path, wt_sequence=founder)
 
 
@@ -220,7 +287,7 @@ def test_the_accounting_separates_masking_from_a_construct_disagreement():
     """
     _, accounting = dms.load_dms("KP.3.1.1")
     assert accounting.mismatch_sites == (1253,)
-    assert accounting.dropped_masked_site > 0
+    assert accounting.dropped_masked_site == 947
     assert accounting.dropped_founder_mismatch == 2
 
 
@@ -232,15 +299,28 @@ def test_every_measured_cell_lands_in_exactly_one_stratum():
         matrix, accounting = dms.load_dms(homolog)
         long = dms.melt_dms(matrix, lib.dms_dataset(homolog).clade)
         assert len(long) == accounting.retained_substitutions
-        assert set(long["stratum"]) <= {dms.SINGLE_NT, dms.MULTI_NT}
+        assert set(long["stratum"]) == {dms.SINGLE_NT, dms.MULTI_NT}
         assert long["stratum"].notna().all()
+        # Both strata non-empty: an indicator that came back all-False would
+        # satisfy the subset check above with everything in one stratum.
+        assert long["stratum"].eq(dms.SINGLE_NT).sum() > 0
+        assert long["stratum"].eq(dms.MULTI_NT).sum() > 0
 
 
 @needs_dms
 def test_a_changed_dms_file_fails_rather_than_moving_every_number():
     """The md5 is a gate: these files are replaced in place when repointed."""
+    import hashlib
+
+    assert lib.dms_homologs(), "no homologs configured, so this loop proves nothing"
     for homolog in lib.dms_homologs():
-        assert dms.verify_dms_md5(homolog) == lib.dms_dataset(homolog).md5
+        dataset = lib.dms_dataset(homolog)
+        # Computed here rather than read back from `verify_dms_md5`, which
+        # returns the digest it just compared: a gate that returned the pinned
+        # value unconditionally would satisfy that comparison.
+        measured = hashlib.md5(dataset.path.read_bytes()).hexdigest()
+        assert measured == dataset.md5
+        assert dms.verify_dms_md5(homolog) == measured
 
 
 def test_a_log_selection_factor_is_refused_where_a_linear_one_belongs():
@@ -267,11 +347,19 @@ def test_a_log_selection_factor_is_refused_where_a_linear_one_belongs():
         mask=torch.ones(sites, dtype=torch.bool),
     )
     linear = torch.full((sites, n_aa), 0.5)
+    # A zero factor is a legitimate linear input -- a mutation the model calls
+    # lethal -- so the guard must be `< 0` and not `<= 0`. Without this cell a
+    # guard strengthened to `<= 0` would pass every test here.
+    linear[0, 0] = 0.0
     probabilities, _ = aa_mutation_probabilities(linear, rates)
     assert torch.isfinite(probabilities).all()
+    # The probabilities are normalised over the whole sequence, so this is the
+    # cheap check that the passing leg reached the real computation rather
+    # than a degenerate path.
+    assert torch.isclose(probabilities.sum(), torch.tensor(1.0), atol=1e-6)
 
     with pytest.raises(ValueError, match="negative"):
-        aa_mutation_probabilities(torch.log(linear), rates)
+        aa_mutation_probabilities(torch.log(linear.clamp(min=1e-6)), rates)
 
 
 def test_the_scatter_homolog_is_one_this_pipeline_reads():
@@ -287,8 +375,11 @@ def test_every_stratum_has_both_label_forms():
     raising. :func:`panel_charts.stratum_label` falls back to the raw key, which
     is why the coverage is asserted rather than left to the fallback.
     """
+    assert set(panel_charts.STRATUM_LABELS) == set(dms.STRATA), (
+        "panel_charts spells the stratum keys as literals because it must not "
+        "import dms, so this is what keeps the two in step."
+    )
     for stratum in dms.STRATA:
-        assert stratum in panel_charts.STRATUM_LABELS
         long_form, short_form = panel_charts.STRATUM_LABELS[stratum]
         assert long_form and short_form
         assert len(short_form) <= len(long_form)

@@ -258,6 +258,40 @@ DMS_BAR_HEIGHT = 220
 #: the saturation is what shows the shape a correlation coefficient hides.
 DMS_TREND_BINS = 20
 
+#: The columns panel A draws, so the chart embeds those and not the frame.
+#: `scripts/panels.py` hands over a frame with the join's full width, and
+#: Altair serializes whatever it is given.
+DMS_PLOT_COLUMNS = ["log_selection_factor", "dms_cell_entry"]
+
+#: Points drawn per stratum cell. **Altair refuses a dataset over 5,000 rows**,
+#: and the refusal is asymmetric in a way that hides it: `chart.save()` goes
+#: through `vl-convert` and writes the PNG regardless, while `chart.to_dict()`
+#: raises `MaxRowsError` -- so a rule writes the panel and the notebook cell
+#: that displays it fails. The real strata are larger than that ceiling (5,432
+#: single-nucleotide mutations on KP.3.1.1 alone), so the cloud is thinned.
+#:
+#: Drawing only. Every statistic in the corner label is computed upstream on
+#: the full data, as `shift_panel`'s are, so thinning a dense cell changes what
+#: is *drawn* and never what is reported.
+DMS_POINT_BUDGET = 4_000
+
+#: The sampling seed, fixed so a rebuild draws the same cloud. Shared with
+#: `shift_grid`'s thinning, which uses the same value for the same reason.
+DMS_SAMPLE_SEED = 0
+
+
+def _padded_domain(values: pd.Series, pad_fraction: float = 0.04) -> list[float]:
+    """``[min, max]`` of ``values``, padded so a mark on a bound is not clipped.
+
+    A point is a disc of some radius, so one sitting exactly on a bound is
+    drawn half outside the plot -- the reason `scatter_panel` pads its own
+    domain the same way.
+    """
+    low = float(values.min())
+    high = float(values.max())
+    padding = pad_fraction * ((high - low) or 1.0)
+    return [low - padding, high + padding]
+
 
 def binned_median(
     frame: pd.DataFrame, *, x: str, y: str, bins: int = DMS_TREND_BINS
@@ -307,11 +341,19 @@ STRATUM_LABELS: dict[str, tuple[str, str]] = {
 
 
 def stratum_label(stratum: str, *, short: bool = False) -> str:
-    """One stratum's name, as the figure prints it."""
-    forms = STRATUM_LABELS.get(stratum)
-    if forms is None:
-        return stratum
-    return forms[1] if short else forms[0]
+    """One stratum's name, as the figure prints it.
+
+    Raises:
+        KeyError: On a stratum with no label. Returning the raw key instead
+            would put ``single_nt`` on a paper figure, which is the one failure
+            here that looks deliberate.
+    """
+    if stratum not in STRATUM_LABELS:
+        raise KeyError(
+            f"{stratum!r} has no label; expected one of {sorted(STRATUM_LABELS)}"
+        )
+    long_form, short_form = STRATUM_LABELS[stratum]
+    return short_form if short else long_form
 
 
 def dms_scatter_panel(
@@ -339,6 +381,17 @@ def dms_scatter_panel(
     would hide it.
     """
     axis = alt.Axis(labelFontSize=PANEL_FONT_SIZE, titleFontSize=PANEL_FONT_SIZE)
+    # One domain per axis across the whole row, computed from the data and
+    # padded. Two things need it. The y scale is shared, so a cell left to
+    # infer its own bounds would widen the row; and the regression is an
+    # unbounded line, so without an explicit domain Vega sizes the axis to
+    # where the *fit* reaches rather than to where the assay measured -- which
+    # on these data means an axis running up to +3.5 cell entry against a
+    # measured ceiling of +0.3, and a third of the panel empty.
+    x_domain = _padded_domain(frame["log_selection_factor"])
+    y_domain = _padded_domain(frame["dms_cell_entry"])
+    x_scale = alt.Scale(domain=x_domain, nice=False)
+    y_scale = alt.Scale(domain=y_domain, nice=False)
     cells = []
     for stratum in stratum_order:
         cell_frame = frame[frame["stratum"] == stratum]
@@ -346,11 +399,14 @@ def dms_scatter_panel(
         if stats is not None:
             matching = stats[stats["stratum"] == stratum]
             row = None if matching.empty else matching.iloc[0]
+        drawn = cell_frame[DMS_PLOT_COLUMNS]
+        if len(drawn) > DMS_POINT_BUDGET:
+            drawn = drawn.sample(DMS_POINT_BUDGET, random_state=DMS_SAMPLE_SEED)
         x_enc = alt.X(
             "log_selection_factor:Q",
             title=DMS_X_TITLE,
             axis=axis,
-            scale=alt.Scale(zero=False),
+            scale=x_scale,
         )
         # The y scale is shared across the row, so only the leftmost cell
         # carries the axis. Repeating it would print the same title and the
@@ -365,22 +421,35 @@ def dms_scatter_panel(
             "dms_cell_entry:Q",
             title=DMS_Y_TITLE if not cells else None,
             axis=y_axis,
-            scale=alt.Scale(zero=False),
+            scale=y_scale,
         )
         cloud = (
-            alt.Chart(cell_frame)
+            alt.Chart(drawn)
             .mark_point(size=56, opacity=0.3, filled=True, color=POINT_BLUE)
             .encode(x=x_enc, y=y_enc)
         )
+        # `clip=True` on both lines: a layered mark is not clipped to the plot
+        # area by default, so with an explicit domain the regression would run
+        # out over the axis and the neighbouring cell instead of stopping.
         fit = cloud.transform_regression(
             "log_selection_factor", "dms_cell_entry"
-        ).mark_line(strokeWidth=2, color=FIT_FIREBRICK)
+        ).mark_line(strokeWidth=2, color=FIT_FIREBRICK, clip=True)
+        # The median is computed on the *full* cell, not the thinned draw, and
+        # is 20 rows whatever `n` is. Solid rather than dashed: it has to read
+        # over a saturated cloud, and `ladder_row`'s median is solid for the
+        # same reason.
+        trend_frame = binned_median(
+            cell_frame, x="log_selection_factor", y="dms_cell_entry"
+        )
         trend = (
-            alt.Chart(
-                binned_median(cell_frame, x="log_selection_factor", y="dms_cell_entry")
-            )
+            alt.Chart(trend_frame)
             .mark_line(
-                strokeWidth=1.8, strokeDash=[4, 3], color=REFERENCE_GREY, point=True
+                strokeWidth=2.2,
+                color=LADDER_MEDIAN_COLOR,
+                point=alt.OverlayMarkDef(
+                    color=LADDER_MEDIAN_COLOR, stroke="white", strokeWidth=1, size=45
+                ),
+                clip=True,
             )
             .encode(x=x_enc, y=y_enc)
         )
@@ -398,7 +467,12 @@ def dms_scatter_panel(
                 ),
             )
         )
-    return alt.hconcat(*cells).resolve_scale(x="independent", y="shared")
+    # Both scales shared. Every cell is given the same explicit domain above,
+    # so this states what is already true rather than changing it -- and it is
+    # what makes the strata comparable: the split is the point of the panel,
+    # and two cells on different x ranges put the fit and the median at slopes
+    # a reader cannot set against each other.
+    return alt.hconcat(*cells).resolve_scale(x="shared", y="shared")
 
 
 def homolog_correlation_panel(
@@ -435,6 +509,17 @@ def homolog_correlation_panel(
             predictors one hue; or if a homolog or stratum in ``frame`` is
             absent from the order it is sorted by, which Vega drops silently.
     """
+    missing_r = frame["pearson_r"].isna()
+    if missing_r.any():
+        rows = frame.loc[missing_r, ["homolog", "stratum", "predictor"]]
+        raise ValueError(
+            f"{int(missing_r.sum())} rows carry no `pearson_r`, which draws no "
+            f"bar and leaves a gap the legend still promises:\n"
+            f"{rows.to_string(index=False)}\n"
+            f"`within_clade_metrics` returns NaN below its `min_mutations`, so "
+            f"decide whether those cells are reported as absent or drawn as "
+            f"`n/a` rather than left to render as nothing."
+        )
     unknown = sorted(set(frame["predictor"]) - set(DMS_PREDICTOR_COLORS))
     if unknown:
         raise ValueError(
@@ -443,7 +528,11 @@ def homolog_correlation_panel(
             f"shorter than its domain without raising, so two predictors would "
             f"be drawn in one hue."
         )
-    for column, order in (("homolog", homolog_order), ("stratum", stratum_order)):
+    for column, order in (
+        ("homolog", homolog_order),
+        ("stratum", stratum_order),
+        ("predictor", predictor_order),
+    ):
         missing = sorted(set(frame[column]) - set(order))
         if missing:
             raise ValueError(
@@ -452,7 +541,8 @@ def homolog_correlation_panel(
                 f"an explicit sort without raising, so those bars would not be "
                 f"drawn and the panel would look complete."
             )
-    predictors = [name for name in predictor_order if name in set(frame["predictor"])]
+    present = set(frame["predictor"])
+    predictors = [name for name in predictor_order if name in present]
     axis = alt.Axis(labelFontSize=PANEL_FONT_SIZE, titleFontSize=PANEL_FONT_SIZE)
     labelled = frame.assign(
         stratum_label=frame["stratum"].map(
