@@ -382,6 +382,7 @@ def lookup_frame(
     *,
     mutation: str,
     model: str,
+    min_count: float = PANEL_MIN_COUNT,
     spec: FilterSpec = BASE_SPEC,
 ) -> pd.DataFrame:
     """One mutation across every clade that carries an estimate of it.
@@ -402,6 +403,12 @@ def lookup_frame(
     sequencing artifact rather than a clade-specific judgment, so a mutation at
     a masked site has no reading anywhere and a per-clade flag would imply it
     had one somewhere.
+
+    **The count cutoff does apply.** The panel is captioned as the clades that
+    carry at least ``min_count`` actual or expected counts of this mutation, so
+    a clade whose estimate rests on nothing is not drawn at all -- that is a
+    statement about evidence rather than about censoring, and it is the same
+    cutoff the correlation panels use.
 
     Values are the table's own, unclipped: this is a per-mutation readout, and
     a clamped value would misreport a clade pinned to the bound. The clipped
@@ -430,6 +437,12 @@ def lookup_frame(
             f"it is excluded in every clade, not just some."
         )
     rows = rows.dropna(subset=[spec.fitness_metric])
+    rows = filter_merged_fitness(
+        rows,
+        min_actual_count=min_count,
+        min_predicted_count=min_count,
+        count_filter_mode=COUNT_FILTER_MODE,
+    )
     if rows.empty:
         return pd.DataFrame(columns=list(LOOKUP_COLUMNS))
     return pd.DataFrame(
