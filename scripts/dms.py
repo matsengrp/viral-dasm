@@ -4,8 +4,9 @@ Three published full-spike cell-entry assays, each matched to the clade whose
 founder the model is scored on, read into one 20 x L matrix apiece and split
 into the strata the figure reports.
 
-Everything here is a pure function over a path or a clade, so the rules, the
-notebooks and the tests share one implementation. Nothing here reads
+Everything here is a function of its arguments and the files ``config.yaml``
+names -- no model, no checkpoint, no GPU -- so the rules, the notebooks and
+the tests share one implementation. Nothing here reads
 ``selection_factors.parquet``: a DMS matrix and the strata are properties of
 the assay and the founder, so they are built before a model exists and do not
 move when one is rescored.
@@ -35,7 +36,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 # `lib` first, so this repository's root is on `sys.path` before anything
 # imports `dasm2` and the vendored fork wins over an editable install.
-from lib import GENE, assert_dasm2_is_this_repo, dms_dataset, file_md5, mat_pcp_path
+from lib import (
+    GENE,
+    assert_dasm2_is_this_repo,
+    clade_roster,
+    dms_dataset,
+    file_md5,
+    mat_pcp_path,
+)
 
 import dasm2  # noqa: F401  (imported first for its side effects)
 
@@ -46,7 +54,10 @@ from founders import founder_aa_sequence, founder_nt_sequence
 
 from dasm2.codon_table import CODON_NEIGHBOR_MATRIX
 from dasm2.data.functional import to_dms_matrix
-from dasm2.data.functional_formats import from_multidms
+from dasm2.data.functional_formats import (
+    NON_SUBSTITUTION_MUTANT_CODES,
+    from_multidms,
+)
 from dasm2.sequence.constants import AA_STR_SORTED, CODONS
 from dasm2.sequence.conversion import iter_codons
 from dasm2.sequence.masking import (
@@ -72,11 +83,17 @@ ALL = "all"
 STRATA: tuple[str, ...] = (SINGLE_NT, MULTI_NT, ALL)
 
 #: The DMS CSV's own column names. mat-pcp and this pipeline both say
-#: ``aa_site``/``mutant_aa``; these three are the published files' spelling,
-#: and the rename happens once, on the way out of :func:`load_dms`.
+#: ``aa_site``/``mutant_aa``; these four are the published files' spelling, and
+#: the rename happens once, on the way out of :func:`load_dms`.
+#:
+#: They are passed into ``from_multidms`` explicitly rather than left to its
+#: defaults, which happen to be the same strings today: a file whose columns
+#: were renamed would otherwise be pre-filtered on one set of names and parsed
+#: on another.
 DMS_SITE_COL = "site"
 DMS_WT_COL = "wildtype"
 DMS_MUT_COL = "mutant"
+DMS_EFFECT_COL = "functional_effect"
 
 
 @dataclass(frozen=True)
@@ -113,10 +130,14 @@ def codon_sites_of(nt_indices: Iterable[int]) -> set[int]:
 
     The same widening ``scripts/score_run.py`` applies to build the scored
     table's ``globally_masked`` column, and deliberately a second spelling of
-    it: importing that module here would pull the model stack and the GPU slot
-    into the panel path, which is the coupling ``scripts/founders.py`` exists
-    to avoid. ``tests/test_dms.py`` asserts the two agree on this run, which is
-    what keeps the duplication honest.
+    it -- but not to keep torch out of the panel path, which already has it
+    (this module imports ``dasm2.codon_table``, and ``scripts/panels.py``
+    imports ``dasm2.analysis.viral_fitness_eval``). The reason is snakemake:
+    moving these into a module ``score_run.py`` imports would change a declared
+    input of ``rule score`` and mark every scored table out of date, and the
+    training campaign that produces them is mid-flight. ``tests/test_dms.py``
+    asserts the two agree on this run, which is what keeps the duplication
+    honest until a shared module is safe to make.
     """
     return {int(index) // 3 + 1 for index in nt_indices}
 
@@ -175,28 +196,28 @@ def single_nt_indicator(clade: str, gene: str = GENE) -> pd.DataFrame:
         0-indexed position, laid out like a DMS matrix.
     """
     nt_founder = founder_nt_sequence(clade, gene)
-    aa_founder = founder_aa_sequence(clade, gene)
     columns: dict[int, list[bool]] = {}
     for position, codon in enumerate(iter_codons(nt_founder)):
         if codon not in CODONS:
-            # An ambiguous codon reaches nothing: the question "which amino
-            # acids are one change away" has no answer for a codon whose
-            # nucleotides are not known.
-            columns[position] = [False] * len(AA_STR_SORTED)
-            continue
+            # Refused rather than filled with False. A partially ambiguous
+            # codon such as `ACN` still translates (to `T`), so the DMS
+            # wildtype would match the founder and the site would survive the
+            # mismatch drop -- and every mutation at it would then be labelled
+            # multi-nucleotide, which is a wrong stratum rather than a missing
+            # one. No founder in this run's roster has a non-ACGT base, so this
+            # fires only if that changes.
+            raise ValueError(
+                f"{gene}/{clade}: codon {position + 1} is {codon!r}, which is "
+                f"not one of the 64. A partially ambiguous codon would be "
+                f"silently labelled multi-nucleotide at every mutation, so it "
+                f"is refused rather than guessed at."
+            )
         codon_index = CODONS.index(codon)
         columns[position] = [
             bool(CODON_NEIGHBOR_MATRIX[codon_index, aa_index].item())
             for aa_index in range(len(AA_STR_SORTED))
         ]
-    indicator = pd.DataFrame(columns, index=list(AA_STR_SORTED))
-    if len(indicator.columns) != len(aa_founder):
-        raise ValueError(
-            f"{gene}/{clade}: the indicator has {len(indicator.columns)} "
-            f"positions against a founder of {len(aa_founder)} residues. The "
-            f"nucleotide founder was not trimmed to its sense codons."
-        )
-    return indicator
+    return pd.DataFrame(columns, index=list(AA_STR_SORTED))
 
 
 def verify_dms_md5(homolog: str) -> str:
@@ -245,6 +266,12 @@ def load_dms(homolog: str, gene: str = GENE) -> tuple[pd.DataFrame, DmsAccountin
         The 20 x L matrix and a :class:`DmsAccounting` of what was removed.
     """
     dataset = dms_dataset(homolog)
+    if dataset.clade not in clade_roster():
+        raise ValueError(
+            f"{homolog} names clade {dataset.clade}, which has no founder in "
+            f"this mat-pcp run. Its measurements would join to nothing, and "
+            f"the panel would be drawn on the other homologs alone."
+        )
     verify_dms_md5(homolog)
     founder = founder_aa_sequence(dataset.clade, gene)
     mask_sites = unreadable_sites(dataset.clade)
@@ -252,7 +279,7 @@ def load_dms(homolog: str, gene: str = GENE) -> tuple[pd.DataFrame, DmsAccountin
     raw = pd.read_csv(dataset.path)
     raw_rows = len(raw)
 
-    frame = raw[~raw[DMS_MUT_COL].isin(["*", "-"])]
+    frame = raw[~raw[DMS_MUT_COL].isin(NON_SUBSTITUTION_MUTANT_CODES)]
     after_stop = len(frame)
 
     frame = frame[~frame[DMS_SITE_COL].isin(mask_sites)]
@@ -271,7 +298,14 @@ def load_dms(homolog: str, gene: str = GENE) -> tuple[pd.DataFrame, DmsAccountin
     with tempfile.TemporaryDirectory() as scratch:
         filtered = Path(scratch) / "filtered_multidms.csv"
         frame.to_csv(filtered, index=False)
-        tidy = from_multidms(filtered, wt_sequence=founder)
+        tidy = from_multidms(
+            filtered,
+            wt_sequence=founder,
+            wt_column=DMS_WT_COL,
+            site_column=DMS_SITE_COL,
+            mutant_column=DMS_MUT_COL,
+            func_score_column=DMS_EFFECT_COL,
+        )
     tidy = tidy[~tidy["is_reference"]]
 
     matrix = to_dms_matrix(
@@ -285,6 +319,31 @@ def load_dms(homolog: str, gene: str = GENE) -> tuple[pd.DataFrame, DmsAccountin
         mismatch_sites=mismatch_sites,
         retained_substitutions=len(tidy),
     )
+    # Every row is either counted as dropped or retained. `from_multidms`
+    # warns rather than raises on a row with no score or a mutant equal to its
+    # wildtype, and `to_dms_matrix` overwrites a duplicate `(site, mutant)`
+    # silently, so without this a repointed file could lose rows with nothing
+    # saying so. All three hold on today's files.
+    counted = (
+        accounting.dropped_stop_or_deletion
+        + accounting.dropped_masked_site
+        + accounting.dropped_founder_mismatch
+        + accounting.retained_substitutions
+    )
+    if counted != accounting.raw_rows:
+        raise ValueError(
+            f"{homolog}: {accounting.raw_rows} rows in, {counted} accounted "
+            f"for. {accounting.raw_rows - counted} were dropped by a filter "
+            f"this accounting does not name -- a missing score, a mutation "
+            f"equal to its wildtype, or a duplicate `(site, mutant)`."
+        )
+    measured = int(matrix.notna().to_numpy().sum())
+    if measured != accounting.retained_substitutions:
+        raise ValueError(
+            f"{homolog}: the matrix holds {measured} measured cells against "
+            f"{accounting.retained_substitutions} retained rows, so a "
+            f"duplicate `(site, mutant)` overwrote a cell."
+        )
     return matrix, accounting
 
 

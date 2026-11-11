@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import math
 import os
+import re
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -618,6 +619,12 @@ def select_checkpoint(output_dir: str | Path) -> Path:
     return found[0]
 
 
+#: A well-formed md5, as this file must spell one. Length alone would accept a
+#: digest YAML parsed as a number and stringified, which is the way a pinned
+#: digest silently stops being one.
+_MD5_HEX = re.compile(r"[0-9a-f]{32}")
+
+
 def _check_config() -> None:
     """Fail at import on a config that cannot describe a run.
 
@@ -685,12 +692,14 @@ def _check_config() -> None:
     seen_clades: dict[str, str] = {}
     for homolog in dms_homologs():
         dataset = dms_dataset(homolog)
-        if len(dataset.md5) != 32:
+        if not _MD5_HEX.fullmatch(dataset.md5):
             raise ValueError(
-                f"dms.homologs.{homolog}.md5 is {len(dataset.md5)} hex "
-                f"characters; md5 gives 32. It is a gate here, not a label: "
-                f"the file it pins is replaced in place when a dataset is "
-                f"repointed."
+                f"dms.homologs.{homolog}.md5 is {dataset.md5!r}, which is not "
+                f"32 lowercase hex characters. It is a gate here, not a label "
+                f"-- the file it pins is replaced in place when a dataset is "
+                f"repointed -- so a digest YAML coerced to a number, or one "
+                f"with the right length and the wrong alphabet, must fail "
+                f"here rather than at the comparison."
             )
         if dataset.clade in seen_clades:
             raise ValueError(
