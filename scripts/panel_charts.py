@@ -230,11 +230,47 @@ def scatter_panel(
 #: mean the same thing here. The pooled estimate takes a third hue rather than
 #: a lighter grey: it is a different predictor, not a weaker version of the
 #: per-clade one, and a reader should not have to notice a shade to see that.
+#:
+#: The two reference predictors take desaturated hues of their own rather than
+#: shades of either: a floor is a different predictor from the DASM and from the
+#: counts, not a weaker version of one, and a reader should not have to notice a
+#: shade to see which claim a bar is making.
 DMS_PREDICTOR_COLORS: dict[str, str] = {
     "DASM": DASM_PURPLE,
     "per-clade counts": COUNTS_GREY,
     "pooled counts": "#b0975f",
+    "BLOSUM62": "#5b8c7b",
+    "leaf frequency": "#3d7ea6",
 }
+
+#: What each predictor id is called on a chart. The ids are join keys and CSV
+#: values -- `scripts/dms_models.py` writes them and `results/panels/dms/`
+#: carries them -- while :data:`DMS_PREDICTOR_COLORS` is keyed by what a legend
+#: prints, so the two are mapped rather than conflated. ``leaf_logfreq`` prints
+#: as "leaf frequency" because a legend has no room to say which ratio it is and
+#: the caption does.
+DMS_PREDICTOR_LABELS: dict[str, str] = {
+    "blosum62": "BLOSUM62",
+    "leaf_logfreq": "leaf frequency",
+}
+
+
+def predictor_label(predictor: str) -> str:
+    """One predictor's name, as the figure prints it.
+
+    Raises:
+        KeyError: On a predictor with no label, for the reason
+            :func:`stratum_label` raises: returning the raw key would put
+            ``leaf_logfreq`` on a paper figure, which is the one failure here
+            that looks deliberate.
+    """
+    if predictor not in DMS_PREDICTOR_LABELS:
+        raise KeyError(
+            f"{predictor!r} has no label; expected one of "
+            f"{sorted(DMS_PREDICTOR_LABELS)}"
+        )
+    return DMS_PREDICTOR_LABELS[predictor]
+
 
 #: What panel A's axes measure. The DMS is the measurement and the model is the
 #: prediction, so the measurement goes on y -- the convention a reader brings to

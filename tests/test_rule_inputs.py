@@ -112,12 +112,26 @@ ENTRY_POINTS = {
     "agreement_mutations": "notebooks/agreement_mutations.py",
     "agreement_ladders": "notebooks/agreement_ladders.py",
     "subsampling_depth": "notebooks/subsampling_depth.py",
+    # `fig:dms`'s predictor arms run scripts rather than notebooks: panel C's
+    # chart waits on the DASM's own column, so what these build is the table it
+    # will be drawn from.
+    "dms_leaf_counts": "scripts/dms_leaf_freq.py",
+    "dms_predictor_scores": "scripts/dms_models.py",
+    "dms_predictor_summary": "scripts/dms_summary.py",
 }
 
 #: Rules that execute nothing. Asserted, not asserted-by-assertion: each must
 #: carry snakemake's ``norun`` marker, so listing a rule here cannot excuse it
 #: from the import check while it quietly runs a shell command.
-AGGREGATORS = ("all", "corpora", "models", "scored", "panels", "subsampling")
+AGGREGATORS = (
+    "all",
+    "corpora",
+    "models",
+    "scored",
+    "panels",
+    "subsampling",
+    "dms",
+)
 
 #: Rules that do run code and are still not import-checked, with the reason.
 #: Each must carry a ``shellcmd``, so an entry here describes a real

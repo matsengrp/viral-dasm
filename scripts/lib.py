@@ -185,6 +185,17 @@ PANEL_INPUT_FILES = frozenset(
     }
 )
 
+#: The mat-pcp inputs `fig:dms`'s predictor arms read. Its own set for the
+#: reason :data:`PANEL_INPUT_FILES` is separate from :data:`SCORING_INPUT_FILES`:
+#: no scoring job and no `fig:subsampling` panel opens this one. It holds the
+#: per-leaf mutation paths the leaf log-frequency predictor reconstructs each
+#: leaf's spike from, which nothing else in the pipeline reads.
+DMS_INPUT_FILES = frozenset(
+    {
+        "sample_paths_dir",
+    }
+)
+
 #: Suffix mat-pcp gives each per-clade amino-acid fitness table. Here rather
 #: than in the two scripts that glob for it, because ``check_clades.py``
 #: validates a roster that ``score_run.py`` then reads back by this suffix: two
@@ -198,6 +209,12 @@ FITNESS_SUFFIX = "_aamut_fitness.csv"
 #: rule's inputs and `scripts/panels.py` opens them, so two spellings could
 #: drift and leave the rule declaring a path nothing reads.
 NTMUT_SUFFIX = "_ntmut_fitness.csv"
+
+#: Suffix mat-pcp gives each per-clade *leaf path* file -- one row per leaf,
+#: holding that leaf's whole root-to-tip list of nucleotide mutations. Here for
+#: the same reason as the two above: `workflow/figures.smk` declares these files
+#: as a rule's inputs and `scripts/dms_leaf_freq.py` opens them.
+SAMPLE_PATHS_SUFFIX = "_sample_paths.tsv"
 
 
 def mat_pcp_path(key: str) -> Path:
@@ -214,6 +231,7 @@ def mat_pcp_path(key: str) -> Path:
         | NEUTRAL_BUILD_FILES
         | SCORING_INPUT_FILES
         | PANEL_INPUT_FILES
+        | DMS_INPUT_FILES
     )
     if key not in allowed:
         raise KeyError(

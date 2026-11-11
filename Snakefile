@@ -17,9 +17,13 @@ and each read back out of its own log into ``results/runs.csv``. Milestone 4
 (issue #16) scores them: every run's best checkpoint against mat-pcp's
 amino-acid fitness effects on every clade founder, in one tidy table.
 Milestone 5 reads that table back out into the figures: issue #19 is the
-first of its four analyses, `fig:agreement`'s five panels.
+first of its four analyses, `fig:agreement`'s five panels. Issue #28 adds the
+part of `fig:dms` that reads no scored table at all -- panel C's two reference
+predictors, BLOSUM62 and the clade's own leaf frequencies, and the join the
+published models will land through.
 """
 
+import re
 import sys
 from pathlib import Path
 
@@ -36,6 +40,8 @@ from lib import (  # noqa: E402
     VERSION,
     corpus,
     corpus_max_aa_seq_len,
+    dms_dataset,
+    dms_homologs,
     mat_pcp_path,
 )
 
@@ -59,3 +65,4 @@ rule all:
         rules.scored.input,
         rules.panels.input,
         rules.subsampling.input,
+        rules.dms.input,

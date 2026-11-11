@@ -66,6 +66,14 @@ censor tables, no founders, no counts tables, no derived per-site or
 per-sample slice. That is the condition the data is held under, not a
 limitation to work around.
 
+That last clause decides one case this pipeline produces itself. `fig:dms`'s
+leaf-frequency predictor tallies, per site, which residues a clade's own tree
+leaves carry -- a 20 x 1,273 table over as many as 1.9 million named GISAID
+samples. It is a derived per-site slice of the tree, so it goes under
+`artifact_root` and is not committed. What is committed is the correlation table
+built from it, which carries a homolog, a predictor, a stratum and a coefficient,
+and no site and no sample.
+
 Reproducibility therefore runs through the code, not the data. Both pipelines
 are published: a reader with their own GISAID access runs `mat-pcp` on the
 UShER tree to produce PCPs and counts, then runs this pipeline on those
@@ -187,6 +195,9 @@ already did the forward passes, so a panel rule reads
 |---|---|
 | `agreement_mutations` | panels A, B and D: one mutation across the clades, one clade's cloud, the shift grid |
 | `agreement_ladders` | panels C and E: both correlations against the count cutoff |
+| `dms_leaf_counts` | one clade's per-site residue tally over its own tree leaves |
+| `dms_predictor_scores` | one reference predictor's score for every cell one assay measured |
+| `dms_predictor_summary` | `fig:dms` panel C's table: each predictor against the DMS, per homolog and stratum |
 
 Each runs per `{selection}`, which names the models it draws. `figure` is
 `dasm-1077k` -- the largest transformer, which is what every panel of the paper
@@ -194,6 +205,21 @@ shows -- and `fidelity` is `dasm-293k` and `dasm-85k`, the pair the published
 panels were drawn from, which is how the port is shown to compute what the old
 code computed. Both come out of one table and one `groupby`, so the second
 costs no rescoring.
+
+`snakemake dms` builds the part of `fig:dms` that reads no scored table at all:
+panel C's two reference predictors, and the join the published models will land
+through. BLOSUM62 asks how much of a deep mutational scan a substitution matrix
+already explains; the leaf frequency asks how much the clade's own standing
+variation does. Each leaf's spike is reconstructed from its own root-to-tip
+mutation path and tallied per site, so the second is a measure of how common a
+residue is among the sampled sequences -- weighted by descendant count, not by
+how often a substitution arose, which is a different quantity from mat-pcp's
+counts. Spearman is the readout for it: every substitution the clade has never
+shown sits at one pseudocount floor, which makes its scale bimodal, so the table
+reports the correlation restricted to cells whose mutant residue was observed
+beside the headline. Panel C itself is not drawn here -- the DASM's own column
+is a filter on `selection_factors.parquet` -- so what these rules produce is the
+table it will be drawn from.
 
 **Where the two kinds of output go.** The tables land in tracked
 `results/panels/<selection>/`, one CSV per panel holding exactly what that

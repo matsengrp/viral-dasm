@@ -36,6 +36,9 @@ from panel_spec import (
     AUDIT_JSON,
     DEFAULT_SELECTION,
     DEPTH_PANELS,
+    DMS_PREDICTOR_CORRELATIONS,
+    DMS_PREDICTORS,
+    DMS_SELECTION,
     ECDF_CLADES,
     LADDER_PANELS,
     MUTATION_PANELS,
@@ -43,9 +46,12 @@ from panel_spec import (
     SELECTIONS,
     SHIFT_CLADES,
     SUBSAMPLING_SELECTION,
+    dms_leaf_count_path,
+    dms_score_path,
     figure_dir,
     ntmut_grid_path,
     panel_csv_path,
+    sample_paths_path,
 )
 
 NOTEBOOK_DIR = f"{ARTIFACT_ROOT}/notebooks"
@@ -227,4 +233,180 @@ rule agreement_ladders:
         "marimo export html {input.notebook} -o {output.html} --force"
         " -- --table {input.table} --audit {input.audit}"
         " --selection {wildcards.selection}"
+        " > {log} 2>&1"
+
+
+# ---------------------------------------------------------------------------
+# `fig:dms` panel C: the predictors that are not the DASM
+# ---------------------------------------------------------------------------
+#
+# Three rules rather than two. The leaf tally is the expensive one -- clade 21K
+# is 1.9M leaves and 1.7 GB of paths -- and it does not depend on BLOSUM62, so
+# folding both predictors into one rule would rebuild it on every edit to the
+# substitution matrix.
+#
+# Scores and tallies go under the artifact root; only the correlation table is
+# tracked. `panel_spec.DMS_LEAF_COUNT_DIR` records why.
+
+#: The clades the three homologs are matched to, each read from `config.yaml`
+#: rather than listed here, so a repointed homolog moves the clade with it.
+DMS_CLADES = [dms_dataset(homolog).clade for homolog in dms_homologs()]
+
+
+def dms_leaf_founders(*_):
+    """The founders the leaf reconstruction reads: the path root, and the clade.
+
+    The reconstruction starts from 19A's coding sequence and the tally is read
+    back against the clade's own founder, so both are inputs. Declaring the
+    contents is how a rule declares a directory `config.yaml` names, as `rule
+    score`'s `founder_fastas` does.
+    """
+    directory = mat_pcp_path("clade_founders_dir")
+    return [str(directory / "19A.fa"), str(directory / "{clade}.fa")]
+
+
+def dms_homolog_counts(wildcards):
+    """The leaf tally one homolog's scores are read out of."""
+    return str(dms_leaf_count_path(dms_dataset(wildcards.homolog).clade))
+
+
+def dms_all_scores(*_):
+    """Every predictor's scores for every homolog."""
+    return [
+        str(dms_score_path(model, homolog))
+        for model in DMS_PREDICTORS
+        for homolog in dms_homologs()
+    ]
+
+
+def dms_all_counts(*_):
+    """Every matched clade's leaf tally."""
+    return [str(dms_leaf_count_path(clade)) for clade in DMS_CLADES]
+
+
+rule dms:
+    """`fig:dms`'s predictor table, as far as this stage of the port builds it.
+
+    Panel C's two reference predictors and the join they land through. The DASM's
+    own column is a filter on `selection_factors.parquet`, so it arrives with
+    `rule score`'s table; the chart waits on it, and a target that demanded it now
+    would be red for the whole gap.
+    """
+    input:
+        str(panel_csv_path(DMS_SELECTION, DMS_PREDICTOR_CORRELATIONS)),
+
+
+rule dms_leaf_counts:
+    """One clade's per-site residue tally over its own tree leaves.
+
+    Every leaf's spike is reconstructed from its own root-to-tip mutation path
+    applied to 19A's coding sequence, then translated and tallied. Clade 21K is
+    1.9M leaves; the three together read about 2.6 GB.
+    """
+    wildcard_constraints:
+        clade="|".join(DMS_CLADES),
+    input:
+        script="scripts/dms_leaf_freq.py",
+        models="scripts/dms_models.py",
+        dms="scripts/dms.py",
+        founder_reader="scripts/founders.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        # What the entry point imports. Spelled out per rule rather than shared
+        # through a dict, for the reason the other figure rules spell theirs out:
+        # `tests/test_rule_inputs.py` reads these blocks as source, and an input
+        # expanded from a variable is one it cannot see.
+        scov2_rates="dasm2/neutral/scov2_rates.py",
+        constants="dasm2/sequence/constants.py",
+        conversion="dasm2/sequence/conversion.py",
+        dasm2_init="dasm2/__init__.py",
+        # The per-leaf paths this reconstructs from, and the two founders it
+        # reads: 19A for the starting state, the clade's for the readback.
+        paths=lambda w: str(
+            sample_paths_path(mat_pcp_path("sample_paths_dir"), w.clade)
+        ),
+        clade_founders=dms_leaf_founders,
+    output:
+        counts=str(dms_leaf_count_path("{clade}")),
+    log:
+        f"{ARTIFACT_ROOT}/logs/dms_leaf_counts_{{clade}}.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "python {input.script}"
+        " --clade {wildcards.clade}"
+        " --output {output.counts}"
+        " > {log} 2>&1"
+
+
+rule dms_predictor_scores:
+    """One predictor's score for every cell one homolog's assay measured."""
+    wildcard_constraints:
+        model="|".join(DMS_PREDICTORS),
+        homolog="|".join(re.escape(homolog) for homolog in dms_homologs()),
+    input:
+        script="scripts/dms_models.py",
+        leaf_freq="scripts/dms_leaf_freq.py",
+        dms="scripts/dms.py",
+        founder_reader="scripts/founders.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        scov2_rates="dasm2/neutral/scov2_rates.py",
+        constants="dasm2/sequence/constants.py",
+        dasm2_init="dasm2/__init__.py",
+        # The assay itself, and the clade founder every score is taken away from.
+        # `scripts/dms.py` gates the CSV on the md5 `config.yaml` pins, so a
+        # repointed homolog fails here rather than moving a correlation quietly.
+        dms_csv=lambda w: str(dms_dataset(w.homolog).path),
+        clade_founders=founder_fastas,
+        censored=mat_pcp_path("censored_mutations_file"),
+        clades=mat_pcp_path("censored_clades_file"),
+        masked=mat_pcp_path("masked_nt_sites_file"),
+        # The tally the leaf predictor reads. Declared for both predictors: the
+        # entry point dispatches on `{model}` and BLOSUM62 never opens it, but a
+        # rule whose inputs varied by wildcard value would declare one thing for
+        # one job and another for the next.
+        counts=dms_homolog_counts,
+    output:
+        scores=str(dms_score_path("{model}", "{homolog}")),
+    log:
+        f"{ARTIFACT_ROOT}/logs/dms_scores_{{model}}_{{homolog}}.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "python {input.script}"
+        " --model {wildcards.model}"
+        " --homolog {wildcards.homolog}"
+        " --counts {input.counts}"
+        " --output {output.scores}"
+        " > {log} 2>&1"
+
+
+rule dms_predictor_summary:
+    """Panel C's table: each predictor against the DMS, per homolog and stratum."""
+    input:
+        script="scripts/dms_summary.py",
+        models="scripts/dms_models.py",
+        leaf_freq="scripts/dms_leaf_freq.py",
+        dms="scripts/dms.py",
+        spec="scripts/panel_spec.py",
+        founder_reader="scripts/founders.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        analysis_eval="dasm2/analysis/viral_fitness_eval.py",
+        constants="dasm2/sequence/constants.py",
+        dasm2_init="dasm2/__init__.py",
+        scores=dms_all_scores,
+        counts=dms_all_counts,
+    output:
+        table=str(panel_csv_path(DMS_SELECTION, DMS_PREDICTOR_CORRELATIONS)),
+    log:
+        f"{ARTIFACT_ROOT}/logs/dms_predictor_summary.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "python {input.script}"
+        " --scores {input.scores}"
+        " --counts {input.counts}"
+        " --output {output.table}"
         " > {log} 2>&1"
