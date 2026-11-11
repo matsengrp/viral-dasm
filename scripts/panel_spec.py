@@ -1,11 +1,12 @@
-"""What `fig:agreement` is made of: its panels, its selections, its paths.
+"""What `fig:agreement` and `fig:within_clade_shifts` are made of: their
+panels, their selections, their paths.
 
 Separate from `scripts/panels.py`, and stdlib plus `lib` only. `workflow/
 figures.smk` needs these names to declare a rule's outputs, and a `.smk` is
 parsed on every snakemake invocation -- a dry run and a `--lint` included. With
 the panel code imported there instead, each of those would pull in `dasm2`,
-pandas and pyarrow, and pay the fork's import-time assertions, to learn five
-file names.
+pandas and pyarrow, and pay the fork's import-time assertions, to learn a
+handful of file names.
 
 So this is the one spelling of each of these facts. `scripts/panels.py` and
 `workflow/figures.smk` both read them from here, which is what makes a rule's
@@ -14,6 +15,7 @@ declared output the path the notebook actually writes.
 
 from __future__ import annotations
 
+import csv
 import sys
 from pathlib import Path
 
@@ -107,6 +109,104 @@ SCATTER_CLADE = "21J"
 #: The mutation panel A traces across the clades.
 LOOKUP_MUTATION = "F456L"
 
+# ---------------------------------------------------------------------------
+# `fig:within_clade_shifts`
+# ---------------------------------------------------------------------------
+
+#: The clades that figure's panels A and B cover: the two the candidate list
+#: names. Separate from :data:`SHIFT_CLADES`, which is `fig:agreement`'s
+#: cross-clade pairing and whose consumers would change meaning if these were
+#: added to it.
+#:
+#: Neither is a clean single-substitution contrast -- 22D's two heaviest
+#: haplotypes differ at `F486P` and `T356K`, 20B's at `P681H`, `T478K` and
+#: `T732A` -- so a shift in either is attributable to the haplotype and not to
+#: one residue. That is why the scan's row excludes them and covers them here.
+CANDIDATE_CLADES: tuple[str, ...] = ("22D", "20B")
+
+#: The clades the scan's panel row draws, in the order the row reads. The scan
+#: axis is ten clades and the readout seven; these five are the seven minus
+#: :data:`CANDIDATE_CLADES`, which panels A and B already cover.
+SCAN_CLADES: tuple[str, ...] = ("21J", "22B", "21L", "21K", "20I")
+
+#: The rung the scan's panel is drawn at. One rung, not a sweep: the source
+#: writes the saved panel only at the lowest of its three cutoffs, because
+#: letting another setting overwrite it is how a composed figure comes to
+#: disagree with its own caption. This is the evidence cutoff, and it is not
+#: the corroboration gate's own 20-event floor.
+SCAN_MIN_EVIDENCE = COUNT_LADDER[0]
+
+#: The candidate list panels A and B share, as tracked data rather than two
+#: hand-maintained lists. `status` is `figure`, `null` or `held_back`, so
+#: moving a candidate off the figures is one edit that reaches both panels.
+CANDIDATE_CSV = REPO_ROOT / "data" / "shift_candidates.csv"
+
+#: Where the per-haplotype scores go: its own table, beside the founder one.
+#: **Not** rows in `selection_factors.parquet`. That table's `background` is
+#: empty for every row and a test pins it so, and `panels.base_frames` filters
+#: on `(model, clade)` alone -- a haplotype row sharing it would be pooled into
+#: every agreement panel with nothing saying so.
+HAPLOTYPE_TABLE = ARTIFACT_ROOT / "scored" / "haplotype_selection_factors.parquet"
+
+
+def figure_candidates() -> tuple[tuple[str, str], ...]:
+    """The `(clade, mutation)` pairs the figures draw, in file order.
+
+    The off-figure rows are dropped here rather than by each caller, so panel A
+    and panel B cannot disagree about their subjects -- which is the whole
+    reason the list is one file.
+    """
+    return tuple(
+        (clade, mutation)
+        for clade, mutation, status in _candidate_rows()
+        if status == "figure"
+    )
+
+
+def off_figure_candidates() -> tuple[tuple[str, str, str], ...]:
+    """The `(clade, mutation, status)` rows measured but kept off the figures.
+
+    Reported rather than silently dropped: a designed null and a held-back
+    nomination are off the figure for different reasons, and a reader checking
+    the panel against the source needs to see both.
+    """
+    return tuple(
+        (clade, mutation, status)
+        for clade, mutation, status in _candidate_rows()
+        if status != "figure"
+    )
+
+
+def _candidate_rows() -> list[tuple[str, str, str]]:
+    """Every candidate row, validated.
+
+    Columns are found by name, not position, so adding one cannot silently
+    shift what is read. An unknown `status` raises here rather than quietly
+    landing a candidate on or off the figure.
+    """
+    with CANDIDATE_CSV.open(newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    known = {"figure", "null", "held_back"}
+    out = []
+    seen = set()
+    for row in rows:
+        status = row["status"]
+        if status not in known:
+            raise ValueError(
+                f"{CANDIDATE_CSV}: {row['clade']}/{row['mutation']} has status "
+                f"{status!r}, which is not one of {sorted(known)}."
+            )
+        pair = (row["clade"], row["mutation"])
+        if pair in seen:
+            raise ValueError(
+                f"{CANDIDATE_CSV}: {pair[0]}/{pair[1]} appears twice, which "
+                f"would build a DAG whose two jobs write the same output."
+            )
+        seen.add(pair)
+        out.append((row["clade"], row["mutation"], status))
+    return out
+
+
 #: Panel stems, as the figure's composition reads them. Named here so a rule
 #: knows which notebook produces which panel.
 MUTATION_PANELS = (
@@ -118,6 +218,11 @@ LADDER_PANELS = (
     "panel_c_within_clade_ladder",
     "panel_e_shift_ladder",
 )
+
+#: `fig:within_clade_shifts`'s stems, one tuple per producing notebook.
+OUTLIER_PANELS = ("panel_a_candidate_scatter",)
+BACKGROUND_PANELS = ("panel_b_background_effects",)
+SCAN_PANELS = ("panel_c_clade_row",)
 
 #: The columns the panels read. Named rather than taken whole: the table is
 #: 1,425,760 rows per run over 24 columns, and the pooled `*_all` half,
