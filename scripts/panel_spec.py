@@ -22,7 +22,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from lib import ARTIFACT_ROOT, CORPUS_NAMES, REPO_ROOT, TEX_FIGURE_DIR
+from lib import (
+    ARTIFACT_ROOT,
+    CORPUS_NAMES,
+    FULL_DEPTH,
+    NTMUT_SUFFIX,
+    REPO_ROOT,
+    TEX_FIGURE_DIR,
+    cap_of,
+)
 
 #: The committed era partition: which clades each era's GLM was fitted over.
 #: `workflow/corpus.smk` spells this too, for the rule that renders the map.
@@ -399,12 +407,6 @@ def _candidate_rows() -> list[tuple[str, str, str]]:
 #: `SELECTIONS`.
 SUBSAMPLING_SELECTION = "subsampling"
 
-#: The model this figure's ladder is drawn from, and the one exception to
-#: :data:`FIGURE_MODEL`. `scripts/runs.py` trains `dasm-85k` on all four
-#: corpora and every other architecture at full depth alone, because that is
-#: the architecture the sampling-depth ladder trained at every depth.
-SUBSAMPLING_MODEL = "dasm-85k"
-
 #: The two clades panel B draws, under the names the paper uses beside the
 #: labels this pipeline keys on. `main.tex` names clades by their Pango or WHO
 #: alias and every table here is keyed by the bare Nextstrain clade: Delta is
@@ -431,9 +433,21 @@ def subsampling_caps() -> tuple[int, ...]:
     *to* it, which is the whole difference between a cap arm and a fraction
     arm.
     """
-    return tuple(
-        int(name.split("_")[1]) for name in CORPUS_NAMES if name.startswith("cap_")
-    )
+    return tuple(cap_of(name) for name in CORPUS_NAMES if name.startswith("cap_"))
+
+
+def ntmut_grid_path(root: Path, clade: str, arm: str) -> Path:
+    """One clade's nucleotide grid at one sampling depth.
+
+    Full depth is the **top level** of `ntmut_fitness_dir` and each thinned arm
+    is a subdirectory named for its corpus. Here rather than in the two callers
+    because `workflow/figures.smk` declares these files as `rule
+    subsampling_depth`'s inputs and `scripts/panels.py` opens them: a rule that
+    declared one layout while the notebook read another would be a
+    `MissingInputException` at best and a silently undeclared input at worst.
+    """
+    directory = root if arm == FULL_DEPTH.name else root / arm
+    return directory / f"{clade}{NTMUT_SUFFIX}"
 
 
 #: Panel stems, as the figure's composition reads them. Named here so a rule
@@ -448,15 +462,12 @@ LADDER_PANELS = (
     "panel_e_shift_ladder",
 )
 
-#: `fig:subsampling`'s stems. The depth pair is panels A and B, which measure
-#: the tree and take no model; the ladder pair is C and D.
+#: `fig:subsampling`'s depth pair, panels A and B, which measure the tree and
+#: take no model. Panels C and D are added here when the rule that draws them
+#: exists.
 DEPTH_PANELS = (
     "panel_a_sequences_per_clade",
     "panel_b_count_ecdf",
-)
-LADDER_ARM_PANELS = (
-    "panel_c_arm_grid",
-    "panel_d_clade_ladder",
 )
 
 #: `fig:within_clade_shifts`'s stems, one tuple per producing notebook.

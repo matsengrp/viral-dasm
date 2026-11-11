@@ -1247,7 +1247,10 @@ def test_the_ecdf_reproduces_the_measured_shares(ecdf):
     }
     assert set(measured) == set(ECDF_SHARE_AT_THRESHOLD)
     for key, expected in ECDF_SHARE_AT_THRESHOLD.items():
-        assert measured[key] == pytest.approx(expected, abs=1e-3), (
+        # 1e-4 is about one mutation in an 11,371-row grid. At the 1e-3 this
+        # started at, the two cap_5000 pins -- 0.0003 and 0.0006 -- accepted
+        # zero, so an arm that silently lost every count still passed.
+        assert measured[key] == pytest.approx(expected, abs=1e-4), (
             f"{key[0]}/{key[1]} is {measured[key]:.4f} against the {expected} "
             f"measured from this run. Re-measure rather than re-pinning."
         )
@@ -1311,7 +1314,6 @@ def test_the_subsampling_directory_is_not_a_model_selection():
     that is wrong.
     """
     assert panel_spec.SUBSAMPLING_SELECTION not in panel_spec.SELECTIONS
-    assert panel_spec.SUBSAMPLING_MODEL in MODELS
 
 
 def test_the_subsampling_arms_are_the_corpora_the_pipeline_builds():

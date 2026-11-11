@@ -124,6 +124,7 @@ from panel_spec import (  # noqa: F401  (re-exported for the notebooks)
     figure_candidates,
     figure_dir,
     labelled_candidates,
+    ntmut_grid_path,
     panel_csv_path,
     parse_mutation,
     selection_models,
@@ -850,19 +851,16 @@ def _nt_grid(
 ) -> pd.DataFrame:
     """One clade's nucleotide grid at one sampling depth, restricted to a gene.
 
-    Full depth is the **top level** of ``ntmut_fitness_dir``; each thinned arm
-    is a subdirectory named for its corpus, so the arm axis is
-    :data:`lib.CORPUS_NAMES` and nothing spells the caps a second time.
+    The layout is :func:`panel_spec.ntmut_grid_path`'s, which
+    ``workflow/figures.smk`` declares this rule's inputs from, so the file a
+    rule promises and the file this opens are one spelling.
 
     ``gene`` is a semicolon-joined list where a site falls in more than one
     reading frame, and is null on the intergenic rows, so the membership test
     runs on ``fillna("")`` -- a bare ``split`` raises on those.
     """
-    directory = ntmut_dir
-    if arm != FULL_DEPTH.name:
-        directory = directory / arm
     frame = pd.read_csv(
-        directory / f"{clade}_ntmut_fitness.csv", usecols=list(NT_GRID_COLUMNS)
+        ntmut_grid_path(ntmut_dir, clade, arm), usecols=list(NT_GRID_COLUMNS)
     )
     in_gene = frame["gene"].fillna("").str.split(";").apply(lambda g: gene in g)
     return frame.loc[in_gene]
@@ -890,6 +888,8 @@ def count_ecdf_frame(
     mutations the threshold leaves out, which is the panel's question.
 
     Raises:
+        ValueError: If ``arms`` does not carry full depth, which is the
+            reference every other arm's grid is checked against.
         ValueError: If a thinned arm's grid has a different number of rows from
             the full-depth one. The grid is enumerated from the clade founder
             and cannot depend on sampling depth, so a changed count means the
@@ -897,15 +897,23 @@ def count_ecdf_frame(
             different mutations with nothing saying so.
     """
     arms = tuple(CORPUS_NAMES) if arms is None else tuple(arms)
+    if FULL_DEPTH.name not in arms:
+        raise ValueError(
+            f"arms={arms} carries no {FULL_DEPTH.name!r}, which every other "
+            f"arm's grid is sized against and which panel B draws as its "
+            f"reference curve."
+        )
     grid = np.linspace(0, ECDF_MAX_COUNT, ECDF_POINTS)
     rows = []
     for clade in clades:
-        n_full: int | None = None
-        for arm in arms:
-            frame = _nt_grid(ntmut_dir, clade, arm, gene=gene)
-            if arm == FULL_DEPTH.name:
-                n_full = len(frame)
-            elif n_full is not None and len(frame) != n_full:
+        # Every arm read before the comparison, rather than full depth being
+        # whichever arm the loop happens to reach first: a caller passing
+        # `arms` in another order would otherwise skip the size check on every
+        # arm ahead of full depth, silently.
+        grids = {arm: _nt_grid(ntmut_dir, clade, arm, gene=gene) for arm in arms}
+        n_full = len(grids[FULL_DEPTH.name])
+        for arm, frame in grids.items():
+            if len(frame) != n_full:
                 raise ValueError(
                     f"{arm}/{clade}: the {gene} nucleotide grid has "
                     f"{len(frame)} rows against {n_full} at full depth. The "
