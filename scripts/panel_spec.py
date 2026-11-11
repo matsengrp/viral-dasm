@@ -339,6 +339,10 @@ DMS_PREDICTORS: tuple[str, ...] = ("blosum62", "leaf_logfreq")
 #: and :data:`DMS_CORRELATION_PANELS` is unchanged.
 DMS_PREDICTOR_CORRELATIONS = "panel_c_predictor_correlations"
 
+#: `fig:dms` panel C's stem, as both the table's name and the image's: a panel
+#: is a rebuildable picture of the CSV beside it, so they share one name.
+DMS_PREDICTOR_PANELS = ("panel_c_predictor_correlations",)
+
 #: Where `fig:dms`'s predictor intermediates go: under the artifact root, not in
 #: the tree. One narrow Parquet per `(predictor, homolog)`.
 DMS_SCORE_DIR = ARTIFACT_ROOT / "dms" / "scores"

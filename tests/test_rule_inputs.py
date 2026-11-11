@@ -119,6 +119,7 @@ ENTRY_POINTS = {
     "dms_blosum_scores": "scripts/dms_blosum.py",
     "dms_leaf_scores": "scripts/dms_leaf_scores.py",
     "dms_predictor_summary": "scripts/dms_summary.py",
+    "dms_predictors": "notebooks/dms_predictors.py",
 }
 
 #: Rules that execute nothing. Asserted, not asserted-by-assertion: each must

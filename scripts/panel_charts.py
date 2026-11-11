@@ -282,6 +282,21 @@ DMS_Y_TITLE = "measured effect on cell entry"
 #: single-line axis title sets the panel's width.
 DMS_BAR_Y_TITLE = ["Pearson correlation", "with cell entry (r)"]
 
+#: The y-axis title for each correlation a bar panel can draw. Two lines apiece,
+#: as the ladder panels' are, because a long single-line axis title sets the
+#: panel's width.
+#:
+#: Which one a panel wants is a property of its predictors. A log selection
+#: factor against a measured effect is readable linearly, so panel B takes
+#: Pearson. Panel C's leaf predictor puts every substitution its clade has never
+#: shown at one floor, which makes its scale bimodal and its Pearson meaningless
+#: -- on KP.3.1.1's multi-nt cells it reads +0.04 against a Spearman of +0.58 --
+#: so that panel takes the rank correlation.
+DMS_BAR_METRIC_TITLES: dict[str, list[str]] = {
+    "pearson_r": DMS_BAR_Y_TITLE,
+    "spearman_rho": ["Spearman correlation", "with cell entry (rho)"],
+}
+
 #: Panel sizes. The scatter is square because its axes are not comparable and
 #: nothing is read off a diagonal, so the aspect carries no claim; the bars are
 #: wider than tall because the categorical axis has nine positions.
@@ -517,10 +532,11 @@ def homolog_correlation_panel(
     homolog_order: Sequence[str],
     stratum_order: Sequence[str],
     predictor_order: Sequence[str],
+    metric: str = "pearson_r",
     width: int = DMS_BAR_WIDTH,
     height: int = DMS_BAR_HEIGHT,
 ) -> alt.Chart:
-    """Panel B: every predictor's correlation, every homolog, every stratum.
+    """Every predictor's correlation, every homolog, every stratum.
 
     Bars rather than dots, and from zero rather than from the data's floor. A
     correlation has a meaningful zero -- no ordering at all -- so a bar's
@@ -545,11 +561,16 @@ def homolog_correlation_panel(
             predictors one hue; or if a homolog or stratum in ``frame`` is
             absent from the order it is sorted by, which Vega drops silently.
     """
-    missing_r = frame["pearson_r"].isna()
+    if metric not in DMS_BAR_METRIC_TITLES:
+        raise KeyError(
+            f"{metric!r} has no axis title; expected one of "
+            f"{sorted(DMS_BAR_METRIC_TITLES)}"
+        )
+    missing_r = frame[metric].isna()
     if missing_r.any():
         rows = frame.loc[missing_r, ["homolog", "stratum", "predictor"]]
         raise ValueError(
-            f"{int(missing_r.sum())} rows carry no `pearson_r`, which draws no "
+            f"{int(missing_r.sum())} rows carry no `{metric}`, which draws no "
             f"bar and leaves a gap the legend still promises:\n"
             f"{rows.to_string(index=False)}\n"
             f"`within_clade_metrics` returns NaN below its `min_mutations`, so "
@@ -596,7 +617,7 @@ def homolog_correlation_panel(
                 axis=alt.Axis(labelFontSize=PANEL_FONT_SIZE, labelAngle=-40),
             ),
             xOffset=alt.XOffset("predictor:N", sort=predictors),
-            y=alt.Y("pearson_r:Q", title=DMS_BAR_Y_TITLE, axis=axis),
+            y=alt.Y(f"{metric}:Q", title=DMS_BAR_METRIC_TITLES[metric], axis=axis),
             color=alt.Color(
                 "predictor:N",
                 sort=predictors,

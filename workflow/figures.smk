@@ -42,6 +42,7 @@ from panel_spec import (
     DEFAULT_SELECTION,
     DEPTH_PANELS,
     DMS_PREDICTOR_CORRELATIONS,
+    DMS_PREDICTOR_PANELS,
     DMS_PREDICTORS,
     DMS_SELECTION,
     ECDF_CLADES,
@@ -286,7 +287,11 @@ rule dms:
     would be red for the whole gap.
     """
     input:
-        str(panel_csv_path(DMS_SELECTION, DMS_PREDICTOR_CORRELATIONS)),
+        [
+            str(figure_dir(DMS_SELECTION) / f"{stem}.{extension}")
+            for stem in DMS_PREDICTOR_PANELS
+            for extension in ("png", "svg")
+        ],
 
 
 rule dms_leaf_counts:
@@ -442,4 +447,47 @@ rule dms_predictor_summary:
         " --scores {input.scores}"
         " --counts {input.counts}"
         " --output {output.table}"
+        " > {log} 2>&1"
+
+
+rule dms_predictors:
+    """Panel C: every predictor's correlation with the DMS, as grouped bars.
+
+    Reads the table `dms_predictor_summary` wrote and draws it. No CSV of its
+    own: a panel is a rebuildable picture of the table beside it, and that table
+    already exists at this stem.
+    """
+    input:
+        panels="scripts/panels.py",
+        spec="scripts/panel_spec.py",
+        charts="scripts/panel_charts.py",
+        dms="scripts/dms.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        # What the notebook reaches through those modules. Spelled out per rule
+        # rather than shared through a dict, for the reason the other figure
+        # rules spell theirs out: `tests/test_rule_inputs.py` reads these blocks
+        # as source, and an input expanded from a variable is one it cannot see.
+        analysis_charts="dasm2/analysis/charts.py",
+        analysis_viral="dasm2/analysis/viral.py",
+        analysis_eval="dasm2/analysis/viral_fitness_eval.py",
+        io="dasm2/io.py",
+        conversion="dasm2/sequence/conversion.py",
+        scov2_rates="dasm2/neutral/scov2_rates.py",
+        dasm2_init="dasm2/__init__.py",
+        notebook="notebooks/dms_predictors.py",
+        table=str(panel_csv_path(DMS_SELECTION, DMS_PREDICTOR_CORRELATIONS)),
+    output:
+        html=f"{NOTEBOOK_DIR}/dms_predictors.html",
+        panels=[
+            str(figure_dir(DMS_SELECTION) / f"{stem}.{extension}")
+            for stem in DMS_PREDICTOR_PANELS
+            for extension in ("png", "svg")
+        ],
+    log:
+        f"{ARTIFACT_ROOT}/logs/dms_predictors.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "marimo export html {input.notebook} -o {output.html} --force"
         " > {log} 2>&1"
