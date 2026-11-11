@@ -30,6 +30,7 @@ import dasm2  # noqa: F401
 pd = pytest.importorskip("pandas")
 numpy = pytest.importorskip("numpy")
 
+import panel_spec
 import panels
 from runs import MODELS, RUNS
 
@@ -442,3 +443,22 @@ def test_panel_selections_name_runs_the_pipeline_trains():
     # pool whatever their selection names, so a second model here would change
     # what `fig:agreement` shows without changing any code.
     assert len(panels.SELECTIONS[panels.DEFAULT_SELECTION]) == 1
+
+
+def test_the_candidate_clades_match_the_candidate_file():
+    """`CANDIDATE_CLADES` is a hand list beside a file it must agree with.
+
+    The file exists so panels A and B cannot disagree about their subjects; a
+    candidate added for a third clade would otherwise sit silently outside the
+    clade tuple and be dropped by every panel that reads it. The tuple keeps
+    its own order, because that order is the figure's row order and not a
+    property of the data.
+    """
+    from_file = {clade for clade, _ in panel_spec.figure_candidates()}
+    from_file |= {clade for clade, _, _ in panel_spec.off_figure_candidates()}
+    assert set(panel_spec.CANDIDATE_CLADES) == from_file
+
+
+def test_the_scan_row_does_not_overlap_the_candidate_clades():
+    """The scan excludes the two the candidate panels cover, by construction."""
+    assert not set(panel_spec.SCAN_CLADES) & set(panel_spec.CANDIDATE_CLADES)
