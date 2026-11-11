@@ -26,30 +26,47 @@ The images go under the artifact root and the tables into tracked
 effects and selection factors are publishable; no panel carries a sequence.
 """
 
-from panels import (
+# Every path below comes from `scripts/panel_spec.py`, which is what the
+# notebooks compute them from too: one spelling per fact, so a rule cannot
+# declare an output the notebook writes somewhere else. The spec module is
+# stdlib plus `lib`, deliberately: this file is parsed on every snakemake
+# invocation, and importing the panel code here would pull `dasm2`, pandas and
+# pyarrow into a dry run to learn five file names.
+from panel_spec import (
+    AUDIT_JSON,
+    DEFAULT_SELECTION,
     LADDER_PANELS,
     MUTATION_PANELS,
-    DEFAULT_SELECTION,
+    PANEL_MEM_MB,
     SELECTIONS,
+    SHIFT_CLADES,
+    figure_dir,
+    panel_csv_path,
 )
 
-FIGURE_DIR = f"{ARTIFACT_ROOT}/figures"
 NOTEBOOK_DIR = f"{ARTIFACT_ROOT}/notebooks"
-PANEL_CSV_DIR = "results/panels"
 
-#: The censor audit, which is where the reverting exclusion comes from. The
-#: table carries `censored` and `globally_masked` as columns and does not carry
-#: this -- `censored_directional` is the censor table's directional entries and
-#: a subset of `censored` by construction, so a panel that substituted it would
-#: run a two-layer exclusion while believing it ran three.
-AUDIT_JSON = f"{ARTIFACT_ROOT}/audit/{GENE}.json"
+
+def shift_clade_fastas(*_):
+    """The founder FASTAs of the clades the shift panels pair."""
+    directory = mat_pcp_path("clade_founders_dir")
+    return [str(directory / f"{clade}.fa") for clade in SHIFT_CLADES]
 
 
 def panel_outputs(stems, selection):
-    """One selection's panel images and tables, as a rule's outputs."""
-    return [f"{FIGURE_DIR}/{selection}/{stem}.png" for stem in stems] + [
-        f"{PANEL_CSV_DIR}/{selection}/{stem}.csv" for stem in stems
-    ]
+    """One selection's panel images and tables, as a rule's outputs.
+
+    Both image formats are declared, not just the PNG. `save_panel` writes a
+    vector copy of every panel, and an undeclared output is one snakemake will
+    not clean up after a failed job -- so a half-written SVG would survive a
+    rerun that replaced its PNG.
+    """
+    directory = figure_dir(selection)
+    return [
+        str(directory / f"{stem}.{extension}")
+        for stem in stems
+        for extension in ("png", "svg")
+    ] + [str(panel_csv_path(selection, stem)) for stem in stems]
 
 
 rule panels:
@@ -65,6 +82,7 @@ rule agreement_mutations:
         selection="|".join(SELECTIONS),
     input:
         panels="scripts/panels.py",
+        spec="scripts/panel_spec.py",
         charts="scripts/panel_charts.py",
         founder_reader="scripts/founders.py",
         lib="scripts/lib.py",
@@ -83,19 +101,21 @@ rule agreement_mutations:
         notebook="notebooks/agreement_mutations.py",
         table=SCORED_TABLE,
         audit=AUDIT_JSON,
-        # The founders the shift panel drops identical pairs on. Globbed, as
-        # `rule score` globs them: the roster is whatever mat-pcp wrote.
-        clade_founders=founder_fastas,
+        # The founders the shift panel drops identical pairs on -- those four
+        # clades', not the roster's 56. `rule score` declares the whole glob
+        # because it scores every clade; this reads `SHIFT_CLADES` alone.
+        clade_founders=shift_clade_fastas,
     output:
         html=f"{NOTEBOOK_DIR}/agreement_mutations_{{selection}}.html",
         panels=panel_outputs(MUTATION_PANELS, "{selection}"),
     log:
         f"{ARTIFACT_ROOT}/logs/agreement_mutations_{{selection}}.log",
     resources:
-        mem_mb=SCORE_MEM_MB,
+        mem_mb=PANEL_MEM_MB,
     shell:
         "marimo export html {input.notebook} -o {output.html} --force"
-        " -- --table {input.table} --selection {wildcards.selection}"
+        " -- --table {input.table} --audit {input.audit}"
+        " --selection {wildcards.selection}"
         " > {log} 2>&1"
 
 
@@ -105,6 +125,7 @@ rule agreement_ladders:
         selection="|".join(SELECTIONS),
     input:
         panels="scripts/panels.py",
+        spec="scripts/panel_spec.py",
         charts="scripts/panel_charts.py",
         founder_reader="scripts/founders.py",
         lib="scripts/lib.py",
@@ -123,15 +144,16 @@ rule agreement_ladders:
         notebook="notebooks/agreement_ladders.py",
         table=SCORED_TABLE,
         audit=AUDIT_JSON,
-        clade_founders=founder_fastas,
+        clade_founders=shift_clade_fastas,
     output:
         html=f"{NOTEBOOK_DIR}/agreement_ladders_{{selection}}.html",
         panels=panel_outputs(LADDER_PANELS, "{selection}"),
     log:
         f"{ARTIFACT_ROOT}/logs/agreement_ladders_{{selection}}.log",
     resources:
-        mem_mb=SCORE_MEM_MB,
+        mem_mb=PANEL_MEM_MB,
     shell:
         "marimo export html {input.notebook} -o {output.html} --force"
-        " -- --table {input.table} --selection {wildcards.selection}"
+        " -- --table {input.table} --audit {input.audit}"
+        " --selection {wildcards.selection}"
         " > {log} 2>&1"

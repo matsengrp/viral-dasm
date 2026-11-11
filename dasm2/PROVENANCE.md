@@ -431,13 +431,14 @@ branch is gone and the audit reads the key the templates name.
 The cuts above were traced against **training**, which never reads a fitness
 table. Scoring a finished checkpoint against mat-pcp's effects is a third code
 path, and `dasm2/analysis/` was absent entirely. Three files came from the same
-source commit:
+source commit, and a fourth followed with the figures:
 
 | module | upstream | here | what was taken |
 |---|---:|---:|---|
 | `analysis/__init__.py` | 1 | 1 | verbatim |
 | `analysis/viral.py` | 1,077 | 1,089 | every definition; comments revised |
-| `analysis/viral_fitness_eval.py` | 2,711 | 407 | 12 of its definitions |
+| `analysis/viral_fitness_eval.py` | 2,711 | 1,121 | 21 of its definitions, in two passes |
+| `analysis/charts.py` | 2,083 | 223 | 1 of its 15 chart builders |
 
 `viral.py` arrives whole because it is frame-in, frame-out: its only `dasm2`
 import is `sequence.constants`, it reads no path and loads no model, and the
@@ -462,8 +463,32 @@ directories rather than restating it.
 an unrecognised name as a legacy final save. `lib.select_checkpoint` already
 knows this pipeline's layout and raises instead of guessing.
 
-The run axis, the shift families and the effect-error families are not here.
-They compute per-figure readouts, so they belong with the figures.
+The run axis and the effect-error family are not here. They compute readouts
+for figures this repository has not written yet, so they arrive with those
+figures -- which is what the second pass did for the shift family.
+
+**The second pass, with `fig:agreement` (issue #19).** Nine more definitions
+came across, each code-identical to the source commit: `identical_founder_pairs`,
+`shift_frame`, `shift_pair_metrics`, `within_clade_metrics`,
+`count_ladder_adequacy`, `within_clade_count_ladder`, `shift_pair_count_ladder`,
+`poisson_effect_interval` and `poisson_effect_p_value`, with `SHIFT_EPS`,
+`LARGE_SHIFT_THRESHOLD`, `COUNT_NOISE_COVERAGE` and `RATIO_PSEUDOCOUNT`. Every
+statistic the figure's five panels plot is one of them.
+
+`MIN_LARGE_SHIFTS` and `gate_shift_pairs` are not, and that is the one place the
+second pass departs from naming parity: no panel here gates a clade pair on its
+large-shift count, so the threshold is reported and never filtered on, and the
+constants' comments say so rather than pointing at a function this tree does not
+carry.
+
+**`charts.py` came 1 builder of 15.** The figure makes five chart calls and only
+one of them is a library chart, `mutation_lookup_line`; the other four are built
+inline in the notebooks that lay them out, because a scatter with a diagonal and
+a fit is layout rather than a reusable statistic. The builder most obviously
+missing is `mutation_effect_heatmap`, which draws no panel of this figure and
+needs `dasm2/neutral/`'s tabular rates model, pruned by the third cut. The
+module's ImportError message was rewritten: it pointed at a `dasm2[analysis]`
+extra, which this repository's `pyproject.toml` does not have.
 
 ### The comment pass
 

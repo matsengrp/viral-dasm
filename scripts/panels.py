@@ -38,7 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 # `lib` first, so this repository's root is on `sys.path` before anything
 # imports `dasm2` and the vendored fork wins over an editable install.
-from lib import ARTIFACT_ROOT, GENE, REPO_ROOT, assert_dasm2_is_this_repo
+from lib import GENE, assert_dasm2_is_this_repo
 
 # Then `dasm2`, before pandas or pyarrow: `dasm2/arrow_pool.py` moves Arrow off
 # the bundled mimalloc, and can only do so if pyarrow has not been imported yet.
@@ -55,6 +55,32 @@ import pandas as pd
 import pyarrow.parquet as pq
 from founders import founder_aa_sequences
 
+# Every name below is the figure's shape rather than its arithmetic, and
+# `workflow/figures.smk` needs the same names to declare its outputs. They
+# live in a module it can import without pulling in `dasm2`, pandas and
+# pyarrow to learn five file names.
+from panel_spec import (  # noqa: F401  (re-exported for the notebooks)
+    ARM,
+    AUDIT_JSON,
+    COUNT_LADDER,
+    DEFAULT_SELECTION,
+    FIDELITY_MODELS,
+    FIGURE_DIR,
+    FIGURE_MODEL,
+    LADDER_PANELS,
+    LOOKUP_MUTATION,
+    MUTATION_PANELS,
+    PANEL_CSV_DIR,
+    PANEL_MIN_COUNT,
+    SCATTER_CLADE,
+    SELECTIONS,
+    SHIFT_CLADES,
+    TABLE_COLUMNS,
+    figure_dir,
+    panel_csv_path,
+    selection_models,
+)
+
 from dasm2.analysis.viral import filter_merged_fitness
 
 # The statistics are re-exported rather than imported again in each notebook:
@@ -65,10 +91,9 @@ from dasm2.analysis.viral_fitness_eval import (  # noqa: F401  (re-exported)
     CLIP_LOWER,
     COUNT_FILTER_MODE,
     COUNT_NOISE_COVERAGE,
+    COUNT_THRESHOLD_LADDER,
     DEFAULT_MIN_CLADE_MUTATIONS,
     FITNESS_METRICS,
-    LARGE_SHIFT_THRESHOLD,
-    adequate_clades,
     apply_count_threshold,
     clip_axes,
     count_ladder_adequacy,
@@ -80,117 +105,6 @@ from dasm2.analysis.viral_fitness_eval import (  # noqa: F401  (re-exported)
     shift_pair_metrics,
     within_clade_count_ladder,
     within_clade_metrics,
-)
-
-#: Where the panel images go: under the artifact root, not in the tree. A panel
-#: is a rebuildable picture of the CSV committed beside it, and `README.md`'s
-#: layout gives tracked `results/` to the tables.
-FIGURE_DIR = ARTIFACT_ROOT / "figures"
-
-#: Where the tables go: tracked, one CSV per panel, holding exactly what that
-#: panel plots.
-PANEL_CSV_DIR = REPO_ROOT / "results" / "panels"
-
-#: The censor audit, which is the only source of the reverting exclusion.
-AUDIT_JSON = ARTIFACT_ROOT / "audit" / f"{GENE}.json"
-
-#: The model every panel of the published figure is drawn from: the largest
-#: transformer. The subsampling figure is the one exception to that policy, and
-#: it is not this figure.
-FIGURE_MODEL = "dasm-1077k"
-
-#: The context-independent baseline. `PerSiteParentChildHead` over an
-#: `IdentityEncoder` makes its selection factor a function of (site, parent
-#: residue, child residue) and nothing else, so it sees every mutation a DASM
-#: sees and has the same access to each clade's evidence while being unable to
-#: borrow across sites or clades. One constant, because a spelling per notebook
-#: is a spelling that can drift.
-CONTROL_MODEL = "ci-484k"
-
-#: The two models the published CSVs were drawn from, for the port-fidelity
-#: gate. `dasm-293k` is `size_large`'s architecture field for field, and
-#: `dasm-85k` is the ladder's `transformer`; the published panels C and E pool
-#: the two under one median.
-FIDELITY_MODELS: tuple[str, ...] = ("dasm-293k", "dasm-85k")
-
-#: The two model selections the panels are drawn for, and the one name each is
-#: built under. Two, because they answer different questions: `figure` is what
-#: `fig:agreement` publishes, and `fidelity` is the pair the published CSVs were
-#: drawn from, which is how the port is shown to compute what the old code
-#: computed. Both come out of one table and one `groupby`, so the second costs
-#: no rescoring.
-#:
-#: Panels C and E pool the models of their selection under one median, which is
-#: what the published numbers do -- so pooling is a property of the selection
-#: rather than a fixed groupby, or the fidelity gate could not be run at all.
-SELECTIONS: dict[str, tuple[str, ...]] = {
-    "figure": (FIGURE_MODEL,),
-    "fidelity": FIDELITY_MODELS,
-}
-
-#: The selection a rule builds unless it is asked for the other one.
-DEFAULT_SELECTION = "figure"
-
-#: The corpus arm every panel of this figure reads. The thinned arms are the
-#: subsampling figure's axis, and mixing one in here would confound the model
-#: with the corpus.
-ARM = "full_depth"
-
-#: The single cutoff the per-mutation panels are drawn at. Panels C and E sweep
-#: it instead; see :data:`COUNT_LADDER`.
-PANEL_MIN_COUNT = 10
-
-#: The rungs panels C and E sweep. A subset of the shared
-#: `COUNT_THRESHOLD_LADDER`: 100 is out because it is the rung that would set
-#: the paired clade set for every other rung, so the whole sweep would be drawn
-#: on a clade set chosen by the rung nobody reads.
-COUNT_LADDER: list[int] = [10, 20, 50]
-
-#: The clades the shift panels draw pairs from. Quadratic in the number of
-#: clades -- four is six pairs, the full roster would be 1,540 -- so this is a
-#: selection rather than the roster.
-SHIFT_CLADES: tuple[str, ...] = ("21J", "21L", "23A", "24A")
-
-#: The clade panel B scatters. One clade, because the panel's job is to show
-#: the cloud behind one of panel C's dots.
-SCATTER_CLADE = "21J"
-
-#: The mutation panel A traces across the clades.
-LOOKUP_MUTATION = "F456L"
-
-#: Panel stems, as the figure's composition reads them. Named here so a rule
-#: knows which notebook produces which panel.
-MUTATION_PANELS = (
-    "panel_a_mutation_lookup",
-    "panel_b_within_clade_scatter",
-    "panel_d_shift_grid",
-)
-LADDER_PANELS = (
-    "panel_c_within_clade_ladder",
-    "panel_e_shift_ladder",
-)
-
-#: The columns the panels read. Named rather than taken whole: the table is
-#: 1,425,760 rows per run over 24 columns, and the pooled `*_all` half, the
-#: Bayesian estimate's `uncertainty` and `censored_directional` are read by no
-#: panel here.
-TABLE_COLUMNS: tuple[str, ...] = (
-    "clade",
-    "model",
-    "arm",
-    "aa_mutation",
-    "aa_site",
-    "parent_aa",
-    "mutant_aa",
-    "is_synonymous",
-    "log_selection_factor",
-    "actual_count",
-    "predicted_count",
-    "delta_fitness_ratio",
-    "delta_fitness_bayesian",
-    "uncertainty",
-    "globally_masked",
-    "censored",
 )
 
 
@@ -228,15 +142,21 @@ class FilterSpec:
             )
 
     def as_row(self) -> dict[str, object]:
-        """The spec as CSV columns, so a table says what produced it."""
+        """The spec as CSV columns, so a table says what produced it.
+
+        Every name is prefixed ``spec_``. Without it ``min_count`` collides with
+        the column panels C and E carry their **rung** in, and the spec's own
+        value -- 0, because the ladder owns the count axis -- would silently
+        replace the x axis of the two panels that sweep it.
+        """
         return {
-            "fitness_metric": self.fitness_metric,
-            "min_count": self.min_count,
-            "clip_lower": self.clip_lower,
-            "min_clade_mutations": self.min_clade_mutations,
-            "exclude_masked": self.exclude_masked,
-            "exclude_synonymous": self.exclude_synonymous,
-            "count_filter_mode": COUNT_FILTER_MODE,
+            "spec_fitness_metric": self.fitness_metric,
+            "spec_min_count": self.min_count,
+            "spec_clip_lower": self.clip_lower,
+            "spec_min_clade_mutations": self.min_clade_mutations,
+            "spec_exclude_masked": self.exclude_masked,
+            "spec_exclude_synonymous": self.exclude_synonymous,
+            "spec_count_filter_mode": COUNT_FILTER_MODE,
         }
 
 
@@ -245,27 +165,6 @@ class FilterSpec:
 #: per-mutation panels re-apply :data:`PANEL_MIN_COUNT` to the same frames,
 #: which is what makes a dot in panel C and the cloud in panel B the same rows.
 BASE_SPEC = FilterSpec(min_count=0.0)
-
-
-def selection_models(selection: str) -> tuple[str, ...]:
-    """The models one selection draws, named so a typo fails here."""
-    if selection not in SELECTIONS:
-        raise KeyError(
-            f"{selection!r} is not a panel selection: {sorted(SELECTIONS)}. "
-            f"`figure` is what the paper publishes and `fidelity` is the pair "
-            f"the published CSVs were drawn from."
-        )
-    return SELECTIONS[selection]
-
-
-def figure_dir(selection: str) -> Path:
-    """Where one selection's panel images go."""
-    return FIGURE_DIR / selection
-
-
-def panel_csv_path(selection: str, stem: str) -> Path:
-    """Where one selection's panel table goes, in the tracked tree."""
-    return PANEL_CSV_DIR / selection / f"{stem}.csv"
 
 
 def reverting_sites_by_clade(audit_json: Path = AUDIT_JSON) -> dict[str, set[int]]:
@@ -279,7 +178,7 @@ def reverting_sites_by_clade(audit_json: Path = AUDIT_JSON) -> dict[str, set[int
     Raises:
         FileNotFoundError: If the audit has not been written. The sites come
             from the corpus, not from a manifest, so there is nothing to fall
-            back to -- run ``snakemake audit``.
+            back to -- run ``rule audit_censor``.
         ValueError: If the audit carries no ``reverting_codon_sites_by_clade``.
             A stale audit would silently exclude nothing and report every site
             as scored, which is the one failure mode that looks like success.
@@ -287,7 +186,7 @@ def reverting_sites_by_clade(audit_json: Path = AUDIT_JSON) -> dict[str, set[int
     if not audit_json.exists():
         raise FileNotFoundError(
             f"{audit_json} does not exist, so the reverting exclusion cannot be "
-            f"applied. Run `snakemake {audit_json}` -- the sites are derived "
+            f"applied. Run `rule audit_censor` -- the sites are derived "
             f"from the corpus, not from a manifest."
         )
     payload = json.loads(audit_json.read_text())
@@ -321,12 +220,13 @@ def reverting_sites(by_clade: dict[str, set[int]], clade: str) -> set[int]:
 
 
 def excluded_sites(
-    row_or_frame: pd.DataFrame,
+    frame: pd.DataFrame,
     *,
-    reverting: set[int],
-    exclude_masked: bool,
+    clade: str,
+    reverting_by_clade: dict[str, set[int]],
+    exclude_masked: bool = True,
 ) -> pd.Series:
-    """The three-layer site exclusion, as a boolean mask over one clade's rows.
+    """The site exclusion for one clade's rows, as a boolean mask.
 
     All three layers at once: the global artifact mask and the per-clade censor
     table, both carried as columns of the scored table, and the per-clade
@@ -335,10 +235,22 @@ def excluded_sites(
     observations, so it is not an independent yardstick there -- a model
     deliberately trained not to fit those observations would be marked down for
     succeeding.
+
+    **It takes the clade, not that clade's reverting set.** Of the three layers
+    only the reversion rule needs a lookup -- the other two are columns -- and a
+    caller handed the set could hoist the lookup out of its clade loop and score
+    every clade against the first clade's reversions, with the right number of
+    columns and no error. Looking it up here makes that unavailable.
+
+    ``exclude_masked=False`` leaves two layers rather than three, which is the
+    one caller-visible way to get the exclusion this module's docstring warns
+    about. Nothing in the panels passes it.
     """
-    dropped = row_or_frame["censored"] | row_or_frame["aa_site"].isin(reverting)
+    dropped = frame["censored"] | frame["aa_site"].isin(
+        reverting_sites(reverting_by_clade, clade)
+    )
     if exclude_masked:
-        dropped = dropped | row_or_frame["globally_masked"]
+        dropped = dropped | frame["globally_masked"]
     return dropped
 
 
@@ -427,13 +339,11 @@ def base_frames(
             if frame.empty:
                 continue
             frame = frame.dropna(subset=[spec.fitness_metric])
-            # Looked up per clade. Hoisting either clade-dependent exclusion out
-            # of this loop is the one mistake that would silently score every
-            # clade against the first clade's censored set.
             frame = frame[
                 ~excluded_sites(
                     frame,
-                    reverting=reverting_sites(reverting_by_clade, clade),
+                    clade=clade,
+                    reverting_by_clade=reverting_by_clade,
                     exclude_masked=spec.exclude_masked,
                 )
             ]
@@ -455,59 +365,81 @@ def by_clade(
     return {clade: frame for (m, clade), frame in frames.items() if m == model}
 
 
+#: Panel A's columns, which are not the table's: the two approaches arrive as
+#: two series of one quantity rather than as two of the table's columns.
+LOOKUP_COLUMNS = (
+    "clade",
+    "delta_fitness",
+    "log_sf",
+    "expected_count",
+    "actual_count",
+    "censored_here",
+)
+
+
 def lookup_frame(
     table: pd.DataFrame,
     *,
     mutation: str,
     model: str,
-    reverting_by_clade: dict[str, set[int]],
     spec: FilterSpec = BASE_SPEC,
 ) -> pd.DataFrame:
     """One mutation across every clade that carries an estimate of it.
 
     Panel A's own row set, and deliberately not a slice of
-    :func:`base_frames`': the point of the panel is to show where the two
+    :func:`base_frames`': the point of the panel is to show *where* the two
     approaches disagree, which is not confined to the clades a correlation
-    panel happens to score. The count filter and the clade adequacy floor are
-    therefore not applied, and the exclusions are -- a site the models never
-    trained on normally has nothing to say here either.
+    panel happens to score.
+
+    **The per-clade exclusions are not applied here, and that is the panel.**
+    A censored clade is shown and flagged in ``censored_here`` rather than
+    dropped: a reader asking "what does this mutation do across the tree" is
+    owed the clades where the answer is suspect, labelled. Excluding them
+    instead would leave the flag constantly ``False`` -- a column that reads as
+    informative and cannot be.
+
+    The global mask is different, and refuses the whole panel. It is a
+    sequencing artifact rather than a clade-specific judgment, so a mutation at
+    a masked site has no reading anywhere and a per-clade flag would imply it
+    had one somewhere.
+
+    Values are the table's own, unclipped: this is a per-mutation readout, and
+    a clamped value would misreport a clade pinned to the bound. The clipped
+    axes belong to the correlation panels.
 
     Returns:
-        One row per clade, with ``delta_fitness``, ``log_sf``,
-        ``expected_count``, ``actual_count`` and ``censored_here``, sorted by
-        the clade order of ``table``.
+        One row per clade, with :data:`LOOKUP_COLUMNS`, in the clade order of
+        ``table``.
+
+    Raises:
+        ValueError: If the mutation is synonymous, or its site is on the global
+            mask. Both are states where no clade carries a reading, so an empty
+            frame would be indistinguishable from a misspelled label.
     """
     rows = table[(table["model"] == model) & (table["aa_mutation"] == mutation)]
-    rows = rows.dropna(subset=[spec.fitness_metric])
-    keep = []
-    for clade, frame in rows.groupby("clade", sort=False):
-        if excluded_sites(
-            frame,
-            reverting=reverting_sites(reverting_by_clade, clade),
-            exclude_masked=spec.exclude_masked,
-        ).all():
-            continue
-        keep.append(frame)
-    if not keep:
-        return pd.DataFrame(
-            columns=[
-                "clade",
-                "delta_fitness",
-                "log_sf",
-                "expected_count",
-                "actual_count",
-                "censored_here",
-            ]
+    if len(rows) and rows["is_synonymous"].all():
+        raise ValueError(
+            f"{mutation} is synonymous: its log selection factor is a "
+            f"structural 0 rather than a prediction, so there is nothing to "
+            f"compare against the counts."
         )
-    kept = pd.concat(keep, ignore_index=True)
+    if spec.exclude_masked and len(rows) and rows["globally_masked"].all():
+        raise ValueError(
+            f"{mutation} sits on mat-pcp's global mask for {GENE} -- a "
+            f"sequencing artifact rather than a clade-specific censoring -- so "
+            f"it is excluded in every clade, not just some."
+        )
+    rows = rows.dropna(subset=[spec.fitness_metric])
+    if rows.empty:
+        return pd.DataFrame(columns=list(LOOKUP_COLUMNS))
     return pd.DataFrame(
         {
-            "clade": kept["clade"],
-            "delta_fitness": kept[spec.fitness_metric].astype(float),
-            "log_sf": kept["log_selection_factor"].astype(float),
-            "expected_count": kept["predicted_count"].astype(float),
-            "actual_count": kept["actual_count"].astype(float),
-            "censored_here": kept["censored"],
+            "clade": rows["clade"],
+            "delta_fitness": rows[spec.fitness_metric].astype(float),
+            "log_sf": rows["log_selection_factor"].astype(float),
+            "expected_count": rows["predicted_count"].astype(float),
+            "actual_count": rows["actual_count"].astype(float),
+            "censored_here": rows["censored"],
         }
     ).reset_index(drop=True)
 
@@ -530,7 +462,15 @@ def with_count_noise_interval(
     ``count_noise_p`` is the same statement as a number: the two-sided exact
     Poisson p-value for the model's effect being the truth.
     """
-    if not len(frame) or spec.fitness_metric != "delta_fitness_ratio":
+    if spec.fitness_metric != "delta_fitness_ratio":
+        raise ValueError(
+            f"the count-noise band exists only for delta_fitness_ratio, not "
+            f"{spec.fitness_metric!r}: a Poisson interval around "
+            f"delta_fitness_bayesian would be wrong twice over, since that "
+            f"column is shrunk toward a prior and carries its own "
+            f"`uncertainty`. Draw panel A without a band instead."
+        )
+    if not len(frame):
         return frame
     # **No pseudocount**, though the plotted point has one. The band is on
     # `log(lambda / e)`, the quantity both approaches estimate. Matching
@@ -571,9 +511,17 @@ def write_panel_csv(
     every number in the file moves with the cutoff and the clip, and a reader
     who opens the CSV alone should not have to find out which they were.
     """
+    columns = spec.as_row()
+    collisions = sorted(set(columns) & set(frame.columns))
+    if collisions:
+        raise ValueError(
+            f"{stem}'s frame already carries {collisions}, which the filter "
+            f"spec would overwrite. A panel's own column wins: rename the "
+            f"spec's field rather than letting `assign` replace the data."
+        )
     path = panel_csv_path(selection, stem)
     path.parent.mkdir(parents=True, exist_ok=True)
-    frame.assign(**spec.as_row()).to_csv(path, index=False)
+    frame.assign(**columns).to_csv(path, index=False)
     return path
 
 

@@ -137,8 +137,8 @@ CLIP_LOWER = -4.0
 
 # A shift smaller than this counts as "no movement" rather than as a direction.
 # One constant for both the per-mutation `concordant` label and the aggregate
-# concordance, since a dashboard shows them side by side and two epsilons would
-# let the point colours contradict the number above them.
+# concordance, since a panel shows them side by side and two epsilons would let
+# the point colours contradict the number above them.
 SHIFT_EPS = 1e-10
 
 # A cross-clade shift correlation answers "does the model track how a
@@ -913,8 +913,8 @@ def shift_pair_count_ladder(
             depend on the count filter, so the same pairs are dropped at every
             rung.
         large_shift_threshold: Passed to :func:`shift_pair_metrics` for its
-            ``n_large_shifts`` column, which is what
-            reports.
+            ``n_large_shifts`` column, which is reported and never filtered
+            on here.
 
     Returns:
         :func:`shift_pair_metrics`' columns plus ``min_count``, one row per
@@ -991,7 +991,8 @@ def poisson_effect_interval(
     makes this narrower than mat-pcp's published ``uncertainty``, which is the
     posterior SD of ``delta_fitness_bayesian`` and deliberately includes the
     expected-count term (the GLM's residual variance) and a prior. The two are
-    answering different questions; see the module docstring's note on metrics.
+    answering different questions; see this module's docstring on why fitness
+    effects are read and never recomputed.
 
     **Match the pseudocount to the estimate being bounded.** ``pseudocount=0``
     bounds :math:`\\log(\\lambda/e)`, the quantity a model of selection

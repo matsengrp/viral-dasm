@@ -76,8 +76,11 @@ def mutation_lookup_line(
             ``"Mutation <mutation> across clades"``.
         interval_columns: Optional ``(lower, upper)`` column names to shade as
             a grey band behind the series -- an uncertainty region for one of
-            the two estimates. Rows missing either bound are skipped, and an
-            infinite bound is left to the y scale to clip.
+            the two estimates. Rows missing either bound are skipped. A
+            non-finite bound is the **caller's** to replace before calling:
+            Vega-Lite extends the y scale to it and takes both series with it,
+            which is why `scripts/panels.py` redraws an open-below bound at the
+            floor of what the panel already shows.
         interval_label: What the band is, for its tooltip.
         extra_tooltips: Optional ``{column: title}`` for per-clade columns to
             carry through the melt and append to the series tooltip. Absent
@@ -87,13 +90,12 @@ def mutation_lookup_line(
             the same order as the legend domain, so the pair cannot be read
             onto the wrong series. Parameterized rather than fixed because a
             notebook that also draws scatters wants one palette across all of
-            them, and the default keeps every existing caller unchanged.
+            them.
         series_shapes: ``(delta_fitness, log_sf)`` point shapes, same order.
             Shape is redundant with colour on screen and the only thing left
             when the figure is printed in black and white, so a caller
             preparing a figure distinguishes the series twice. The default
-            is a circle for both, which is what the point overlay already
-            drew.
+            is a circle for both.
 
     Returns:
         Layered chart: the optional grey interval band, a two-line overlay
