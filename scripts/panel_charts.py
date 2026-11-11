@@ -29,7 +29,7 @@ assert_dasm2_is_this_repo()
 
 import altair as alt
 import pandas as pd
-from panels import FIGURE_DIR
+from panels import figure_dir
 
 #: Everything is written at one resolution, spelled once. A matplotlib point
 #: and a Vega-Lite pixel both land at ``size * ppi / 72`` pixels, so equal font
@@ -62,8 +62,10 @@ X_AXIS_TITLE = "DASM approach"
 Y_AXIS_TITLE = "counts approach"
 
 
-def save_panel(chart: alt.TopLevelMixin, stem: str) -> alt.TopLevelMixin:
-    """Write one chart to :data:`~panels.FIGURE_DIR` as PNG and SVG.
+def save_panel(
+    chart: alt.TopLevelMixin, stem: str, *, selection: str
+) -> alt.TopLevelMixin:
+    """Write one chart to this selection's figure directory as PNG and SVG.
 
     Returns the chart, so a call can wrap an expression without restructuring
     it.
@@ -76,9 +78,10 @@ def save_panel(chart: alt.TopLevelMixin, stem: str) -> alt.TopLevelMixin:
     PNG *and* SVG. The composition is raster, but a vector copy costs nothing
     here and is what a journal asks for if the figure is ever rebuilt.
     """
-    FIGURE_DIR.mkdir(parents=True, exist_ok=True)
+    directory = figure_dir(selection)
+    directory.mkdir(parents=True, exist_ok=True)
     for extension in ("png", "svg"):
-        chart.save(str(FIGURE_DIR / f"{stem}.{extension}"), ppi=VEGA_WRITE_PPI)
+        chart.save(str(directory / f"{stem}.{extension}"), ppi=VEGA_WRITE_PPI)
     return chart
 
 
