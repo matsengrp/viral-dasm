@@ -299,6 +299,32 @@ def ntmut_grid_path(root: Path, clade: str, arm: str) -> Path:
     return directory / f"{clade}{NTMUT_SUFFIX}"
 
 
+# ---------------------------------------------------------------------------
+# `fig:dms`
+# ---------------------------------------------------------------------------
+
+#: The directory `fig:dms`'s panels are written under -- a **directory name,
+#: not a model selection**, and absent from :data:`SELECTIONS` for the same
+#: reason :data:`SUBSAMPLING_SELECTION` is. `tests/test_panels.py` pins it out.
+DMS_SELECTION = "dms"
+
+#: The homolog whose scatter is panel A. The paper draws one homolog's cloud
+#: and leaves the other two to panel B's summary, so the choice is the
+#: figure's rather than this pipeline's: `main.tex`'s caption names KP.3.1.1.
+#: `tests/test_dms.py` requires it to be one of `config.yaml`'s homologs, since
+#: this module stays stdlib-and-`lib` only and does no config lookup of its own.
+SCATTER_HOMOLOG = "KP.3.1.1"
+
+#: `fig:dms`'s stems, one tuple per producing notebook. Panel C -- the
+#: comparison against published deep-learning models -- is not here: it needs
+#: antiGen and CoVFit, and it is added when the rule that draws it exists.
+DMS_CORRELATION_PANELS = (
+    "panel_a_homolog_scatter",
+    "panel_b_homolog_correlations",
+)
+DMS_PROBABILITY_PANELS = ("panel_d_fitness_vs_probability",)
+
+
 #: Panel stems, as the figure's composition reads them. Named here so a rule
 #: knows which notebook produces which panel.
 MUTATION_PANELS = (

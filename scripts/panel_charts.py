@@ -219,6 +219,283 @@ def scatter_panel(
     )
 
 
+# ---------------------------------------------------------------------------
+# `fig:dms`
+# ---------------------------------------------------------------------------
+
+#: The three predictors panel B sets against each other, in the order it draws
+#: them, with the colour each carries.
+#:
+#: `DASM_PURPLE` and `COUNTS_GREY` are `fig:agreement`'s own two approaches and
+#: mean the same thing here. The pooled estimate takes a third hue rather than
+#: a lighter grey: it is a different predictor, not a weaker version of the
+#: per-clade one, and a reader should not have to notice a shade to see that.
+DMS_PREDICTOR_COLORS: dict[str, str] = {
+    "DASM": DASM_PURPLE,
+    "per-clade counts": COUNTS_GREY,
+    "pooled counts": "#b0975f",
+}
+
+#: What panel A's axes measure. The DMS is the measurement and the model is the
+#: prediction, so the measurement goes on y -- the convention a reader brings to
+#: a predicted-versus-measured plot.
+DMS_X_TITLE = "DASM fitness effect (log SF)"
+DMS_Y_TITLE = "measured effect on cell entry"
+
+#: Panel B's axis titles. Two lines, as the ladder panels' are, because a long
+#: single-line axis title sets the panel's width.
+DMS_BAR_Y_TITLE = ["Pearson correlation", "with cell entry (r)"]
+
+#: Panel sizes. The scatter is square because its axes are not comparable and
+#: nothing is read off a diagonal, so the aspect carries no claim; the bars are
+#: wider than tall because the categorical axis has nine positions.
+DMS_SCATTER_SIZE = 260
+DMS_BAR_WIDTH = 150
+DMS_BAR_HEIGHT = 220
+
+#: How many equal-count bins the binned median in panel A is taken over. The
+#: cloud saturates where the assay's dynamic range ends, and a trend through
+#: the saturation is what shows the shape a correlation coefficient hides.
+DMS_TREND_BINS = 20
+
+
+def binned_median(
+    frame: pd.DataFrame, *, x: str, y: str, bins: int = DMS_TREND_BINS
+) -> pd.DataFrame:
+    """The median of ``y`` in equal-count bins of ``x``.
+
+    Equal-count rather than equal-width: the predictor's distribution has a
+    long deleterious tail, and equal-width bins would put most of the data in
+    two of them and draw a trend from single points everywhere else.
+
+    Returns a frame of ``bins`` rows at most, so it costs the same whatever
+    ``n`` is -- which is what makes it affordable in a notebook cell beside the
+    cloud itself.
+    """
+    if frame.empty:
+        return pd.DataFrame({x: [], y: []})
+    ranked = frame[[x, y]].dropna().sort_values(x)
+    if ranked.empty:
+        return pd.DataFrame({x: [], y: []})
+    labels = pd.qcut(
+        ranked[x].rank(method="first"), q=min(bins, len(ranked)), labels=False
+    )
+    return (
+        ranked.assign(_bin=labels)
+        .groupby("_bin", as_index=False)
+        .agg({x: "median", y: "median"})
+        .drop(columns="_bin", errors="ignore")
+    )
+
+
+#: What each stratum is called on a chart, long form and short.
+#:
+#: Spelled here rather than in `scripts/dms.py` because the strings in that
+#: module are join keys and CSV values: changing one to read better on a chart
+#: would change what a panel's table says.
+#:
+#: Two forms because the two panels have different room. Panel A gives each
+#: stratum a 260 px cell and a two-line title; panel B gives it a facet header
+#: over a 150 px column, where the long form is wider than the column and
+#: Vega-Lite neither wraps nor elides a header label -- adjacent headers simply
+#: overlap, and the row becomes unreadable without anything raising.
+STRATUM_LABELS: dict[str, tuple[str, str]] = {
+    "single_nt": ("single-nt codon mutations", "single-nt"),
+    "multi_nt": ("multi-nt codon mutations", "multi-nt"),
+    "all": ("all measured mutations", "all"),
+}
+
+
+def stratum_label(stratum: str, *, short: bool = False) -> str:
+    """One stratum's name, as the figure prints it."""
+    forms = STRATUM_LABELS.get(stratum)
+    if forms is None:
+        return stratum
+    return forms[1] if short else forms[0]
+
+
+def dms_scatter_panel(
+    frame: pd.DataFrame,
+    *,
+    homolog: str,
+    stratum_order: Sequence[str],
+    stats: pd.DataFrame | None = None,
+    size: int = DMS_SCATTER_SIZE,
+) -> alt.VConcatChart | alt.HConcatChart:
+    """Panel A: one homolog's measured effect against the DASM's, per stratum.
+
+    **No diagonal, and no shared domain.** `fig:agreement`'s scatter compares
+    two estimates of the same quantity, so a point's distance from ``y = x`` is
+    the disagreement. Here the axes are a log selection factor and a cell-entry
+    measurement: different units on different scales, with no reason for a
+    point to sit anywhere in particular. Drawing a 45-degree line would invite
+    a reading the data does not support, so what is drawn instead is the
+    regression and the binned median -- which say how the prediction *orders*
+    the measurement, which is what the correlation reports.
+
+    Built as one cell per stratum rather than through ``.facet()``, as
+    ``shift_grid`` is, so each panel carries its own ``r`` and ``n``: the whole
+    point of the split is that the strata differ, and a shared corner label
+    would hide it.
+    """
+    axis = alt.Axis(labelFontSize=PANEL_FONT_SIZE, titleFontSize=PANEL_FONT_SIZE)
+    cells = []
+    for stratum in stratum_order:
+        cell_frame = frame[frame["stratum"] == stratum]
+        row = None
+        if stats is not None:
+            matching = stats[stats["stratum"] == stratum]
+            row = None if matching.empty else matching.iloc[0]
+        x_enc = alt.X(
+            "log_selection_factor:Q",
+            title=DMS_X_TITLE,
+            axis=axis,
+            scale=alt.Scale(zero=False),
+        )
+        # The y scale is shared across the row, so only the leftmost cell
+        # carries the axis. Repeating it would print the same title and the
+        # same ticks beside every cell, which on the composed page is the
+        # figure's longest string drawn once per stratum.
+        y_axis = (
+            axis
+            if not cells
+            else alt.Axis(labels=False, ticks=False, domain=True, title=None)
+        )
+        y_enc = alt.Y(
+            "dms_cell_entry:Q",
+            title=DMS_Y_TITLE if not cells else None,
+            axis=y_axis,
+            scale=alt.Scale(zero=False),
+        )
+        cloud = (
+            alt.Chart(cell_frame)
+            .mark_point(size=56, opacity=0.3, filled=True, color=POINT_BLUE)
+            .encode(x=x_enc, y=y_enc)
+        )
+        fit = cloud.transform_regression(
+            "log_selection_factor", "dms_cell_entry"
+        ).mark_line(strokeWidth=2, color=FIT_FIREBRICK)
+        trend = (
+            alt.Chart(
+                binned_median(cell_frame, x="log_selection_factor", y="dms_cell_entry")
+            )
+            .mark_line(
+                strokeWidth=1.8, strokeDash=[4, 3], color=REFERENCE_GREY, point=True
+            )
+            .encode(x=x_enc, y=y_enc)
+        )
+        cells.append(
+            (
+                cloud + fit + trend + _corner_label(stat_label(row, len(cell_frame)))
+            ).properties(
+                width=size,
+                height=size,
+                title=alt.TitleParams(
+                    [homolog, stratum_label(stratum)],
+                    fontSize=PANEL_FONT_SIZE,
+                    offset=3,
+                    anchor="middle",
+                ),
+            )
+        )
+    return alt.hconcat(*cells).resolve_scale(x="independent", y="shared")
+
+
+def homolog_correlation_panel(
+    frame: pd.DataFrame,
+    *,
+    homolog_order: Sequence[str],
+    stratum_order: Sequence[str],
+    predictor_order: Sequence[str],
+    width: int = DMS_BAR_WIDTH,
+    height: int = DMS_BAR_HEIGHT,
+) -> alt.Chart:
+    """Panel B: every predictor's correlation, every homolog, every stratum.
+
+    Bars rather than dots, and from zero rather than from the data's floor. A
+    correlation has a meaningful zero -- no ordering at all -- so a bar's
+    length is the quantity, which is the one case in this figure where a bar
+    is the honest mark.
+
+    **One row of grouped bars, not a grid.** Homolog is the x axis and
+    predictor the group within it, so the whole panel carries one y axis and
+    one legend. Faceting on homolog as well as stratum draws nine cells, nine
+    y axes and the axis title nine times, and the comparison a reader wants --
+    the three predictors at one homolog -- then spans three cells instead of
+    sitting side by side.
+
+    **No ``LADDER_R_FLOOR`` here.** The ladder panels clip negative r to zero,
+    because there the x axis is a count cutoff and a negative r is a rung with
+    too little data rather than a result. Here a negative r is a real statement
+    about a predictor, so it is drawn.
+
+    Raises:
+        ValueError: If ``frame`` names a predictor with no colour, which Vega
+            would otherwise recycle from the start of the range and give two
+            predictors one hue; or if a homolog or stratum in ``frame`` is
+            absent from the order it is sorted by, which Vega drops silently.
+    """
+    unknown = sorted(set(frame["predictor"]) - set(DMS_PREDICTOR_COLORS))
+    if unknown:
+        raise ValueError(
+            f"{unknown} have no entry in DMS_PREDICTOR_COLORS, whose keys are "
+            f"{sorted(DMS_PREDICTOR_COLORS)}. Vega recycles a colour range "
+            f"shorter than its domain without raising, so two predictors would "
+            f"be drawn in one hue."
+        )
+    for column, order in (("homolog", homolog_order), ("stratum", stratum_order)):
+        missing = sorted(set(frame[column]) - set(order))
+        if missing:
+            raise ValueError(
+                f"{column}={missing} is in the frame but not in the order it "
+                f"is sorted by, {list(order)}. Vega drops a value absent from "
+                f"an explicit sort without raising, so those bars would not be "
+                f"drawn and the panel would look complete."
+            )
+    predictors = [name for name in predictor_order if name in set(frame["predictor"])]
+    axis = alt.Axis(labelFontSize=PANEL_FONT_SIZE, titleFontSize=PANEL_FONT_SIZE)
+    labelled = frame.assign(
+        stratum_label=frame["stratum"].map(
+            lambda name: stratum_label(name, short=True)
+        ),
+    )
+    return (
+        alt.Chart(labelled)
+        .mark_bar()
+        .encode(
+            x=alt.X(
+                "homolog:N",
+                title=None,
+                sort=list(homolog_order),
+                axis=alt.Axis(labelFontSize=PANEL_FONT_SIZE, labelAngle=-40),
+            ),
+            xOffset=alt.XOffset("predictor:N", sort=predictors),
+            y=alt.Y("pearson_r:Q", title=DMS_BAR_Y_TITLE, axis=axis),
+            color=alt.Color(
+                "predictor:N",
+                sort=predictors,
+                scale=alt.Scale(
+                    domain=predictors,
+                    range=[DMS_PREDICTOR_COLORS[name] for name in predictors],
+                ),
+                legend=alt.Legend(
+                    title=None,
+                    labelFontSize=PANEL_FONT_SIZE,
+                    orient="top",
+                    direction="horizontal",
+                ),
+            ),
+            column=alt.Column(
+                "stratum_label:N",
+                title=None,
+                sort=[stratum_label(name, short=True) for name in stratum_order],
+                header=alt.Header(labelFontSize=PANEL_FONT_SIZE),
+            ),
+        )
+        .properties(width=width, height=height)
+    )
+
+
 #: Panel D's per-cell columns. The statistics are computed upstream on the full
 #: data, so thinning a dense cell changes what is drawn and never what is
 #: reported.

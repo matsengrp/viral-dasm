@@ -368,6 +368,57 @@ BUILT_CORPUS_NAMES = tuple(n for n in CORPUS_NAMES if corpus(n).is_built_here)
 FULL_DEPTH = corpus("full_depth")
 
 
+@dataclass(frozen=True)
+class DmsDataset:
+    """One homolog's deep mutational scan, with what identifies it.
+
+    ``md5`` is a gate rather than a label, which is the one way this differs
+    from :class:`Corpus`'s. A DMS file is received, not built, and the planned
+    repoint of KP.3.1.1 at filtered measurements replaces the file at the same
+    path -- so a digest is what makes a changed dataset fail loudly instead of
+    quietly moving every number this figure reports.
+
+    ``clade`` is the Nextstrain label this pipeline keys its tables on. The
+    papers name their homologs by Pango alias, and the two are not
+    interchangeable in any join here.
+    """
+
+    homolog: str
+    clade: str
+    path: Path
+    md5: str
+
+
+def dms_homologs() -> list[str]:
+    """The homologs ``fig:dms`` scores, in the order ``config.yaml`` lists them."""
+    return list(CONFIG["dms"]["homologs"])
+
+
+def dms_dataset(homolog: str) -> DmsDataset:
+    """The named homolog's DMS dataset from ``config.yaml``.
+
+    Raises:
+        KeyError: If ``homolog`` is not one of them. An allowlist for the same
+            reason :func:`mat_pcp_path` is one: these names are written into
+            panel filenames and read back as join keys, so a typo that resolved
+            to nothing would produce an empty panel rather than an error.
+    """
+    block = CONFIG["dms"]
+    try:
+        entry = block["homologs"][homolog]
+    except KeyError:
+        raise KeyError(
+            f"{homolog!r} is not a DMS homolog; expected one of "
+            f"{sorted(block['homologs'])}"
+        ) from None
+    return DmsDataset(
+        homolog=homolog,
+        clade=str(entry["clade"]),
+        path=Path(block["root"]) / entry["file"],
+        md5=str(entry["md5"]),
+    )
+
+
 def cap_of(corpus_name: str) -> int:
     """The per-clade cap a thinned corpus's name records.
 
@@ -620,6 +671,24 @@ def _check_config() -> None:
         raise ValueError(
             f"smoke_corpus.md5 is {len(SMOKE_CORPUS_MD5)} hex characters; md5 gives 32."
         )
+    seen_clades: dict[str, str] = {}
+    for homolog in dms_homologs():
+        dataset = dms_dataset(homolog)
+        if len(dataset.md5) != 32:
+            raise ValueError(
+                f"dms.homologs.{homolog}.md5 is {len(dataset.md5)} hex "
+                f"characters; md5 gives 32. It is a gate here, not a label: "
+                f"the file it pins is replaced in place when a dataset is "
+                f"repointed."
+            )
+        if dataset.clade in seen_clades:
+            raise ValueError(
+                f"{homolog} and {seen_clades[dataset.clade]} both name clade "
+                f"{dataset.clade}. A clade's founder carries one set of "
+                f"selection factors, so two homologs on it would be scored "
+                f"against identical predictions and read as agreement."
+            )
+        seen_clades[dataset.clade] = homolog
 
 
 _check_config()
