@@ -13,18 +13,34 @@ justified *for* selection factors, which these predictors are not -- BLOSUM62 is
 a log-odds table and the leaf predictor a log frequency ratio -- so nothing here
 clips and nothing here names a reference predictor.
 
-**Spearman is the readout.** The leaf predictor puts every cell whose mutant
-residue the clade has never shown at one site-level floor, which makes its scale
-bimodal and a linear correlation unreadable: on KP.3.1.1's ``multi_nt`` cells its
-Spearman is +0.58 and its Pearson +0.04. Pearson is kept because a reader will
-look for it and because it is readable for BLOSUM62, not because it ranks these
-predictors.
+**Two altitudes, both reported, because the predictors live at different ones.**
+The pooled correlation runs over every measured cell, so it is dominated by
+variance *between* sites -- and the leaf predictor is very nearly a per-site
+statistic while BLOSUM62 carries no site information at all. Pooled, the leaf
+predictor leads on all three homologs; centre both the score and the measurement
+on their per-site means and the ordering reverses, with BLOSUM62 the better
+substitution-level predictor everywhere. ``*_within_site`` is that second
+readout, over sites with at least :data:`WITHIN_SITE_MIN_CELLS` measured cells.
+Reporting only the pooled number would invite reading it as a statement about
+which substitution at a site is tolerated, which it is not.
 
-``*_mutant_observed`` is the same correlation restricted to the cells where the
-clade's leaves carry the mutant residue at all. It is a property of the cells
-rather than of a predictor, so it applies to every column and answers the
-question the headline invites: how much of the leaf predictor's lead is the
-observed/unobserved split rather than graded frequency.
+**Spearman is the readout.** The leaf predictor puts every cell whose mutant
+residue the clade has never shown at ``-log(parent + p)``, a band a tenth of a
+nat wide for two of the three clades, so its scale is bimodal and a linear
+correlation unreadable: on KP.3.1.1's ``multi_nt`` cells its Spearman is +0.58
+and its Pearson +0.04. Pearson is kept because a reader will look for it and
+because it is readable for BLOSUM62, not because it ranks these predictors.
+Nothing should plot this score on an axis.
+
+``*_mutant_observed`` is the same correlation restricted to the cells whose
+mutant residue the clade's leaves carry at all. It is a property of the cells
+rather than of a predictor, so it applies to every column. It is **not** a
+decomposition of the pooled number: restricting to observed cells also selects
+tolerant, well-sampled sites, so a drop there is a changed cell set rather than
+an isolated term. Correlations over fewer than
+:data:`MUTANT_OBSERVED_MIN_CELLS` cells are left blank rather than printed,
+because a coefficient over thirty cells in a tracked table reads as a
+measurement.
 """
 
 from __future__ import annotations
@@ -47,10 +63,14 @@ import dms
 import dms_leaf_freq
 import dms_models
 import pandas as pd
-from panel_spec import DMS_PREDICTOR_CORRELATIONS, DMS_SELECTION, panel_csv_path
+from panel_spec import (
+    DMS_PREDICTOR_CORRELATIONS,
+    DMS_PREDICTORS,
+    DMS_SELECTION,
+    panel_csv_path,
+)
 
 from dasm2.analysis.viral_fitness_eval import within_clade_metrics
-from dasm2.sequence.constants import AA_STR_SORTED
 
 #: The DMS column every predictor is correlated against.
 DMS_COLUMN = "dms_cell_entry"
@@ -61,10 +81,16 @@ DMS_COLUMN = "dms_cell_entry"
 #: happens here.
 METRIC_COLUMN = "log_selection_factor"
 
-#: The composite key passed as ``within_clade_metrics``' "clade", split back out
-#: on the way to the CSV. That function keys its rows by one string, and what
-#: this figure groups by is three fields.
-KEY_SEPARATOR = "|"
+#: Cells per site required before a site contributes to the within-site readout.
+#: Below this the per-site mean is itself mostly noise, and centring on it adds
+#: more variance than it removes.
+WITHIN_SITE_MIN_CELLS = 5
+
+#: Cells required before a ``*_mutant_observed`` correlation is printed at all.
+#: KP.3.1.1 and XBB.1.5 have 30 and 29 cells with an observed mutant in their
+#: ``multi_nt`` stratum; a four-decimal coefficient over those reads as a result
+#: and is not one. `within_clade_metrics` only refuses below three.
+MUTANT_OBSERVED_MIN_CELLS = 100
 
 #: The CSV's columns, in order.
 SUMMARY_COLUMNS = (
@@ -75,34 +101,66 @@ SUMMARY_COLUMNS = (
     "spearman_rho",
     "regression_slope",
     "n_mutations",
+    "spearman_rho_within_site",
+    "n_within_site",
     "pearson_r_mutant_observed",
     "spearman_rho_mutant_observed",
     "n_mutant_observed",
 )
 
 
+def centre_on_site_means(frame: pd.DataFrame) -> pd.DataFrame:
+    """One stratum's cells with the score and the measurement site-mean-centred.
+
+    What is left is the within-site comparison: given this site, does the
+    predictor rank *which* substitution the assay tolerates. Sites with fewer
+    than :data:`WITHIN_SITE_MIN_CELLS` cells are dropped rather than centred on a
+    one- or two-cell mean.
+    """
+    sized = frame.groupby("aa_site")[METRIC_COLUMN].transform("size")
+    kept = frame[sized >= WITHIN_SITE_MIN_CELLS]
+    if kept.empty:
+        return kept
+    centred = {
+        column: kept[column] - kept.groupby("aa_site")[column].transform("mean")
+        for column in (METRIC_COLUMN, DMS_COLUMN)
+    }
+    return kept.assign(**centred)
+
+
 def mutant_observed(cells: pd.DataFrame, counts_path: Path) -> pd.Series:
     """Whether the clade's leaves carry each cell's mutant residue at all."""
-    counts = dms_leaf_freq.read_counts(counts_path).to_numpy()
-    observed = counts[
-        cells["aa_site"].to_numpy() - 1,
-        [AA_STR_SORTED.index(aa) for aa in cells["mutant_aa"]],
-    ]
+    counts = dms_leaf_freq.read_counts(counts_path)
+    observed = dms_leaf_freq.counts_at(
+        counts, cells["aa_site"].to_numpy(), cells["mutant_aa"]
+    )
     return pd.Series(observed > 0, index=cells.index)
 
 
-def _metrics(groups: dict[str, pd.DataFrame], suffix: str) -> pd.DataFrame:
-    """``within_clade_metrics`` over the composite keys, renamed for the CSV."""
-    table = within_clade_metrics(groups, DMS_COLUMN)
-    table = table.rename(
-        columns={
-            name: f"{name}{suffix}"
-            for name in ("pearson_r", "spearman_rho", "regression_slope", "n_mutations")
-        }
+def _metrics(groups: dict[tuple[str, str, str], pd.DataFrame], suffix: str):
+    """``within_clade_metrics`` once per group, tagged with what the group was.
+
+    One call per group and an ``assign``, which is how
+    `notebooks/agreement_mutations.py` already borrows this function. Packing the
+    three fields into one string to pass as its "clade" and splitting them back
+    out would break on a homolog name containing the separator, and
+    `workflow/figures.smk` escapes those names for its wildcards precisely
+    because they are not plain identifiers.
+    """
+    renames = {
+        name: f"{name}{suffix}"
+        for name in ("pearson_r", "spearman_rho", "regression_slope", "n_mutations")
+    }
+    return pd.concat(
+        [
+            within_clade_metrics({homolog: frame}, DMS_COLUMN)
+            .drop(columns="clade")
+            .rename(columns=renames)
+            .assign(homolog=homolog, predictor=predictor, stratum=stratum)
+            for (homolog, predictor, stratum), frame in groups.items()
+        ],
+        ignore_index=True,
     )
-    keys = table["clade"].str.split(KEY_SEPARATOR, expand=True)
-    table[["homolog", "predictor", "stratum"]] = keys
-    return table.drop(columns="clade")
 
 
 def summarize(merged: dict[str, pd.DataFrame], observed: dict[str, pd.Series]):
@@ -113,12 +171,24 @@ def summarize(merged: dict[str, pd.DataFrame], observed: dict[str, pd.Series]):
     ``multi_nt``, and `scripts/dms.py` names ``all`` precisely because a readout
     that reports it has to say the three partition rather than nest.
     """
-    full: dict[str, pd.DataFrame] = {}
-    restricted: dict[str, pd.DataFrame] = {}
+    missing = {
+        (homolog, predictor)
+        for homolog, frame in merged.items()
+        for predictor in DMS_PREDICTORS
+        if predictor not in frame.columns
+    }
+    if missing:
+        raise ValueError(
+            f"no scores joined for {sorted(missing)}. Every predictor is expected "
+            f"for every homolog; a short table would otherwise report a figure "
+            f"built from fewer arms than the panel names."
+        )
+
+    full: dict[tuple[str, str, str], pd.DataFrame] = {}
+    restricted: dict[tuple[str, str, str], pd.DataFrame] = {}
+    within: dict[tuple[str, str, str], pd.DataFrame] = {}
     for homolog, frame in merged.items():
-        for predictor in dms_models.PREDICTORS:
-            if predictor not in frame.columns:
-                continue
+        for predictor in DMS_PREDICTORS:
             scored = frame.rename(columns={predictor: METRIC_COLUMN})
             for stratum in dms.STRATA:
                 subset = (
@@ -126,9 +196,10 @@ def summarize(merged: dict[str, pd.DataFrame], observed: dict[str, pd.Series]):
                     if stratum == dms.ALL
                     else scored[scored["stratum"] == stratum]
                 )
-                key = KEY_SEPARATOR.join((homolog, predictor, stratum))
+                key = (homolog, predictor, stratum)
                 full[key] = subset
                 restricted[key] = subset[observed[homolog].reindex(subset.index)]
+                within[key] = centre_on_site_means(subset)
 
     table = _metrics(full, "").merge(
         _metrics(restricted, "_mutant_observed"),
@@ -136,6 +207,15 @@ def summarize(merged: dict[str, pd.DataFrame], observed: dict[str, pd.Series]):
         how="outer",
         validate="one_to_one",
     )
+    table = table.merge(
+        _metrics(within, "_within_site").drop(
+            columns=["pearson_r_within_site", "regression_slope_within_site"]
+        ),
+        on=["homolog", "predictor", "stratum"],
+        how="outer",
+        validate="one_to_one",
+    )
+    table = table.rename(columns={"n_mutations_within_site": "n_within_site"})
     # The restricted pass keeps only its two correlations and its own `n`: a
     # second regression slope over a subset of the same cells says nothing the
     # first does not, and leaving it in would invite reading two slopes as a
@@ -143,16 +223,28 @@ def summarize(merged: dict[str, pd.DataFrame], observed: dict[str, pd.Series]):
     table = table.rename(columns={"n_mutations_mutant_observed": "n_mutant_observed"})
     table = table.drop(columns=["regression_slope_mutant_observed"])
 
-    # The partition `summarize`'s docstring asserts, checked rather than stated:
-    # an `all` row that is not the two strata summed means a cell landed in
-    # neither or in both.
+    # Blank, not printed: see MUTANT_OBSERVED_MIN_CELLS.
+    thin = table["n_mutant_observed"] < MUTANT_OBSERVED_MIN_CELLS
+    table.loc[thin, ["pearson_r_mutant_observed", "spearman_rho_mutant_observed"]] = (
+        float("nan")
+    )
+
+    # Coverage, not the partition. `all` is the unfiltered frame and the two
+    # strata are filters on it, so they sum by construction -- `melt_dms` labels
+    # every cell and raises on a NaN, so the sum could not fail. What *can*
+    # happen, and what this catches, is a predictor whose `n` is smaller than the
+    # cells it was handed: `within_clade_metrics` drops any row where either
+    # column is NaN, so an unjoined or unscored cell leaves the CSV reporting a
+    # confident correlation over fewer mutations than the assay measured.
     for (homolog, predictor), rows in table.groupby(["homolog", "predictor"]):
-        counts = rows.set_index("stratum")["n_mutations"]
-        if counts[dms.ALL] != counts[dms.SINGLE_NT] + counts[dms.MULTI_NT]:
+        measured = len(merged[homolog])
+        reported = int(rows.set_index("stratum")["n_mutations"][dms.ALL])
+        if reported != measured:
             raise ValueError(
-                f"{homolog}/{predictor}: {counts[dms.ALL]} cells in `all` against "
-                f"{counts[dms.SINGLE_NT]} + {counts[dms.MULTI_NT]} in the two "
-                f"strata, so the three do not partition"
+                f"{homolog}/{predictor}: reports {reported} mutations against the "
+                f"{measured} cells the assay measured. A cell that failed to join, "
+                f"or a score that came back NaN, is dropped by "
+                f"`within_clade_metrics` rather than raising."
             )
 
     ordered = pd.Categorical(
@@ -189,14 +281,18 @@ def main() -> None:
     merged: dict[str, pd.DataFrame] = {}
     observed: dict[str, pd.Series] = {}
     for homolog in dms_homologs():
-        cells = dms_models.homolog_cells(homolog)
+        cells, _ = dms_models.homolog_cells(homolog)
         for_homolog = [
             (frame[frame["homolog"] == homolog], manifest)
             for frame, manifest in loaded
             if homolog in set(frame["homolog"].unique())
         ]
-        if not for_homolog:
-            continue
+        if len(for_homolog) != len(DMS_PREDICTORS):
+            raise SystemExit(
+                f"{homolog}: {len(for_homolog)} of {len(DMS_PREDICTORS)} "
+                f"predictors passed. Skipping one would shorten the table rather "
+                f"than fail the rule."
+            )
         merged[homolog], _ = dms_models.join_scores(cells, for_homolog)
         clade = dms_dataset(homolog).clade
         if clade not in by_clade:
@@ -215,10 +311,11 @@ def main() -> None:
     for row in table.itertuples():
         print(
             f"  {row.homolog:10s} {row.predictor:14s} {row.stratum:10s} "
-            f"spearman={row.spearman_rho:+.4f} pearson={row.pearson_r:+.4f} "
-            f"n={row.n_mutations}  (mutant observed: "
-            f"spearman={row.spearman_rho_mutant_observed:+.4f} "
-            f"n={row.n_mutant_observed})"
+            f"pooled={row.spearman_rho:+.4f} n={row.n_mutations:<6d} "
+            f"within-site={row.spearman_rho_within_site:+.4f} "
+            f"n={row.n_within_site:<6d} "
+            f"mutant-observed={row.spearman_rho_mutant_observed:+.4f} "
+            f"n={row.n_mutant_observed}"
         )
 
 

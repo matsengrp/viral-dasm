@@ -208,18 +208,26 @@ costs no rescoring.
 
 `snakemake dms` builds the part of `fig:dms` that reads no scored table at all:
 panel C's two reference predictors, and the join the published models will land
-through. BLOSUM62 asks how much of a deep mutational scan a substitution matrix
-already explains; the leaf frequency asks how much the clade's own standing
-variation does. Each leaf's spike is reconstructed from its own root-to-tip
-mutation path and tallied per site, so the second is a measure of how common a
-residue is among the sampled sequences -- weighted by descendant count, not by
-how often a substitution arose, which is a different quantity from mat-pcp's
-counts. Spearman is the readout for it: every substitution the clade has never
-shown sits at one pseudocount floor, which makes its scale bimodal, so the table
-reports the correlation restricted to cells whose mutant residue was observed
-beside the headline. Panel C itself is not drawn here -- the DASM's own column
-is a filter on `selection_factors.parquet` -- so what these rules produce is the
-table it will be drawn from.
+through. BLOSUM62 asks how much of a deep mutational scan a general substitution
+matrix already explains. The leaf frequency reconstructs every one of a clade's
+tree leaves from its own root-to-tip mutation path, tallies residues per site,
+and scores a substitution by the log ratio of its residue's leaf count to the
+clade founder's at that site.
+
+**The two live at different altitudes, and the table reports both.** Pooled over
+every measured cell, the leaf predictor leads on all three homologs. But it is
+very nearly a per-site statistic -- `-log(parent count + 1)` alone, which says
+nothing about which residue a substitution goes to, scores as well as the full
+thing -- while BLOSUM62 carries no site information at all, so a pooled
+correlation is mostly a statement about between-site variance. Centre both the
+score and the measurement on their per-site means and the ordering reverses:
+BLOSUM62 is the better substitution-level predictor on every homolog. So the
+table carries `spearman_rho` and `spearman_rho_within_site` side by side, and
+anything written from it should say which question it is answering.
+
+Panel C itself is not drawn here -- the DASM's own column is a filter on
+`selection_factors.parquet` -- so what these rules produce is the table it will
+be drawn from.
 
 **Where the two kinds of output go.** The tables land in tracked
 `results/panels/<selection>/`, one CSV per panel holding exactly what that

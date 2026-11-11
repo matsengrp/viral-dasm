@@ -29,7 +29,10 @@ import dasm2  # noqa: F401
 pd = pytest.importorskip("pandas")
 
 import dms
+import dms_blosum
+import dms_leaf_scores
 import dms_models
+import founders
 import panel_charts
 import panel_spec
 
@@ -43,10 +46,18 @@ EXPECTED_CELLS = {"BA.1": 7202, "XBB.1.5": 6204, "KP.3.1.1": 9803}
 
 _DMS_PATHS = tuple(lib.dms_dataset(homolog).path for homolog in lib.dms_homologs())
 
+# Asserted at import, not probed: an empty roster would make every per-homolog
+# loop below a pass over zero homologs, and a roster that did not match the pins
+# would leave a new homolog unchecked and a removed one still asserted. Neither
+# is a reason to skip -- both are config bugs.
+assert _DMS_PATHS, "config.yaml names no DMS homologs"
+assert set(EXPECTED_CELLS) == set(lib.dms_homologs()), (
+    f"EXPECTED_CELLS covers {sorted(EXPECTED_CELLS)} against config.yaml's "
+    f"{sorted(lib.dms_homologs())}"
+)
+
 
 def _dms_readable() -> bool:
-    if not _DMS_PATHS:
-        return False
     try:
         return all(path.is_file() for path in _DMS_PATHS)
     except OSError:
@@ -73,19 +84,20 @@ def _manifest(model: str, sequence: str) -> dms_models.Manifest:
 
 
 def test_blosum62_is_biopythons_table_in_this_repositorys_residue_order():
-    """A reindexed matrix scores every substitution as some other substitution."""
-    substitution_matrices = pytest.importorskip("Bio.Align").substitution_matrices
+    """A reindexed matrix scores every substitution as some other substitution.
+
+    BLOSUM62 is symmetric, so a transposed read would pass unnoticed; what this
+    catches is a row or column order that is not ``AA_STR_SORTED``, which is the
+    layout every selection-factor row in this pipeline uses.
+    """
+    from Bio.Align import substitution_matrices
+
     blosum = substitution_matrices.load("BLOSUM62")
-    matrix = dms_models.blosum62_log_odds()
+    matrix = dms_blosum.blosum62_log_odds()
     assert matrix.shape == (20, 20)
     for i, parent in enumerate(AA_STR_SORTED):
         for j, mutant in enumerate(AA_STR_SORTED):
             assert matrix[i, j] == blosum[parent, mutant]
-    # Asymmetric indexing would pass a symmetric-matrix check, so pin a cell
-    # whose residues sit far apart in `AA_STR_SORTED`: W is last, A first.
-    assert (
-        matrix[AA_STR_SORTED.index("A"), AA_STR_SORTED.index("W")] == blosum["A", "W"]
-    )
 
 
 def test_a_declared_hash_that_is_not_the_sequences_is_refused(tmp_path):
@@ -186,14 +198,22 @@ def test_a_predictor_declaring_no_stratum_says_nothing():
         dms_models.validate_scores(frame, empty)
 
 
-def test_the_predictor_ids_the_rules_resolve_are_the_ones_the_module_scores():
-    """`panel_spec` spells these without importing the module that defines them."""
-    assert tuple(panel_spec.DMS_PREDICTORS) == dms_models.PREDICTORS
+def test_the_predictor_ids_the_rules_resolve_are_the_ones_the_modules_score():
+    """`panel_spec` spells these without importing the modules that define them.
+
+    It is stdlib-plus-`lib` so `workflow/figures.smk` stays cheap to parse, so
+    the ids are a hand-copied tuple there and this is what ties them to the
+    predictors that actually write them.
+    """
+    assert tuple(panel_spec.DMS_PREDICTORS) == (
+        dms_blosum.BLOSUM62,
+        dms_leaf_scores.LEAF_LOGFREQ,
+    )
 
 
 def test_every_predictor_has_a_label_and_a_colour():
     """A predictor missing either reaches a chart that recycles a hue or prints an id."""
-    for predictor in dms_models.PREDICTORS:
+    for predictor in panel_spec.DMS_PREDICTORS:
         label = panel_charts.predictor_label(predictor)
         assert label in panel_charts.DMS_PREDICTOR_COLORS
     with pytest.raises(KeyError):
@@ -204,26 +224,88 @@ def test_every_predictor_has_a_label_and_a_colour():
 def test_the_join_preserves_every_measured_cell_and_scores_each_once():
     """A join that dropped or duplicated a cell would report its own key as coverage."""
     for homolog, expected in EXPECTED_CELLS.items():
-        cells = dms_models.homolog_cells(homolog)
+        cells, cells_founder = dms_models.homolog_cells(homolog)
         assert len(cells) == expected
-        frame, manifest, founder = dms_models.blosum62_scores(homolog)
+        frame, manifest, founder = dms_blosum.blosum62_scores(homolog)
         merged, manifests = dms_models.join_scores(cells, [(frame, manifest)])
         assert len(merged) == expected
-        assert merged[dms_models.BLOSUM62].notna().all()
-        assert set(manifests) == {dms_models.BLOSUM62}
-        # The parent the score was taken away from is the clade founder's
-        # residue, which is what makes this predictor comparable to the DASM's.
-        assert (merged["parent_aa"] == frame["parent_aa"]).all()
+        assert merged[dms_blosum.BLOSUM62].notna().all()
+        assert set(manifests) == {dms_blosum.BLOSUM62}
         assert manifest.input_sequence_sha256 == dms_models.sequence_sha256(founder)
+        # One founder read, so the cells and the declared sequence cannot be two
+        # different readings of the same FASTA.
+        assert cells_founder == founder
+        # And every score's parent is that founder's residue at that site,
+        # compared against the FASTA rather than against the column's own source,
+        # which would be a tautology.
+        clade = lib.dms_dataset(homolog).clade
+        expected_parents = founders.founder_aa_sequence(clade, lib.GENE)
+        assert all(
+            expected_parents[site - 1] == parent
+            for site, parent in zip(merged["aa_site"], merged["parent_aa"])
+        )
 
 
 @needs_dms
 def test_a_predictor_that_scores_a_subset_leaves_the_rest_missing():
     """An absent cell must be NaN, not a zero a correlation would read as a value."""
     homolog = lib.dms_homologs()[0]
-    cells = dms_models.homolog_cells(homolog)
-    frame, manifest, _ = dms_models.blosum62_scores(homolog)
+    cells, _ = dms_models.homolog_cells(homolog)
+    frame, manifest, _ = dms_blosum.blosum62_scores(homolog)
     half = frame.iloc[: len(frame) // 2]
     merged, _ = dms_models.join_scores(cells, [(half, manifest)])
     assert len(merged) == len(cells)
-    assert merged[dms_models.BLOSUM62].notna().sum() == len(half)
+    assert merged[dms_blosum.BLOSUM62].notna().sum() == len(half)
+
+
+@needs_dms
+def test_blosum62_scores_the_cell_it_says_it_does():
+    """The assertion the rest of this file does not make: the score's own value.
+
+    Every other check here is a row count, a key or a hash, all of which a
+    predictor that scored ``matrix[parent, parent]``, or scored the transpose, or
+    dropped the lookup entirely would satisfy. A wrong value reaches panel C as a
+    correlation of the wrong magnitude and nothing else notices.
+    """
+    from Bio.Align import substitution_matrices
+
+    blosum = substitution_matrices.load("BLOSUM62")
+    frame, _, _ = dms_blosum.blosum62_scores(panel_spec.SCATTER_HOMOLOG)
+    for row in frame.head(200).itertuples():
+        assert row.score == blosum[row.parent_aa, row.mutant_aa]
+    # And not all one value, which a dropped lookup would be.
+    assert frame["score"].nunique() > 1
+
+
+def test_a_non_finite_score_is_refused():
+    """`within_clade_metrics` drops NaN rows, so a bad predictor shrinks `n`."""
+    homolog = lib.dms_homologs()[0]
+    rows = [
+        {
+            "homolog": homolog,
+            "aa_site": site,
+            "parent_aa": "M",
+            "mutant_aa": "A",
+            "model": "hand",
+            "score": score,
+        }
+        for site, score in ((1, 0.0), (2, float("nan")))
+    ]
+    with pytest.raises(ValueError, match="NaN or"):
+        dms_models.validate_scores(_frame(rows), _manifest("hand", "MM"))
+
+
+@needs_dms
+def test_a_predictor_may_not_score_a_stratum_it_did_not_declare():
+    """Otherwise the declaration says nothing and the extra rows read as coverage."""
+    homolog = panel_spec.SCATTER_HOMOLOG
+    cells, _ = dms_models.homolog_cells(homolog)
+    frame, manifest, _ = dms_blosum.blosum62_scores(homolog)
+    narrowed = dms_models.Manifest(
+        model=manifest.model,
+        strata=(dms.SINGLE_NT,),
+        frame=manifest.frame,
+        input_sequence_sha256=manifest.input_sequence_sha256,
+    )
+    with pytest.raises(ValueError, match="does not declare"):
+        dms_models.join_scores(cells, [(frame, narrowed)])

@@ -116,7 +116,8 @@ ENTRY_POINTS = {
     # chart waits on the DASM's own column, so what these build is the table it
     # will be drawn from.
     "dms_leaf_counts": "scripts/dms_leaf_freq.py",
-    "dms_predictor_scores": "scripts/dms_models.py",
+    "dms_blosum_scores": "scripts/dms_blosum.py",
+    "dms_leaf_scores": "scripts/dms_leaf_scores.py",
     "dms_predictor_summary": "scripts/dms_summary.py",
 }
 

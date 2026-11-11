@@ -1,4 +1,4 @@
-"""The contract a non-DASM predictor scores the spike DMS through, and BLOSUM62.
+"""The contract a non-DASM predictor scores the spike DMS through.
 
 `fig:dms`'s panel C sets the DASM against published models. Each of those reads
 a different parent -- the DASM arms read the clade founder, which is the UShER
@@ -15,15 +15,23 @@ invariant a join preserves here is that the row count does not move and no key
 repeats, rather than a fixed row count.
 
 What is deliberately absent is the scored-parent/founder difference check that
-``dasm2-experiments`` #1913 carries. Both predictors here read the clade founder
-itself, and ``load_dms`` has already dropped every founder-mismatched cell, so
-that machinery would have no live case and only synthetic tests. It arrives with
-the first predictor that reads a different parent.
+``dasm2-experiments`` #1913 carries. Both predictors landing with this read the
+clade founder itself, and ``load_dms`` has already dropped every
+founder-mismatched cell, so that machinery would have no live case and only
+synthetic tests. It arrives with the first predictor that reads a different
+parent.
+
+**The sequence checks in :func:`write_scores` are for those arms, not for these
+two.** A predictor that reads the founder declares the founder, so its hash and
+its ``parent_aa`` agree by construction and the checks are tautologies today.
+They are four lines, they are the only thing that will catch antiGen or CoVFit
+scored against the wrong construct, and they are written now so that arm cannot
+land without answering them. Said plainly here rather than left to look like
+live validation.
 """
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import sys
@@ -43,11 +51,13 @@ assert_dasm2_is_this_repo()
 import dms
 import numpy as np
 import pandas as pd
-from Bio.Align import substitution_matrices
+import pyarrow as pa
+import pyarrow.parquet as pq
 from founders import founder_aa_sequence
 
+from dasm2.data.parquet_backend import read_parquet_file_metadata
 from dasm2.neutral.scov2_rates import GENE_NT_LENGTH
-from dasm2.sequence.constants import AA_STR_SORTED
+from dasm2.sequence.constants import AA_STR_TO_IDX
 
 #: One predictor's scores, in column order. ``parent_aa`` is the residue the
 #: predictor actually scored against, spelled as `selection_factors.parquet` and
@@ -70,15 +80,15 @@ JOIN_KEY = ("aa_site", "mutant_aa")
 #: `scripts/founders.py` length-checks every founder against the same number.
 GENE_AA_LENGTH = GENE_NT_LENGTH[GENE] // 3
 
-#: The twenty standard residues, from the repository's own alphabet.
-STANDARD_AA = frozenset(AA_STR_SORTED)
+#: The footer key one predictor's manifest is stored under. A top-level
+#: key-value entry, which is what `dasm2/data/parquet_backend.py` says every
+#: metadata reader goes through -- not pandas' ``DataFrame.attrs``, whose
+#: survival across a Parquet round trip is a pandas implementation detail and
+#: which `read_parquet_file_metadata` would not see.
+MANIFEST_KEY = "manifest"
 
-#: The predictor ids this module can score. A rule's ``{model}`` wildcard is
-#: constrained to these, so a typo fails at DAG construction rather than
-#: writing a table named for a predictor that does not exist.
-BLOSUM62 = "blosum62"
-LEAF_LOGFREQ = "leaf_logfreq"
-PREDICTORS: tuple[str, ...] = (BLOSUM62, LEAF_LOGFREQ)
+#: The twenty standard residues, from the repository's own alphabet.
+STANDARD_AA = frozenset(AA_STR_TO_IDX)
 
 
 @dataclass(frozen=True)
@@ -128,27 +138,7 @@ def sequence_sha256(sequence: str) -> str:
     return hashlib.sha256(sequence.encode()).hexdigest()
 
 
-def blosum62_log_odds() -> np.ndarray:
-    """BLOSUM62's 20 x 20 log-odds, rows and columns in ``AA_STR_SORTED``.
-
-    Biopython's table also carries the ambiguity codes and the stop; this keeps
-    the twenty standard residues, in the order every selection-factor row in
-    this pipeline is laid out in.
-
-    Taken from ``dasm2-experiments`` ``dasm2/analysis/pam_baseline.py``. It is
-    here and not in ``dasm2/`` on purpose: that tree is a one-way fork whose
-    value is that a diff against its source commit is meaningful, so a module at
-    a name no upstream commit uses does not belong in it -- and ``ruff`` excludes
-    it, so a file there would go unchecked.
-    """
-    blosum = substitution_matrices.load("BLOSUM62")
-    return np.array(
-        [[blosum[a, b] for b in AA_STR_SORTED] for a in AA_STR_SORTED],
-        dtype=np.float64,
-    )
-
-
-def homolog_cells(homolog: str) -> pd.DataFrame:
+def homolog_cells(homolog: str) -> tuple[pd.DataFrame, str]:
     """One homolog's measured cells, with the two columns the join needs added.
 
     ``melt_dms`` returns ``aa_site``, ``mutant_aa``, ``dms_cell_entry`` and
@@ -157,6 +147,11 @@ def homolog_cells(homolog: str) -> pd.DataFrame:
     Both are added here rather than in ``melt_dms``: #26's panels read its four
     columns and ``tests/test_dms.py`` pins its row count and stratum set against
     them.
+
+    Returns:
+        ``(cells, founder)``. The founder comes back rather than being read again
+        by each caller: every predictor needs it for the sequence its manifest
+        declares, and two reads of one FASTA are two chances to disagree.
     """
     dataset = dms_dataset(homolog)
     matrix, _ = dms.load_dms(homolog)
@@ -165,7 +160,7 @@ def homolog_cells(homolog: str) -> pd.DataFrame:
     cells = cells.copy()
     cells["homolog"] = homolog
     cells["parent_aa"] = [founder[site - 1] for site in cells["aa_site"]]
-    return cells
+    return cells, founder
 
 
 def validate_scores(frame: pd.DataFrame, manifest: Manifest) -> None:
@@ -202,6 +197,14 @@ def validate_scores(frame: pd.DataFrame, manifest: Manifest) -> None:
                 f"{manifest.model}: {column} holds {bad}; the contract carries "
                 f"amino-acid substitutions only, so no stop and no deletion"
             )
+
+    nonfinite = int((~np.isfinite(frame["score"])).sum())
+    if nonfinite:
+        raise ValueError(
+            f"{manifest.model}: {nonfinite} of {len(frame)} scores are NaN or "
+            f"infinite. `within_clade_metrics` drops those rows, so they would "
+            f"shrink this predictor's `n` rather than fail anything."
+        )
 
     sites = frame["aa_site"]
     off = sites[(sites < 1) | (sites > GENE_AA_LENGTH)]
@@ -265,11 +268,17 @@ def write_scores(
 
     path.parent.mkdir(parents=True, exist_ok=True)
     out = frame[list(PREDICTOR_COLUMNS)].reset_index(drop=True)
-    out.attrs["manifest"] = json.dumps(manifest.as_dict())
-    out.to_parquet(path, index=False)
-    # Mirrored for humans. The Parquet footer is what `read_scores` reads; this
-    # is a copy, as `prepare_viral_parquet.py` writes its own summary beside the
-    # table it put the same facts into.
+    table = pa.Table.from_pandas(out, preserve_index=False)
+    table = table.replace_schema_metadata(
+        {
+            **(table.schema.metadata or {}),
+            MANIFEST_KEY.encode(): json.dumps(manifest.as_dict()).encode(),
+        }
+    )
+    pq.write_table(table, path)
+    # Mirrored for humans. The footer entry above is what `read_scores` reads;
+    # this is a copy, as `prepare_viral_parquet.py` writes its own summary beside
+    # the table it put the same facts into.
     path.with_suffix(".manifest.json").write_text(
         json.dumps(manifest.as_dict(), indent=1, sort_keys=True) + "\n"
     )
@@ -277,11 +286,10 @@ def write_scores(
 
 def read_scores(path: Path) -> tuple[pd.DataFrame, Manifest]:
     """One predictor's scores and the manifest its footer carries."""
-    frame = pd.read_parquet(path)
-    raw = frame.attrs.get("manifest")
+    raw = read_parquet_file_metadata(path).get(MANIFEST_KEY)
     if raw is None:
-        raise ValueError(f"{path}: no manifest in the Parquet footer")
-    return frame, Manifest.from_dict(json.loads(raw))
+        raise ValueError(f"{path}: no {MANIFEST_KEY!r} key in the Parquet footer")
+    return pd.read_parquet(path), Manifest.from_dict(json.loads(raw))
 
 
 def join_scores(
@@ -335,63 +343,18 @@ def join_scores(
             how="left",
             validate="one_to_one",
         )
+        # `strata` is a claim about what the predictor can speak on, and this is
+        # where it is held to. Scoring a stratum it did not declare makes the
+        # declaration meaningless, and a reader of the summary would take those
+        # rows for coverage. Declaring more than it scores is allowed: that is
+        # absence, which the summary reports as a smaller `n`.
+        scored_strata = set(merged.loc[merged[manifest.model].notna(), "stratum"])
+        undeclared = sorted(scored_strata - set(manifest.strata))
+        if undeclared:
+            raise ValueError(
+                f"{manifest.model}: scores cells in {undeclared}, which its "
+                f"manifest does not declare; it declares {sorted(manifest.strata)}"
+            )
         manifests[manifest.model] = manifest.as_dict()
 
     return merged, manifests
-
-
-def blosum62_scores(homolog: str) -> tuple[pd.DataFrame, Manifest, str]:
-    """BLOSUM62's log-odds for every cell one homolog's assay measured.
-
-    The score is ``B[parent_aa, mutant_aa]`` at the clade founder's residue. It
-    is already a log-odds, so nothing is transformed: that is what puts it on the
-    same axis as the DASM's log selection factor.
-    """
-    cells = homolog_cells(homolog)
-    founder = founder_aa_sequence(dms_dataset(homolog).clade, GENE)
-    matrix = blosum62_log_odds()
-    index = {aa: i for i, aa in enumerate(AA_STR_SORTED)}
-    scores = [
-        matrix[index[parent], index[mutant]]
-        for parent, mutant in zip(cells["parent_aa"], cells["mutant_aa"])
-    ]
-    frame = cells.assign(model=BLOSUM62, score=scores)
-    manifest = Manifest(
-        model=BLOSUM62,
-        strata=dms.STRATA,
-        frame=(
-            f"clade founder {dms_dataset(homolog).clade} {GENE}, from mat-pcp's "
-            f"own clade_founders FASTA; 1-indexed, so no site mapping"
-        ),
-        input_sequence_sha256=sequence_sha256(founder),
-    )
-    return frame[list(PREDICTOR_COLUMNS)], manifest, founder
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", required=True, choices=PREDICTORS)
-    parser.add_argument("--homolog", required=True, choices=dms_homologs())
-    parser.add_argument("--counts", type=Path, help=f"required for {LEAF_LOGFREQ}")
-    parser.add_argument("--output", required=True, type=Path)
-    args = parser.parse_args()
-
-    if args.model == BLOSUM62:
-        frame, manifest, sequence = blosum62_scores(args.homolog)
-    else:
-        # Imported here, not at module scope: `dms_leaf_freq` imports this
-        # module for the contract, and a top-level import back would be a cycle.
-        import dms_leaf_freq
-
-        if args.counts is None:
-            raise SystemExit(f"--counts is required for {LEAF_LOGFREQ}")
-        frame, manifest, sequence = dms_leaf_freq.leaf_logfreq_scores(
-            args.homolog, args.counts
-        )
-
-    write_scores(frame, manifest, sequence, args.output)
-    print(f"wrote {args.output}: {len(frame)} cells for {args.homolog}")
-
-
-if __name__ == "__main__":
-    main()

@@ -1,4 +1,4 @@
-"""What the clade's own sampled sequences say, per site, as `fig:dms`'s floor.
+"""Per-site residue counts over a clade's own tree leaves.
 
 Panel C asks how much of a deep mutational scan a model explains that something
 cheaper does not. One cheap answer is the clade's standing variation: a
@@ -15,19 +15,20 @@ its descendant count rather than by the number of times it arose, which is the
 right quantity for "how common is this residue in the sampled population" and is
 deliberately not mat-pcp's per-branch event count.
 
-**The log-odds is against the parent residue, not a background composition.** A
-position-specific scoring matrix conventionally scores
-``log(p_obs(a, s) / p_background(a))``. This scores against the clade founder's
-own count at the same site, which is what puts it on the same axis as BLOSUM62's
-log-odds and the DASM's log selection factor; the conventional form would be
-comparable to neither. Hence the name.
+This module builds and reads the tally. `scripts/dms_leaf_scores.py` turns it
+into a predictor.
 
 **Masked sites are reconstructed wrong, and it does not reach a scored cell.**
 mat-pcp's branch-mutation extraction drops masked nucleotide sites while the
 founder FASTA does not, so the reconstruction keeps 19A's base wherever a clade
-founder differs at one. ``load_dms`` has already dropped every masked site, so
-those sites are not among the cells a score is written for; the tests assert that
-rather than assume it.
+founder differs at one. A codon all of whose nucleotides are masked is never
+visited at all; a codon with one masked nucleotide and another that is mutated
+*is* visited, and is rebuilt with 19A's base at the masked position -- a wrong
+residue either way. ``dms.codon_sites_of`` puts the whole codon in
+``globally_masked_sites`` and ``load_dms`` drops every such site, so none of them
+is among the cells a score is written for, and the tests assert that rather than
+assume it. The rows stay in the written tally, which is why its docstring says
+what they are.
 
 GISAID-derived input. The per-site tally this writes is a derived per-site slice
 of the tree, so it goes under the artifact root and is not committed; see
@@ -44,26 +45,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 # `lib` first, so this repository's root is on `sys.path` before anything
 # imports `dasm2` and the vendored fork wins over an editable install.
-from lib import (
-    GENE,
-    SAMPLE_PATHS_SUFFIX,
-    assert_dasm2_is_this_repo,
-    dms_dataset,
-    mat_pcp_path,
-)
+from lib import GENE, assert_dasm2_is_this_repo, mat_pcp_path
 
 import dasm2  # noqa: F401  (imported first for its side effects)
 
 assert_dasm2_is_this_repo()
 
 import dms
-import dms_models
 import numpy as np
 import pandas as pd
+import panel_spec
 from founders import founder_aa_sequence, founder_nt_sequence
 
 from dasm2.neutral.scov2_rates import gene_nt_span
-from dasm2.sequence.constants import AA_STR_SORTED
+from dasm2.sequence.constants import AA_STR_SORTED, AA_STR_TO_IDX
 from dasm2.sequence.conversion import translate_codon, translate_sequence
 
 #: The clade whose founder every path's mutations are expressed against. The
@@ -73,19 +68,6 @@ from dasm2.sequence.conversion import translate_codon, translate_sequence
 #: rather than by asserting anything about the tree's topology.
 PATH_ROOT_CLADE = "19A"
 
-#: The pseudocount in the log frequency ratio. **Not**
-#: ``viral_fitness_eval.RATIO_PSEUDOCOUNT``, which regularises a count ratio
-#: rather than a residue frequency; they hold different numbers for different
-#: reasons and must not be assumed to move together.
-#:
-#: At one against a clade's leaf count this is not a neutral smoother: it fixes
-#: every unobserved mutant at a site-level floor, so most of the predictor's rank
-#: information is the observed/unobserved split rather than graded frequency.
-#: That is the floor the panel means to report -- "has this substitution ever
-#: been seen in this clade" -- and `scripts/dms_summary.py` reports the
-#: observed-only correlation beside the headline so it can be read as such.
-LEAF_PSEUDOCOUNT = 1.0
-
 #: The count table's site column. The twenty residue columns are
 #: ``AA_STR_SORTED`` itself, so a reader of the CSV gets the same column order as
 #: every selection-factor row in this pipeline.
@@ -93,8 +75,14 @@ SITE_COLUMN = "aa_site"
 
 
 def sample_paths_path(clade: str) -> Path:
-    """One clade's per-leaf mutation paths."""
-    return mat_pcp_path("sample_paths_dir") / f"{clade}{SAMPLE_PATHS_SUFFIX}"
+    """One clade's per-leaf mutation paths.
+
+    Resolved through `scripts/panel_spec.py`, which is where
+    `workflow/figures.smk` declares the rule's input from. The suffix is spelled
+    once, there: a second spelling here would be exactly the drift that module
+    exists to prevent.
+    """
+    return panel_spec.sample_paths_path(mat_pcp_path("sample_paths_dir"), clade)
 
 
 def parse_mutation(token: str) -> tuple[str, int, str]:
@@ -154,7 +142,6 @@ class LeafTally:
         self.root_aa = translate_sequence(self.root_nt)
         self.span_start = gene_nt_span(gene)[0]
         self.n_sites = len(self.root_aa)
-        self.aa_index = {aa: i for i, aa in enumerate(AA_STR_SORTED)}
         self.deviations = np.zeros((self.n_sites, len(AA_STR_SORTED)), dtype=np.int64)
         #: Leaves whose codon at a site translates outside ``AA_STR_SORTED``.
         #: Dropped from that site rather than counted as a residue, so the site's
@@ -195,22 +182,30 @@ class LeafTally:
             residue = translate_codon(codon)
             if residue == self.root_aa[codon_site]:
                 continue
-            if residue not in self.aa_index:
+            if residue not in AA_STR_TO_IDX:
                 self.unreadable[codon_site] += 1
                 continue
-            self.deviations[codon_site, self.aa_index[residue]] += 1
+            self.deviations[codon_site, AA_STR_TO_IDX[residue]] += 1
 
     def frame(self) -> pd.DataFrame:
         """The full 20 x L tally, as ``aa_site`` plus one column per residue."""
         counts = self.deviations.copy()
         deviated = counts.sum(axis=1) + self.unreadable
         for site, residue in enumerate(self.root_aa):
-            counts[site, self.aa_index[residue]] += self.n_leaves - deviated[site]
-        if (counts < 0).any():
+            counts[site, AA_STR_TO_IDX[residue]] += self.n_leaves - deviated[site]
+        # Every site's residues sum to the leaf count, less the leaves whose
+        # codon there read outside the alphabet. This is the identity the
+        # deviation optimisation stands on, and the one assertion here that a
+        # mistake in it could actually break -- a negative-count guard cannot
+        # fire, since each leaf adds at most one increment per site by
+        # construction.
+        totals = counts.sum(axis=1) + self.unreadable
+        if not (totals == self.n_leaves).all():
+            bad = int(next(iter((totals != self.n_leaves).nonzero()[0])))
             raise ValueError(
-                f"{self.clade}: a site's {PATH_ROOT_CLADE} count came out "
-                f"negative, which means a leaf was tallied at more than one "
-                f"residue there"
+                f"{self.clade}: site {bad + 1} tallies {int(totals[bad])} leaves "
+                f"against {self.n_leaves}, so a leaf was counted at more than one "
+                f"residue there or at none"
             )
         table = pd.DataFrame(counts, columns=list(AA_STR_SORTED))
         table.insert(0, SITE_COLUMN, np.arange(1, self.n_sites + 1))
@@ -224,6 +219,20 @@ def build_tally(clade: str, gene: str = GENE) -> LeafTally:
         for line in handle:
             if line.strip():
                 tally.add_leaf(line)
+    if tally.reference_mismatches:
+        raise ValueError(
+            f"{clade}: {tally.reference_mismatches} mutations disagree with the "
+            f"sequence's base at their own offset, e.g. "
+            f"{tally.mismatch_examples}. Either the paths are not expressed "
+            f"against {PATH_ROOT_CLADE}'s founder or the gene offset is wrong; "
+            f"every residue tallied past the first is then unreliable."
+        )
+    if not tally.n_leaves:
+        raise ValueError(
+            f"{sample_paths_path(clade)} holds no leaves. An empty tally scores "
+            f"every substitution at log(1/1) = 0, which correlates with nothing "
+            f"and raises nothing."
+        )
     return tally
 
 
@@ -236,42 +245,29 @@ def read_counts(path: Path) -> pd.DataFrame:
             f"{path}: expected {SITE_COLUMN} and the 20 residues of AA_STR_SORTED; "
             f"missing {missing}"
         )
+    # :func:`counts_at` indexes this positionally, so the rows must be exactly
+    # 1..L in order. A truncated, reordered or hand-edited tally would otherwise
+    # return some other site's counts, or raise an IndexError much later.
+    expected = np.arange(1, len(table) + 1)
+    if not (table[SITE_COLUMN].to_numpy() == expected).all():
+        raise ValueError(
+            f"{path}: {SITE_COLUMN} is not 1..{len(table)} in order, which is what "
+            f"the per-cell lookup indexes by position"
+        )
     return table.set_index(SITE_COLUMN)
 
 
-def leaf_logfreq_scores(
-    homolog: str, counts_path: Path
-) -> tuple[pd.DataFrame, dms_models.Manifest, str]:
-    """The log frequency ratio for every cell one homolog's assay measured."""
-    dataset = dms_dataset(homolog)
-    counts = read_counts(counts_path)
-    cells = dms_models.homolog_cells(homolog)
-    founder = founder_aa_sequence(dataset.clade, GENE)
+def counts_at(counts: pd.DataFrame, sites, residues):
+    """The tally's value for each ``(site, residue)`` pair, as an array.
 
-    mutant_counts = counts.to_numpy()[
-        cells["aa_site"].to_numpy() - 1,
-        [AA_STR_SORTED.index(aa) for aa in cells["mutant_aa"]],
+    One helper rather than the same fancy-index in each caller: the scorer needs
+    it for the mutant residue and for the parent, and `scripts/dms_summary.py`
+    needs it for the mutant alone.
+    """
+    return counts.to_numpy()[
+        np.asarray(sites) - 1,
+        [AA_STR_TO_IDX[residue] for residue in residues],
     ]
-    parent_counts = counts.to_numpy()[
-        cells["aa_site"].to_numpy() - 1,
-        [AA_STR_SORTED.index(aa) for aa in cells["parent_aa"]],
-    ]
-    scores = np.log(
-        (mutant_counts + LEAF_PSEUDOCOUNT) / (parent_counts + LEAF_PSEUDOCOUNT)
-    )
-
-    frame = cells.assign(model=dms_models.LEAF_LOGFREQ, score=scores)
-    manifest = dms_models.Manifest(
-        model=dms_models.LEAF_LOGFREQ,
-        strata=dms.STRATA,
-        frame=(
-            f"clade founder {dataset.clade} {GENE} for the scored parent; the "
-            f"tally behind it is each leaf's own path applied to the "
-            f"{PATH_ROOT_CLADE} founder, 1-indexed, so no site mapping"
-        ),
-        input_sequence_sha256=dms_models.sequence_sha256(founder),
-    )
-    return frame[list(dms_models.PREDICTOR_COLUMNS)], manifest, founder
 
 
 def main() -> None:
@@ -281,15 +277,6 @@ def main() -> None:
     args = parser.parse_args()
 
     tally = build_tally(args.clade)
-    if tally.reference_mismatches:
-        raise SystemExit(
-            f"{args.clade}: {tally.reference_mismatches} mutations disagree with "
-            f"the sequence's base at their own offset, e.g. "
-            f"{tally.mismatch_examples}. Either the paths are not expressed "
-            f"against {PATH_ROOT_CLADE}'s founder or the gene offset is wrong; "
-            f"every residue tallied past the first is then unreliable."
-        )
-
     table = tally.frame()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     table.to_csv(args.output, index=False)
