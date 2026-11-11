@@ -44,17 +44,19 @@ def _(mo):
     import sys
     from pathlib import Path
 
-    import pandas as pd
-
     REPO_ROOT = Path(__file__).resolve().parent.parent
     for _path in (REPO_ROOT, REPO_ROOT / "scripts"):
         if str(_path) not in sys.path:
             sys.path.insert(0, str(_path))
 
-    import panel_charts as charts
+    # `panels` before `pandas`: it imports `lib` and then `dasm2`, which moves
+    # Arrow off the bundled mimalloc, and `pandas` pulls pyarrow in
+    # transitively. Whichever import lands first wins, and this notebook reads
+    # a Parquet.
     import panels
+    import panel_charts as charts
 
-    from dasm2.analysis.charts import mutation_lookup_line
+    import pandas as pd
 
     # The rule passes the table in; a second spelling in a notebook is a path
     # that can drift from `workflow/score.smk`'s.
@@ -77,7 +79,6 @@ def _(mo):
         SELECTION,
         TABLE_PATH,
         charts,
-        mutation_lookup_line,
         panels,
         pd,
     )
@@ -138,7 +139,6 @@ def _(
     TABLE_PATH,
     charts,
     mo,
-    mutation_lookup_line,
     panels,
 ):
     LOOKUP = panels.with_count_noise_interval(
@@ -155,7 +155,7 @@ def _(
     )
 
     if len(LOOKUP):
-        _chart = mutation_lookup_line(
+        _chart = charts.mutation_lookup_line(
             LOOKUP,
             panels.LOOKUP_MUTATION,
             clade_order=list(LOOKUP["clade"]),

@@ -58,4 +58,11 @@ extend-exclude = ["dasm2"]
 # cells read, so a cell that exports nothing ends in a bare `return`
 # (PLR1711), and a cell that renders a widget ends in that widget as a bare
 # expression (B018). Both are marimo's file format, not dead code.
-"notebooks/*.py" = ["PLR1711", "B018"]
+#
+# `I001` for a different reason: a notebook's imports have to land in the
+# order `tests/test_import_order.py` requires -- `lib`, then `dasm2`, then
+# `pandas` -- and a script separates those blocks with the
+# `assert_dasm2_is_this_repo()` call, which is what stops isort merging and
+# re-sorting them. A cell has no such statement to put between them, so the
+# ordering is enforced by that test rather than by this linter.
+"notebooks/*.py" = ["PLR1711", "B018", "I001"]

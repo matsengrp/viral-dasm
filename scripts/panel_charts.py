@@ -31,6 +31,12 @@ import altair as alt
 import pandas as pd
 from panels import figure_dir
 
+# Re-exported, like the statistics through `scripts/panels.py`: a notebook then
+# imports its charts from one module and never names `dasm2` itself, which is
+# what keeps `tests/test_import_order.py`'s two orderings a property of this
+# layer rather than of every notebook that draws a panel.
+from dasm2.analysis.charts import mutation_lookup_line  # noqa: F401
+
 #: Everything is written at one resolution, spelled once. A matplotlib point
 #: and a Vega-Lite pixel both land at ``size * ppi / 72`` pixels, so equal font
 #: numbers across the panels are equal type on the composed page -- and a panel

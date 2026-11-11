@@ -54,15 +54,19 @@ def _(mo):
     import sys
     from pathlib import Path
 
-    import pandas as pd
-
     REPO_ROOT = Path(__file__).resolve().parent.parent
     for _path in (REPO_ROOT, REPO_ROOT / "scripts"):
         if str(_path) not in sys.path:
             sys.path.insert(0, str(_path))
 
-    import panel_charts as charts
+    # `panels` before `pandas`: it imports `lib` and then `dasm2`, which moves
+    # Arrow off the bundled mimalloc, and `pandas` pulls pyarrow in
+    # transitively. Whichever import lands first wins, and this notebook reads
+    # a Parquet.
     import panels
+    import panel_charts as charts
+
+    import pandas as pd
 
     _args = mo.cli_args()
     TABLE_PATH = Path(
