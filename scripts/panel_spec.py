@@ -118,10 +118,10 @@ LOOKUP_MUTATION = "F456L"
 #: cross-clade pairing and whose consumers would change meaning if these were
 #: added to it.
 #:
-#: Neither is a clean single-substitution contrast -- 22D's two heaviest
-#: haplotypes differ at `F486P` and `T356K`, 20B's at `P681H`, `T478K` and
-#: `T732A` -- so a shift in either is attributable to the haplotype and not to
-#: one residue. That is why the scan's row excludes them and covers them here.
+#: In neither clade do the two heaviest haplotypes differ at a single residue,
+#: so a shift in either is attributable to the haplotype rather than to one
+#: substitution. That is why the scan's row excludes these two and the
+#: candidate panels cover them instead.
 CANDIDATE_CLADES: tuple[str, ...] = ("22D", "20B")
 
 #: The clades the scan's panel row draws, in the order the row reads. The scan
@@ -129,24 +129,45 @@ CANDIDATE_CLADES: tuple[str, ...] = ("22D", "20B")
 #: :data:`CANDIDATE_CLADES`, which panels A and B already cover.
 SCAN_CLADES: tuple[str, ...] = ("21J", "22B", "21L", "21K", "20I")
 
-#: The rung the scan's panel is drawn at. One rung, not a sweep: the source
-#: writes the saved panel only at the lowest of its three cutoffs, because
+#: The rung the scan's panel is drawn at. One rung, not a sweep: the saved
+#: panel is written only at the lowest of the scan's three cutoffs, because
 #: letting another setting overwrite it is how a composed figure comes to
-#: disagree with its own caption. This is the evidence cutoff, and it is not
-#: the corroboration gate's own 20-event floor.
-SCAN_MIN_EVIDENCE = COUNT_LADDER[0]
+#: disagree with its own caption.
+#:
+#: **Deliberately not tied to `PANEL_MIN_COUNT` or `COUNT_LADDER`, which hold
+#: the same number.** This counts a cell's pooled *events* across two
+#: backgrounds of one clade; those count a mutation's actual-or-expected
+#: occurrences in a clade. Different numerators over different denominators,
+#: equal at 10 today, with no reason to move together. It is also not the
+#: corroboration gate's own 20-event floor.
+SCAN_MIN_EVIDENCE = 10
 
 #: The candidate list panels A and B share, as tracked data rather than two
-#: hand-maintained lists. `status` is `figure`, `null` or `held_back`, so
-#: moving a candidate off the figures is one edit that reaches both panels.
+#: hand-maintained lists. Moving a candidate off the figures is one edit that
+#: reaches both panels.
 CANDIDATE_CSV = REPO_ROOT / "data" / "shift_candidates.csv"
+
+#: What a candidate's `status` may be. `figure` reaches the panels; `null` is
+#: the designed null, measured and deliberately not drawn; `held_back` is
+#: measured and off the figure for some other reason the file records. The two
+#: non-figure reasons stay distinct rather than collapsing to "excluded".
+CANDIDATE_ON_FIGURE = "figure"
+CANDIDATE_STATUSES = (CANDIDATE_ON_FIGURE, "null", "held_back")
+
+#: The columns :func:`_candidate_rows` requires, found by name.
+CANDIDATE_COLUMNS = ("clade", "mutation", "status")
+
+#: Where the scored tables live. `workflow/score.smk` spells this too, for
+#: `rule score`'s own output; this module's job is to be the one spelling for
+#: everything the figures read, so a later haplotype rule takes it from here.
+SCORED_DIR = ARTIFACT_ROOT / "scored"
 
 #: Where the per-haplotype scores go: its own table, beside the founder one.
 #: **Not** rows in `selection_factors.parquet`. That table's `background` is
 #: empty for every row and a test pins it so, and `panels.base_frames` filters
 #: on `(model, clade)` alone -- a haplotype row sharing it would be pooled into
 #: every agreement panel with nothing saying so.
-HAPLOTYPE_TABLE = ARTIFACT_ROOT / "scored" / "haplotype_selection_factors.parquet"
+HAPLOTYPE_TABLE = SCORED_DIR / "haplotype_selection_factors.parquet"
 
 
 def figure_candidates() -> tuple[tuple[str, str], ...]:
@@ -159,7 +180,7 @@ def figure_candidates() -> tuple[tuple[str, str], ...]:
     return tuple(
         (clade, mutation)
         for clade, mutation, status in _candidate_rows()
-        if status == "figure"
+        if status == CANDIDATE_ON_FIGURE
     )
 
 
@@ -173,7 +194,7 @@ def off_figure_candidates() -> tuple[tuple[str, str, str], ...]:
     return tuple(
         (clade, mutation, status)
         for clade, mutation, status in _candidate_rows()
-        if status != "figure"
+        if status != CANDIDATE_ON_FIGURE
     )
 
 
@@ -185,16 +206,24 @@ def _candidate_rows() -> list[tuple[str, str, str]]:
     landing a candidate on or off the figure.
     """
     with CANDIDATE_CSV.open(newline="") as handle:
-        rows = list(csv.DictReader(handle))
-    known = {"figure", "null", "held_back"}
+        reader = csv.DictReader(handle)
+        missing = [
+            name for name in CANDIDATE_COLUMNS if name not in (reader.fieldnames or ())
+        ]
+        if missing:
+            raise ValueError(
+                f"{CANDIDATE_CSV}: missing column(s) {missing}; it must carry "
+                f"{list(CANDIDATE_COLUMNS)}."
+            )
+        rows = list(reader)
     out = []
     seen = set()
     for row in rows:
         status = row["status"]
-        if status not in known:
+        if status not in CANDIDATE_STATUSES:
             raise ValueError(
                 f"{CANDIDATE_CSV}: {row['clade']}/{row['mutation']} has status "
-                f"{status!r}, which is not one of {sorted(known)}."
+                f"{status!r}, which is not one of {list(CANDIDATE_STATUSES)}."
             )
         pair = (row["clade"], row["mutation"])
         if pair in seen:
