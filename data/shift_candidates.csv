@@ -1,0 +1,10 @@
+clade,mutation,status,note
+20B,E1258D,figure,
+20B,D1259H,figure,
+22D,D574V,figure,the worked candidate; the largest counts-versus-DASM difference in the agreement figure
+22D,F486S,figure,
+22D,F486V,figure,
+22D,K444T,figure,
+22D,L452R,figure,
+22D,Q183E,null,the designed null: measured end to end and kept off the figures because no shift is predicted
+22D,G482R,held_back,"nominated after the rest, fails the 50-event screen gate at 27 events, and its contrast is the thinnest in the set at 4 against 7"
