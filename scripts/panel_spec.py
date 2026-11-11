@@ -21,7 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from lib import ARTIFACT_ROOT, GENE, REPO_ROOT
+from lib import ARTIFACT_ROOT, CORPUS_NAMES, GENE, REPO_ROOT
 
 #: Where the panel images go: under the artifact root, not in the tree. A panel
 #: is a rebuildable picture of the CSV committed beside it, and `README.md`'s
@@ -232,6 +232,59 @@ def _candidate_rows() -> list[tuple[str, str, str]]:
     return out
 
 
+# ---------------------------------------------------------------------------
+# `fig:subsampling`
+# ---------------------------------------------------------------------------
+
+#: The directory `fig:subsampling`'s panels are written under -- a **directory
+#: name, not a model selection**, and deliberately absent from
+#: :data:`SELECTIONS`.
+#:
+#: `SELECTIONS` is `rule panels`' wildcard domain, so a third entry there would
+#: let the agreement rules resolve `selection=subsampling` and draw agreement
+#: panels into this figure's directory. `figure_dir` and `panel_csv_path` are
+#: plain joins and validate nothing, so the two new rules pass this string with
+#: no `{selection}` wildcard and `tests/test_panels.py` pins it out of
+#: `SELECTIONS`.
+SUBSAMPLING_SELECTION = "subsampling"
+
+#: The model this figure's ladder is drawn from, and the one exception to
+#: :data:`FIGURE_MODEL`. `scripts/runs.py` trains `dasm-85k` on all four
+#: corpora and every other architecture at full depth alone, because that is
+#: the architecture the sampling-depth ladder trained at every depth.
+SUBSAMPLING_MODEL = "dasm-85k"
+
+#: The two clades panel B draws, under the names the paper uses beside the
+#: labels this pipeline keys on. `main.tex` names clades by their Pango or WHO
+#: alias and every table here is keyed by the bare Nextstrain clade: Delta is
+#: `21J` and XFG is `25C`. The tree's own metadata spells the pair -- its
+#: `Nextstrain_clade_usher` field reads `25C (XFG)` over `XFG.*` lineages --
+#: and the panel's facet titles use that form, so a reader of the paper and a
+#: reader of `results/panels/` can follow the same figure.
+ECDF_CLADES: dict[str, str] = {"21J": "21J (Delta)", "25C": "25C (XFG)"}
+
+#: The counts panel B's eCDF is evaluated at. Linear and stopping at 20: the
+#: accuracy threshold is 10, so this is the range either side of the cutoff the
+#: rest of the paper reads everything at, and a log axis would spend most of
+#: its width past the point where the curves have flattened.
+ECDF_MAX_COUNT = 20
+ECDF_POINTS = 201
+
+
+def subsampling_caps() -> tuple[int, ...]:
+    """Each thinned arm's per-clade cap, deepest first.
+
+    Read off the corpus names rather than restated -- `cap_50000_0` is a cap of
+    50,000 -- so panel A's rules cannot drift from the arms that were built.
+    Panel A draws one rule per cap, and every clade above a rule is cut back
+    *to* it, which is the whole difference between a cap arm and a fraction
+    arm.
+    """
+    return tuple(
+        int(name.split("_")[1]) for name in CORPUS_NAMES if name.startswith("cap_")
+    )
+
+
 #: Panel stems, as the figure's composition reads them. Named here so a rule
 #: knows which notebook produces which panel.
 MUTATION_PANELS = (
@@ -242,6 +295,17 @@ MUTATION_PANELS = (
 LADDER_PANELS = (
     "panel_c_within_clade_ladder",
     "panel_e_shift_ladder",
+)
+
+#: `fig:subsampling`'s stems. The depth pair is panels A and B, which measure
+#: the tree and take no model; the ladder pair is C and D.
+DEPTH_PANELS = (
+    "panel_a_sequences_per_clade",
+    "panel_b_count_ecdf",
+)
+LADDER_ARM_PANELS = (
+    "panel_c_arm_grid",
+    "panel_d_clade_ladder",
 )
 
 #: `fig:within_clade_shifts`'s stems, one tuple per producing notebook.

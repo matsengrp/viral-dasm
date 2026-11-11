@@ -27,6 +27,8 @@ import dasm2  # noqa: F401  (imported first for its side effects)
 
 assert_dasm2_is_this_repo()
 
+from collections.abc import Sequence
+
 import altair as alt
 import pandas as pd
 from panels import figure_dir
@@ -534,3 +536,227 @@ def lookup_panel_sizing(n_clades: int) -> dict[str, int]:
         "width": max(420, 20 * n_clades),
         "height": 350,
     }
+
+
+# ---------------------------------------------------------------------------
+# `fig:subsampling` panels A and B
+# ---------------------------------------------------------------------------
+
+#: Full depth against the three caps. One ink for the undisturbed tree and a
+#: light-to-dark blue ramp for the caps, so depth reads as one ordered channel:
+#: a reader follows the curves down as the cap tightens without consulting the
+#: legend. Deliberately not :data:`POINT_BLUE` and friends -- those three are
+#: the scatter's data-reference-fit roles, and reusing one here would imply a
+#: cap arm was a reference.
+DEPTH_INK = "#1a1a1a"
+CAP_BLUES = ("#6baed6", "#3182bd", "#08519c")
+
+#: The accuracy threshold's rule, in the one hue neither the depth ramp nor the
+#: scatter roles use.
+THRESHOLD_ACCENT = "#d95f02"
+
+#: Panel A's bars. A cap is drawn as a rule across the whole panel rather than
+#: as a per-clade mark, because what it does is set one height for every clade
+#: above it.
+CLADE_SIZE_WIDTH = 760
+CLADE_SIZE_HEIGHT = 230
+ECDF_PANEL_WIDTH = 300
+ECDF_PANEL_HEIGHT = 230
+
+
+def clade_size_panel(
+    frame: pd.DataFrame,
+    caps: Sequence[int],
+    *,
+    title: list[str],
+    width: int = CLADE_SIZE_WIDTH,
+    height: int = CLADE_SIZE_HEIGHT,
+) -> alt.LayerChart:
+    """Panel A: sequences per clade, with one rule per downsampling cap.
+
+    A dot per clade on a log y axis.
+
+    **A log y axis**, because the clades span 86 sequences to 4.3 million. On a
+    linear axis every clade but the largest five is a flat line against the
+    axis, which is the opposite of the panel's point: the imbalance is the
+    finding, and a reader has to be able to see where a cap falls among the
+    clades it does *not* touch as well as the ones it cuts.
+
+    The clades are ordered by size rather than by name, so each cap rule meets
+    the curve of dots at one place and the reader can count what it reaches.
+    """
+    order = list(frame["clade"])
+    x_enc = alt.X(
+        "clade:N",
+        sort=order,
+        title="Nextstrain clade",
+        axis=alt.Axis(
+            labelFontSize=PANEL_FONT_SIZE - 6,
+            titleFontSize=PANEL_FONT_SIZE,
+            labelAngle=-90,
+        ),
+    )
+    # One scale object and one field name for both layers. A layered chart
+    # shares a channel's scale, so a rule encoded on its own field -- or on a
+    # linear scale beside the bars' log one -- resolves to a domain that fits
+    # neither: the first draft drew no bars at all and collapsed the three caps
+    # onto one line at the top of the frame.
+    floor = max(1, int(frame["n_sequences"].min()))
+    ceiling = int(frame["n_sequences"].max())
+    y_enc = alt.Y(
+        "n_sequences:Q",
+        title="sequences",
+        scale=alt.Scale(type="log", domain=[floor, ceiling], nice=False),
+        axis=alt.Axis(
+            labelFontSize=PANEL_FONT_SIZE,
+            titleFontSize=PANEL_FONT_SIZE,
+            format="~s",
+        ),
+    )
+    # A dot per clade, not a bar. A bar extends from its scale's zero, and a
+    # log scale has none, so bars silently do not render at all -- which is
+    # what the first draft of this panel did. The source panel draws dots for
+    # the same reason.
+    dots = (
+        alt.Chart(frame)
+        .mark_point(color=DEPTH_INK, filled=True, size=70, opacity=0.9)
+        .encode(
+            x=x_enc,
+            y=y_enc,
+            tooltip=[
+                alt.Tooltip("clade:N", title="Clade"),
+                alt.Tooltip("n_sequences:Q", title="Sequences", format=","),
+            ],
+        )
+    )
+    cap_frame = pd.DataFrame(
+        {
+            "n_sequences": [float(cap) for cap in caps],
+            "label": [f"cap {cap:,}" for cap in caps],
+        }
+    )
+    rules = (
+        alt.Chart(cap_frame)
+        .mark_rule(strokeDash=[6, 4], strokeWidth=1.8)
+        .encode(
+            y=y_enc,
+            color=alt.Color(
+                "label:N",
+                title="downsampling cap",
+                sort=cap_frame["label"].tolist(),
+                scale=alt.Scale(
+                    domain=cap_frame["label"].tolist(), range=list(CAP_BLUES)
+                ),
+                legend=alt.Legend(
+                    labelFontSize=PANEL_FONT_SIZE, titleFontSize=PANEL_FONT_SIZE
+                ),
+            ),
+            tooltip=[alt.Tooltip("label:N", title="Cap")],
+        )
+    )
+    return (dots + rules).properties(
+        width=width,
+        height=height,
+        title=alt.TitleParams(
+            title, fontSize=PANEL_FONT_SIZE, offset=4, anchor="middle"
+        ),
+    )
+
+
+def count_ecdf_panel(
+    frame: pd.DataFrame,
+    *,
+    clade_titles: dict[str, str],
+    threshold: float,
+    width: int = ECDF_PANEL_WIDTH,
+    height: int = ECDF_PANEL_HEIGHT,
+) -> alt.HConcatChart:
+    """Panel B: one eCDF per clade, one curve per sampling depth.
+
+    A dotted rule marks the accuracy threshold, so the share of a clade's
+    mutations each depth still puts above it is read off the curve's height
+    where it crosses.
+
+    Concatenated rather than faceted: the two panels carry different clades'
+    titles in the paper's own naming -- `21J (Delta)`, `25C (XFG)` -- and a
+    facet header would show the bare label this pipeline keys on.
+    """
+    arms = [arm for arm in frame["arm"].unique()]
+    caps = [arm for arm in arms if arm != "full_depth"]
+    domain = ["full depth"] + [f"cap {int(arm.split('_')[1]):,}" for arm in caps]
+    labelled = frame.assign(
+        depth=[
+            "full depth" if arm == "full_depth" else f"cap {int(arm.split('_')[1]):,}"
+            for arm in frame["arm"]
+        ]
+    )
+    threshold_frame = pd.DataFrame({"x": [threshold]})
+
+    panels = []
+    for index, (clade, clade_title) in enumerate(clade_titles.items()):
+        rows = labelled[labelled["clade"] == clade]
+        curves = (
+            alt.Chart(rows)
+            .mark_line(strokeWidth=2.2)
+            .encode(
+                x=alt.X(
+                    "x:Q",
+                    title="X counts",
+                    scale=alt.Scale(domain=[0, float(rows["x"].max())], nice=False),
+                    axis=alt.Axis(
+                        labelFontSize=PANEL_FONT_SIZE, titleFontSize=PANEL_FONT_SIZE
+                    ),
+                ),
+                y=alt.Y(
+                    "share:Q",
+                    # Two lines, not one. The single-line spelling is taller
+                    # than the plot it labels at this panel size, and in an
+                    # hconcat that pushes the left view's plot down while its
+                    # title stays at the top of its box -- the two facet titles
+                    # then sit at visibly different heights.
+                    title=(
+                        ["fraction of mutations", "with ≥ X counts"]
+                        if index == 0
+                        else None
+                    ),
+                    scale=alt.Scale(domain=[0, 1], nice=False),
+                    axis=alt.Axis(
+                        labelFontSize=PANEL_FONT_SIZE,
+                        titleFontSize=PANEL_FONT_SIZE,
+                        labels=index == 0,
+                    ),
+                ),
+                color=alt.Color(
+                    "depth:N",
+                    title="sampling depth",
+                    sort=domain,
+                    scale=alt.Scale(domain=domain, range=[DEPTH_INK] + list(CAP_BLUES)),
+                    legend=alt.Legend(
+                        labelFontSize=PANEL_FONT_SIZE, titleFontSize=PANEL_FONT_SIZE
+                    ),
+                ),
+                tooltip=[
+                    alt.Tooltip("depth:N", title="Depth"),
+                    alt.Tooltip("x:Q", title="X counts", format=".1f"),
+                    alt.Tooltip("share:Q", title="Fraction", format=".4f"),
+                ],
+            )
+        )
+        rule = (
+            alt.Chart(threshold_frame)
+            .mark_rule(color=THRESHOLD_ACCENT, strokeDash=[2, 3], strokeWidth=1.6)
+            .encode(x=alt.X("x:Q"))
+        )
+        panels.append(
+            (curves + rule).properties(
+                width=width,
+                height=height,
+                title=alt.TitleParams(
+                    [f"clade {clade_title}"],
+                    fontSize=PANEL_FONT_SIZE,
+                    offset=4,
+                    anchor="middle",
+                ),
+            )
+        )
+    return alt.hconcat(*panels)

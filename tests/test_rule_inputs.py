@@ -111,12 +111,13 @@ ENTRY_POINTS = {
     # are the code the rule runs.
     "agreement_mutations": "notebooks/agreement_mutations.py",
     "agreement_ladders": "notebooks/agreement_ladders.py",
+    "subsampling_depth": "notebooks/subsampling_depth.py",
 }
 
 #: Rules that execute nothing. Asserted, not asserted-by-assertion: each must
 #: carry snakemake's ``norun`` marker, so listing a rule here cannot excuse it
 #: from the import check while it quietly runs a shell command.
-AGGREGATORS = ("all", "corpora", "models", "scored", "panels")
+AGGREGATORS = ("all", "corpora", "models", "scored", "panels", "subsampling")
 
 #: Rules that do run code and are still not import-checked, with the reason.
 #: Each must carry a ``shellcmd``, so an entry here describes a real

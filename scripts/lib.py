@@ -173,6 +173,17 @@ SCORING_INPUT_FILES = frozenset(
     }
 )
 
+#: The mat-pcp inputs a panel rule reads. Separate from
+#: :data:`SCORING_INPUT_FILES` because no scoring job opens either: they are
+#: measurements *of the tree*, read by `fig:subsampling`'s panels A and B,
+#: which take no model and no checkpoint.
+PANEL_INPUT_FILES = frozenset(
+    {
+        "clade_counts_file",
+        "ntmut_fitness_dir",
+    }
+)
+
 #: Suffix mat-pcp gives each per-clade amino-acid fitness table. Here rather
 #: than in the two scripts that glob for it, because ``check_clades.py``
 #: validates a roster that ``score_run.py`` then reads back by this suffix: two
@@ -190,7 +201,12 @@ def mat_pcp_path(key: str) -> Path:
             or building a neutral model from a table nobody meant.
     """
     block = CONFIG["mat_pcp"]
-    allowed = TRAINING_CONFIG_FILES | NEUTRAL_BUILD_FILES | SCORING_INPUT_FILES
+    allowed = (
+        TRAINING_CONFIG_FILES
+        | NEUTRAL_BUILD_FILES
+        | SCORING_INPUT_FILES
+        | PANEL_INPUT_FILES
+    )
     if key not in allowed:
         raise KeyError(
             f"{key!r} is not a mat-pcp file; expected one of {sorted(allowed)}"

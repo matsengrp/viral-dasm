@@ -35,11 +35,14 @@ effects and selection factors are publishable; no panel carries a sequence.
 from panel_spec import (
     AUDIT_JSON,
     DEFAULT_SELECTION,
+    DEPTH_PANELS,
+    ECDF_CLADES,
     LADDER_PANELS,
     MUTATION_PANELS,
     PANEL_MEM_MB,
     SELECTIONS,
     SHIFT_CLADES,
+    SUBSAMPLING_SELECTION,
     figure_dir,
     panel_csv_path,
 )
@@ -69,11 +72,79 @@ def panel_outputs(stems, selection):
     ] + [str(panel_csv_path(selection, stem)) for stem in stems]
 
 
+def ecdf_grid_files(*_):
+    """The nucleotide grids panel B's curves are drawn from.
+
+    Eight files, not the directory: two clades at four sampling depths, where
+    full depth is the directory's own level and each cap arm is a subdirectory
+    named for its corpus. Declaring the contents is how a rule declares a
+    directory `config.yaml` names, as `rule score`'s `founder_fastas` does.
+    """
+    root = mat_pcp_path("ntmut_fitness_dir")
+    return [
+        str(root / f"{clade}_ntmut_fitness.csv")
+        if arm == "full_depth"
+        else str(root / arm / f"{clade}_ntmut_fitness.csv")
+        for clade in ECDF_CLADES
+        for arm in CORPUS_NAMES
+    ]
+
+
 rule panels:
     """Every panel of `fig:agreement`, for the model the paper publishes."""
     input:
         panel_outputs(MUTATION_PANELS, DEFAULT_SELECTION),
         panel_outputs(LADDER_PANELS, DEFAULT_SELECTION),
+
+
+rule subsampling:
+    """`fig:subsampling`'s panels, as far as this stage of the port builds them.
+
+    Panels A and B only. C and D need `rule score`'s table for `dasm-85k` on
+    all four corpora, so they are a separate rule once those runs land -- and a
+    target that demanded them now would be red for the whole gap.
+    """
+    input:
+        panel_outputs(DEPTH_PANELS, SUBSAMPLING_SELECTION),
+
+
+rule subsampling_depth:
+    """Panels A and B: the sampling imbalance, and what it costs the counts."""
+    input:
+        panels="scripts/panels.py",
+        spec="scripts/panel_spec.py",
+        charts="scripts/panel_charts.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        # What the notebook reaches through those modules. Spelled out per rule
+        # rather than shared through a dict, for the reason the agreement rules
+        # spell theirs out: `tests/test_rule_inputs.py` reads these blocks as
+        # source, and an input expanded from a variable is one it cannot see.
+        analysis_charts="dasm2/analysis/charts.py",
+        analysis_viral="dasm2/analysis/viral.py",
+        analysis_eval="dasm2/analysis/viral_fitness_eval.py",
+        io="dasm2/io.py",
+        conversion="dasm2/sequence/conversion.py",
+        scov2_rates="dasm2/neutral/scov2_rates.py",
+        dasm2_init="dasm2/__init__.py",
+        notebook="notebooks/subsampling_depth.py",
+        # The two mat-pcp tables these panels measure. No scored table and no
+        # audit: neither panel reads a model.
+        clade_counts=mat_pcp_path("clade_counts_file"),
+        nt_grids=ecdf_grid_files,
+        # The roster panel A plots, which `clade_size_frame` drops the counts
+        # table's two extra clades against.
+        clade_founders=founder_fastas,
+    output:
+        html=f"{NOTEBOOK_DIR}/subsampling_depth.html",
+        panels=panel_outputs(DEPTH_PANELS, SUBSAMPLING_SELECTION),
+    log:
+        f"{ARTIFACT_ROOT}/logs/subsampling_depth.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "marimo export html {input.notebook} -o {output.html} --force"
+        " > {log} 2>&1"
 
 
 rule agreement_mutations:
