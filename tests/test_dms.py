@@ -258,7 +258,11 @@ def test_masking_runs_before_the_loader_that_raises_on_a_mismatch():
     from founders import founder_aa_sequence
 
     founder = founder_aa_sequence(dataset.clade, lib.GENE)
-    raw = pd.read_csv(dataset.path)
+    # Through the conversion, as `load_dms` reads it: `dataset.path` is the
+    # study's own file and does not carry these four columns.
+    from dms_published import normalise_published, read_published
+
+    raw = normalise_published(read_published(dataset), dataset)
     unmasked = raw[~raw[dms.DMS_MUT_COL].isin(["*", "-"])]
 
     import tempfile
@@ -309,7 +313,12 @@ def test_every_measured_cell_lands_in_exactly_one_stratum():
 
 @needs_dms
 def test_a_changed_dms_file_fails_rather_than_moving_every_number():
-    """The md5 is a gate: these files are replaced in place when repointed."""
+    """The md5 is a gate: it pins the study's own file as its authors wrote it.
+
+    What the conversion makes of those bytes is checked in
+    `tests/test_dms_published.py`, which is where the pin is also shown to
+    fire rather than only to pass.
+    """
     import hashlib
 
     assert lib.dms_homologs(), "no homologs configured, so this loop proves nothing"

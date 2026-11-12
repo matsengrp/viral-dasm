@@ -50,6 +50,14 @@ import dasm2  # noqa: F401  (imported first for its side effects)
 assert_dasm2_is_this_repo()
 
 import pandas as pd
+from dms_published import (
+    DMS_EFFECT_COL,
+    DMS_MUT_COL,
+    DMS_SITE_COL,
+    DMS_WT_COL,
+    normalise_published,
+    read_published,
+)
 from founders import founder_aa_sequence, founder_nt_sequence
 
 from dasm2.codon_table import CODON_NEIGHBOR_MATRIX
@@ -82,18 +90,13 @@ ALL = "all"
 #: The strata every readout of this figure reports, in the order they are read.
 STRATA: tuple[str, ...] = (SINGLE_NT, MULTI_NT, ALL)
 
-#: The DMS CSV's own column names. mat-pcp and this pipeline both say
-#: ``aa_site``/``mutant_aa``; these four are the published files' spelling, and
-#: the rename happens once, on the way out of :func:`load_dms`.
+#: The four columns the conversion emits. mat-pcp and this pipeline both say
+#: ``aa_site``/``mutant_aa``; these are the studies' spelling, and the rename
+#: happens once, on the way out of :func:`load_dms`.
 #:
-#: They are passed into ``from_multidms`` explicitly rather than left to its
-#: defaults, which happen to be the same strings today: a file whose columns
-#: were renamed would otherwise be pre-filtered on one set of names and parsed
-#: on another.
-DMS_SITE_COL = "site"
-DMS_WT_COL = "wildtype"
-DMS_MUT_COL = "mutant"
-DMS_EFFECT_COL = "functional_effect"
+#: Defined with the conversion that produces them, in
+#: `scripts/dms_published.py`, and re-exported here because this module is
+#: where every consumer already reads them from.
 
 
 @dataclass(frozen=True)
@@ -223,10 +226,12 @@ def single_nt_indicator(clade: str, gene: str = GENE) -> pd.DataFrame:
 def verify_dms_md5(homolog: str) -> str:
     """Check one homolog's CSV against the digest ``config.yaml`` pins.
 
-    A gate rather than a label. These files are received, and the planned
-    repoint of KP.3.1.1 at filtered measurements replaces one of them at the
-    same path, so without this every number the figure reports would move
-    while the pipeline kept running.
+    A gate rather than a label. The file is the study's own, committed under
+    ``data/dms/`` and received rather than built, so without this a dataset
+    swapped for another would move every number the figure reports while the
+    pipeline kept running. It pins the file as its authors wrote it, not the
+    four columns :func:`load_dms` converts it into -- what the conversion does
+    with those bytes is the business of `tests/test_dms_published.py`.
 
     Raises:
         ValueError: If the file's md5 is not the pinned one.
@@ -276,7 +281,10 @@ def load_dms(homolog: str, gene: str = GENE) -> tuple[pd.DataFrame, DmsAccountin
     founder = founder_aa_sequence(dataset.clade, gene)
     mask_sites = unreadable_sites(dataset.clade)
 
-    raw = pd.read_csv(dataset.path)
+    # The study's own file, converted to the four columns before anything is
+    # counted: `raw_rows` is the dataset as its preparation published it, and
+    # every filter named in the accounting below runs after that point.
+    raw = normalise_published(read_published(dataset), dataset)
     raw_rows = len(raw)
 
     frame = raw[~raw[DMS_MUT_COL].isin(NON_SUBSTITUTION_MUTANT_CODES)]

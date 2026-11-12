@@ -389,23 +389,42 @@ FULL_DEPTH = corpus("full_depth")
 
 @dataclass(frozen=True)
 class DmsDataset:
-    """One homolog's deep mutational scan, with what identifies it.
+    """One homolog's deep mutational scan: its file, and how to read it.
 
     ``md5`` is a gate rather than a label, which is the one way this differs
-    from :class:`Corpus`'s. A DMS file is received, not built, and the planned
-    repoint of KP.3.1.1 at filtered measurements replaces the file at the same
-    path -- so a digest is what makes a changed dataset fail loudly instead of
-    quietly moving every number this figure reports.
+    from :class:`Corpus`'s. The file is one this pipeline receives rather than
+    builds, so a digest is what makes a changed dataset fail loudly instead of
+    quietly moving every number this figure reports. Since #30 the file it
+    pins is the study's own, committed under ``data/dms/``, so a reader's
+    checkout either matches it or does not.
 
     ``clade`` is the Nextstrain label this pipeline keys its tables on. The
     papers name their homologs by Pango alias, and the two are not
     interchangeable in any join here.
+
+    The rest declares the conversion `scripts/dms_published.py` runs, so that
+    it branches on what a dataset says rather than on its name.
+    ``effect_column`` is the measured phenotype. The four that follow are
+    empty for a file that already carries one row per mutation:
+
+    - ``mutation_column`` names a column of ``A1015D``-style strings to parse
+      into the three join keys, for a file carrying no site, wildtype or
+      mutant column of its own.
+    - ``replicate_column`` names the replicates ``effect_column`` is averaged
+      over.
+    - ``fixed`` pins a column to one value, for a file holding a sweep.
+    - ``min_times_seen`` is a ``(column, floor)`` pair applied as a row filter.
     """
 
     homolog: str
     clade: str
     path: Path
     md5: str
+    effect_column: str
+    mutation_column: str | None = None
+    replicate_column: str | None = None
+    fixed: tuple[tuple[str, float], ...] = ()
+    min_times_seen: tuple[str, int] | None = None
 
 
 def dms_homologs() -> list[str]:
@@ -415,6 +434,12 @@ def dms_homologs() -> list[str]:
 
 def dms_dataset(homolog: str) -> DmsDataset:
     """The named homolog's DMS dataset from ``config.yaml``.
+
+    ``root`` is anchored to :data:`REPO_ROOT` rather than resolved as given.
+    It is the one input path that lives inside the checkout, and a relative
+    path would otherwise resolve against the working directory -- correct
+    under snakemake and pytest, which both start at the repository root, and
+    silently wrong for anything else.
 
     Raises:
         KeyError: If ``homolog`` is not one of them. An allowlist for the same
@@ -430,11 +455,21 @@ def dms_dataset(homolog: str) -> DmsDataset:
             f"{homolog!r} is not a DMS homolog; expected one of "
             f"{sorted(block['homologs'])}"
         ) from None
+    times_seen = entry.get("min_times_seen")
     return DmsDataset(
         homolog=homolog,
         clade=str(entry["clade"]),
-        path=Path(block["root"]) / entry["file"],
+        path=REPO_ROOT / block["root"] / entry["file"],
         md5=str(entry["md5"]),
+        effect_column=str(entry["effect_column"]),
+        mutation_column=entry.get("mutation_column"),
+        replicate_column=entry.get("replicate_column"),
+        fixed=tuple((str(k), v) for k, v in (entry.get("fixed") or {}).items()),
+        min_times_seen=(
+            None
+            if times_seen is None
+            else (str(times_seen["column"]), int(times_seen["value"]))
+        ),
     )
 
 
@@ -708,6 +743,24 @@ def _check_config() -> None:
                 f"with the right length and the wrong alphabet, must fail "
                 f"here rather than at the comparison."
             )
+        # A `fixed` value is compared against a column parsed out of a CSV, so
+        # it has to arrive as a number. `4e-05` in YAML is the *string*
+        # `'4e-05'` -- PyYAML's float resolver wants a decimal point, so only
+        # `4.0e-05` parses -- and a string compares unequal to every row,
+        # leaving an empty frame rather than an error at the point of use.
+        for column, value in dataset.fixed:
+            # ValueError, not the TypeError ruff's TRY004 would prefer: every
+            # other failure in this function is a ValueError, and a caller
+            # distinguishing a mistyped config key from a mistyped config value
+            # would be drawing a line `config.yaml`'s reader does not have.
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                raise ValueError(  # noqa: TRY004
+                    f"dms.homologs.{homolog}.fixed.{column} is {value!r}, which "
+                    f"is {type(value).__name__} rather than a number. YAML reads "
+                    f"`4e-05` as a string and `4.0e-05` as a float; written the "
+                    f"first way this would match no row and the figure would be "
+                    f"drawn on an empty frame."
+                )
         if dataset.clade in seen_clades:
             raise ValueError(
                 f"{homolog} and {seen_clades[dataset.clade]} both name clade "

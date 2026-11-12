@@ -38,7 +38,9 @@ results/      the publishable tables it writes, tracked
 ```
 
 The two data directories split by direction, not by provenance. `data/` holds
-input a reader may edit -- today just the era template. `results/` holds what
+input: the era template, the shift candidates, and under `data/dms/` the three
+deep mutational scans, each as its authors' own file with its provenance in
+[`data/dms/PROVENANCE.md`](data/dms/PROVENANCE.md). `results/` holds what
 the pipeline produces and the repository keeps: `runs.csv`, and from M5 one
 CSV per figure panel. Everything large or intermediate -- corpora,
 checkpoints, the scored table, logs -- goes under `artifact_root` on the
@@ -81,13 +83,19 @@ outputs. mat-pcp's outputs are plain inputs here — this pipeline never reaches
 behind them to a tree, an alignment or a MAT, so a missing input stops the DAG
 at the mat-pcp target that produces it.
 
-**One input is not GISAID-derived.** `fig:dms` reads three published deep
-mutational scans — full-spike cell-entry measurements on BA.1, XBB.1.5 and
-KP.3.1.1 — which have their own papers and their own repositories. A reader
-without GISAID access can obtain them. `config.yaml`'s `dms` block names them
-by path and pins each one's md5, and this repository does not redistribute
-them: they belong to the groups that published them, and a reader who wants to
-rebuild that figure fetches them from those repositories.
+**One input is not GISAID-derived, and it is carried here.** `fig:dms` reads
+three deep mutational scans — full-spike cell-entry measurements on BA.1,
+XBB.1.5 and KP.3.1.1 — which have their own papers and their own
+repositories. Each is committed under `data/dms/` as the file its authors
+wrote, pinned by md5 in `config.yaml` and attributed in
+[`data/dms/PROVENANCE.md`](data/dms/PROVENANCE.md), so that figure rebuilds
+from this checkout with no GISAID access and nothing to fetch. The two
+Dadonaite datasets are redistributed under their repositories' MIT licence,
+whose grant names associated data; BA.1's is this project's own paper. The
+conversion from each study's format to the four columns the figure reads runs
+in `scripts/dms_published.py` rather than before the file arrives, so the
+choices it makes — which effect column, which regularization, how thin a
+measurement to keep — are readable here.
 
 The trained checkpoints are parameters, not sequence, so they are published.
 Every figure depends on a checkpoint *path* that either a training rule or a
