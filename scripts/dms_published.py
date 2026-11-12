@@ -11,16 +11,24 @@ regularization, how thin a measurement to keep -- were not readable here.
 of `rule dms_leaf_counts`, and `tests/test_rule_inputs.py` compares a rule's
 declared inputs by content, so an edit to `dms.py` reruns an 18-minute,
 2.6 GB per-leaf tally that reads no DMS file at all. The predictor modules
-were split for the same reason in #29. Only the rules that read a DMS file
-declare this one.
+were split for the same reason in #29. That shields the tally from edits to
+*this* module and nothing else: `dms.py` and `config.yaml` are both still
+declared inputs of it, so an edit to either still reruns it.
 
-**The conversion runs before the accounting starts.** `load_dms` takes
-``raw_rows`` from what this returns, so a row this drops is not a row that
-figure's accounting loses track of: it is a row the dataset's own preparation
-never published. That is the same boundary as before #30, when the dropping
-happened in another repository -- what changed is that it is now visible.
-Every filter *after* ``raw_rows`` is named in
-:class:`~dms.DmsAccounting` and balanced against it.
+**What this drops, and why the accounting does not see it.** `load_dms` takes
+``raw_rows`` from what this returns, so the rows dropped here -- the
+regularization strengths the figure does not read, measurements below the
+``times_seen`` floor, replicate duplicates, insertion labels, rows with no
+measured effect, and mutations equal to their own wildtype -- are outside
+:class:`~dms.DmsAccounting` entirely. ``raw_rows`` is therefore the dataset as
+this conversion emits it, **not** the row count of the file in `data/dms/`:
+that file is carried pre-preparation, so counting its lines will not match.
+Every filter *after* ``raw_rows`` is named in the accounting and balanced
+against it.
+
+The row counts are unchanged by #30 -- the conversion reproduces, byte for
+byte, the tables that used to arrive prepared -- so what moved is where the
+dropping is written down, not which rows survive.
 """
 
 from __future__ import annotations
@@ -59,11 +67,15 @@ OUTPUT_COLUMNS = (DMS_WT_COL, DMS_SITE_COL, DMS_MUT_COL, DMS_EFFECT_COL)
 #:
 #: BA.1's file carries no site, wildtype or mutant column -- its unit is this
 #: string -- so for that homolog the three join keys are parsed out of it.
-MUTATION_PATTERN = re.compile(r"^([A-Z*])(\d+)([A-Z*-])$")
+AA_MUTATION_PATTERN = re.compile(r"^([A-Z*])(\d+)([A-Z*-])$")
 
 
-def parse_mutation(mutation: str) -> tuple[str, int, str]:
+def parse_aa_mutation(mutation: str) -> tuple[str, int, str]:
     """``"A1015D"`` to ``("A", 1015, "D")``.
+
+    Named for amino acids because `scripts/dms_leaf_freq.py` has its own
+    ``parse_mutation`` for a *nucleotide* mutation off a tree branch, which
+    takes the same type and returns the same one while meaning something else.
 
     Raises:
         ValueError: If the string is not a wildtype residue, a site and a
@@ -71,7 +83,7 @@ def parse_mutation(mutation: str) -> tuple[str, int, str]:
             an unparsed row would otherwise reach the matrix as a measurement
             at site NaN, and a silent `.notna()` later would drop it.
     """
-    matched = MUTATION_PATTERN.match(mutation)
+    matched = AA_MUTATION_PATTERN.match(mutation)
     if matched is None:
         raise ValueError(
             f"cannot parse mutation {mutation!r} as wildtype, site and mutant. "
@@ -81,20 +93,43 @@ def parse_mutation(mutation: str) -> tuple[str, int, str]:
     return matched.group(1), int(matched.group(2)), matched.group(3)
 
 
-def _apply_fixed(frame: pd.DataFrame, fixed: tuple[tuple[str, float], ...]):
+def declared_columns(dataset: DmsDataset) -> tuple[str, ...]:
+    """Every column of the source file this dataset's conversion names.
+
+    Checked against the frame before the conversion runs, so a typo in
+    `config.yaml` fails saying which key is wrong rather than as a `KeyError`
+    inside a groupby -- or, for ``replicate_column``, not at all. That one is
+    the reason this exists: the averaging groups on ``mutation_column``, so
+    nothing else would ever read it, and a misspelling would change no output.
+    """
+    named = [dataset.effect_column, dataset.mutation_column, dataset.replicate_column]
+    named += [column for column, _ in dataset.fixed]
+    if dataset.min_times_seen is not None:
+        named.append(dataset.min_times_seen[0])
+    return tuple(column for column in named if column is not None)
+
+
+def _check_columns(frame: pd.DataFrame, dataset: DmsDataset) -> None:
+    missing = [column for column in declared_columns(dataset) if column not in frame]
+    if missing:
+        raise ValueError(
+            f"{dataset.homolog}: {sorted(missing)} named in config.yaml but not "
+            f"in {dataset.path.name}, which carries {sorted(frame.columns)}."
+        )
+
+
+def _apply_fixed(
+    frame: pd.DataFrame, fixed: tuple[tuple[str, float], ...]
+) -> pd.DataFrame:
     """Keep the rows whose named columns hold the pinned values."""
     for column, value in fixed:
-        if column not in frame.columns:
-            raise ValueError(
-                f"{column!r} is pinned to {value} but the file has no such "
-                f"column; it carries {sorted(frame.columns)}."
-            )
+        # `.tolist()` so the message carries `4e-05` rather than numpy's
+        # `np.float64(4e-05)`, which buries the value this is diagnosing.
+        present = sorted(frame[column].unique().tolist())
         frame = frame[frame[column] == value]
         if frame.empty:
             raise ValueError(
-                f"no row has {column} == {value}. A YAML scalar written "
-                f"without a decimal point, such as `4e-05`, loads as a string "
-                f"and matches nothing."
+                f"no row has {column} == {value}. The file's values are {present[:10]}."
             )
     return frame
 
@@ -102,30 +137,39 @@ def _apply_fixed(frame: pd.DataFrame, fixed: tuple[tuple[str, float], ...]):
 def normalise_published(raw: pd.DataFrame, dataset: DmsDataset) -> pd.DataFrame:
     """One study's file as the four columns, in the order they are written.
 
-    The steps, in the order they run -- each one skipped when the dataset
-    declares nothing for it:
+    Two shapes, chosen by whether the dataset names a ``mutation_column``: a
+    *long* file whose unit is a mutation string, with a regularization sweep
+    and replicates to collapse, and a *tidy* file that already carries one row
+    per measured substitution. They meet at a shared tail.
 
-    1. Keep the rows matching ``fixed``. BA.1's file holds nine
-       regularization strengths; the figure reads one.
+    The steps, in the order they run -- each skipped when the dataset declares
+    nothing for it:
+
+    1. Keep the rows matching ``fixed``. BA.1's file holds nine regularization
+       strengths; the figure reads one.
     2. Keep the rows whose ``min_times_seen`` column is at least its value.
        This is a **row** filter, not a per-mutation one: a mutation seen often
        enough in one replicate and not the other keeps the replicate that
-       passed, and averages over that alone.
-    3. Average ``effect_column`` over ``replicate_column``, grouping on the
-       mutation key.
-    4. Parse ``mutation_column`` into the three join keys, or, when the file
-       already names them, drop the sites that are not integers. Those are
-       insertion labels like ``16a``, numbered relative to a Wuhan-Hu-1 site
-       and so having no coordinate in the frame this pipeline indexes on.
-    5. Drop rows with no measured effect and rows whose mutant equals its
-       wildtype, rename the effect column, and sort by ``(site, mutant)``.
+       passed, and averages over that alone. 972 of BA.1's 7,820 output
+       mutations are that case.
+    3. Average ``effect_column`` over the replicates, grouping on the mutation
+       key.
+    4. Parse ``mutation_column`` into the three join keys, or, for a tidy
+       file, drop the sites that are not integers. Those are insertion labels
+       like ``16a``, numbered relative to a Wuhan-Hu-1 site and so having no
+       coordinate in the frame this pipeline indexes on.
+    5. The shared tail: drop rows with no measured effect and rows whose
+       mutant equals its wildtype, rename the effect column, and sort by
+       ``(site, mutant)``.
 
-    Step 5's two drops are the dataset's own preparation, not this figure's:
-    see the module docstring on where the accounting boundary sits.
+    Step 5's two drops are the dataset's own preparation rather than this
+    figure's filters; see the module docstring on where the accounting
+    boundary sits and what it no longer catches.
 
     Returns:
-        A frame with exactly :data:`OUTPUT_COLUMNS`, its index reset.
+        A frame with exactly :data:`OUTPUT_COLUMNS` and a reset index.
     """
+    _check_columns(raw, dataset)
     frame = _apply_fixed(raw.copy(), dataset.fixed)
 
     if dataset.min_times_seen is not None:
@@ -133,11 +177,6 @@ def normalise_published(raw: pd.DataFrame, dataset: DmsDataset) -> pd.DataFrame:
         frame = frame[frame[column] >= floor]
 
     if dataset.replicate_column is not None:
-        if dataset.mutation_column is None:
-            raise ValueError(
-                f"{dataset.homolog} averages over {dataset.replicate_column!r} "
-                f"but names no mutation_column to group on."
-            )
         frame = (
             frame.groupby(dataset.mutation_column)[dataset.effect_column]
             .mean()
@@ -145,7 +184,7 @@ def normalise_published(raw: pd.DataFrame, dataset: DmsDataset) -> pd.DataFrame:
         )
 
     if dataset.mutation_column is not None:
-        parsed = frame[dataset.mutation_column].apply(parse_mutation)
+        parsed = frame[dataset.mutation_column].apply(parse_aa_mutation)
         frame[DMS_WT_COL] = parsed.apply(lambda fields: fields[0])
         frame[DMS_SITE_COL] = parsed.apply(lambda fields: fields[1])
         frame[DMS_MUT_COL] = parsed.apply(lambda fields: fields[2])
@@ -171,6 +210,9 @@ def read_published(dataset: DmsDataset) -> pd.DataFrame:
     ``site`` is read as a string so an insertion label survives to be dropped
     by name in :func:`normalise_published`; read as a number it would already
     be NaN, and indistinguishable from a site that failed to parse for some
-    other reason. A ``.gz`` suffix is decompressed by pandas.
+    other reason. In practice KP.3.1.1's column is read as a string anyway,
+    because of those labels, so this is defensive rather than load-bearing --
+    the conversion's output is byte-identical with and without it. A ``.gz``
+    suffix is decompressed by pandas.
     """
     return pd.read_csv(dataset.path, dtype={DMS_SITE_COL: str})

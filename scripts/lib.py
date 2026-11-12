@@ -435,11 +435,13 @@ def dms_homologs() -> list[str]:
 def dms_dataset(homolog: str) -> DmsDataset:
     """The named homolog's DMS dataset from ``config.yaml``.
 
-    ``root`` is anchored to :data:`REPO_ROOT` rather than resolved as given.
-    It is the one input path that lives inside the checkout, and a relative
-    path would otherwise resolve against the working directory -- correct
-    under snakemake and pytest, which both start at the repository root, and
-    silently wrong for anything else.
+    ``root`` is joined onto :data:`REPO_ROOT`. It is the one input path that
+    lives inside the checkout, and left relative it would resolve against the
+    working directory -- correct under snakemake and pytest, which both start
+    at the repository root, and silently wrong for anything else. An absolute
+    ``root`` still works, since joining one onto a prefix discards the prefix;
+    that is what `tests/test_dms_published.py` uses to point the digest gate
+    at a copy.
 
     Raises:
         KeyError: If ``homolog`` is not one of them. An allowlist for the same
@@ -464,7 +466,13 @@ def dms_dataset(homolog: str) -> DmsDataset:
         effect_column=str(entry["effect_column"]),
         mutation_column=entry.get("mutation_column"),
         replicate_column=entry.get("replicate_column"),
-        fixed=tuple((str(k), v) for k, v in (entry.get("fixed") or {}).items()),
+        # `float` at the read site, as every other typed field here is coerced
+        # (`int(entry["n_rows"])`, `str(entry["md5"])`). YAML reads `4e-05` as
+        # the string `'4e-05'` and only `4.0e-05` as a float, and a string
+        # would compare unequal to every row, leaving an empty frame instead
+        # of an error. Coercing makes both spellings mean the same number, so
+        # there is no trap left to guard.
+        fixed=tuple((str(k), float(v)) for k, v in (entry.get("fixed") or {}).items()),
         min_times_seen=(
             None
             if times_seen is None
@@ -743,24 +751,16 @@ def _check_config() -> None:
                 f"with the right length and the wrong alphabet, must fail "
                 f"here rather than at the comparison."
             )
-        # A `fixed` value is compared against a column parsed out of a CSV, so
-        # it has to arrive as a number. `4e-05` in YAML is the *string*
-        # `'4e-05'` -- PyYAML's float resolver wants a decimal point, so only
-        # `4.0e-05` parses -- and a string compares unequal to every row,
-        # leaving an empty frame rather than an error at the point of use.
-        for column, value in dataset.fixed:
-            # ValueError, not the TypeError ruff's TRY004 would prefer: every
-            # other failure in this function is a ValueError, and a caller
-            # distinguishing a mistyped config key from a mistyped config value
-            # would be drawing a line `config.yaml`'s reader does not have.
-            if not isinstance(value, (int, float)) or isinstance(value, bool):
-                raise ValueError(  # noqa: TRY004
-                    f"dms.homologs.{homolog}.fixed.{column} is {value!r}, which "
-                    f"is {type(value).__name__} rather than a number. YAML reads "
-                    f"`4e-05` as a string and `4.0e-05` as a float; written the "
-                    f"first way this would match no row and the figure would be "
-                    f"drawn on an empty frame."
-                )
+        # `replicate_column` names the replicates the effect is averaged over,
+        # and the averaging groups on `mutation_column`, so one without the
+        # other is a half-written spec. Caught here rather than on the first
+        # `load_dms` of a figure build.
+        if dataset.replicate_column is not None and dataset.mutation_column is None:
+            raise ValueError(
+                f"dms.homologs.{homolog} averages over "
+                f"{dataset.replicate_column!r} but names no mutation_column to "
+                f"group on, so there is nothing to average within."
+            )
         if dataset.clade in seen_clades:
             raise ValueError(
                 f"{homolog} and {seen_clades[dataset.clade]} both name clade "

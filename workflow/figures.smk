@@ -306,6 +306,10 @@ rule dms_leaf_counts:
     input:
         script="scripts/dms_leaf_freq.py",
         dms="scripts/dms.py",
+        # No `dms_published.py`. This rule reads no DMS file -- it calls only
+        # `dms.globally_masked_sites` -- and declaring the conversion would
+        # make an edit to it rebuild this tally, which is the whole reason the
+        # conversion sits in a module of its own.
         spec="scripts/panel_spec.py",
         founder_reader="scripts/founders.py",
         lib="scripts/lib.py",

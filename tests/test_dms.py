@@ -263,7 +263,7 @@ def test_masking_runs_before_the_loader_that_raises_on_a_mismatch():
     from dms_published import normalise_published, read_published
 
     raw = normalise_published(read_published(dataset), dataset)
-    unmasked = raw[~raw[dms.DMS_MUT_COL].isin(["*", "-"])]
+    unmasked = raw[~raw[dms.DMS_MUT_COL].isin(dms.NON_SUBSTITUTION_MUTANT_CODES)]
 
     import tempfile
 
@@ -312,12 +312,13 @@ def test_every_measured_cell_lands_in_exactly_one_stratum():
 
 
 @needs_dms
-def test_a_changed_dms_file_fails_rather_than_moving_every_number():
-    """The md5 is a gate: it pins the study's own file as its authors wrote it.
+def test_each_dms_file_matches_its_pin():
+    """The md5 agrees with the study's own file as its authors wrote it.
 
-    What the conversion makes of those bytes is checked in
-    `tests/test_dms_published.py`, which is where the pin is also shown to
-    fire rather than only to pass.
+    The passing half only. A gate that returned the pinned value
+    unconditionally would satisfy everything below, so the firing half lives
+    in `tests/test_dms_published.py::test_a_changed_input_file_fails_the_pin`,
+    which goes through ``verify_dms_md5`` against a mutated copy.
     """
     import hashlib
 

@@ -88,10 +88,13 @@ three deep mutational scans — full-spike cell-entry measurements on BA.1,
 XBB.1.5 and KP.3.1.1 — which have their own papers and their own
 repositories. Each is committed under `data/dms/` as the file its authors
 wrote, pinned by md5 in `config.yaml` and attributed in
-[`data/dms/PROVENANCE.md`](data/dms/PROVENANCE.md), so that figure rebuilds
-from this checkout with no GISAID access and nothing to fetch. The two
-Dadonaite datasets are redistributed under their repositories' MIT licence,
-whose grant names associated data; BA.1's is this project's own paper. The
+[`data/dms/PROVENANCE.md`](data/dms/PROVENANCE.md), so the one input a reader
+would otherwise have to obtain from a third party now arrives with the
+checkout. That figure's other inputs — the clade founders, the censor tables
+and the per-leaf paths its leaf-frequency predictor tallies — are still
+mat-pcp's, and still need GISAID access. The two Dadonaite datasets are
+redistributed under their repositories' MIT licence, whose grant names
+associated data; BA.1's is a paper from this group. The
 conversion from each study's format to the four columns the figure reads runs
 in `scripts/dms_published.py` rather than before the file arrives, so the
 choices it makes — which effect column, which regularization, how thin a

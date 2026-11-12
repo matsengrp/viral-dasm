@@ -267,9 +267,11 @@ smoke_corpus:
 #
 # The one block here that is NOT GISAID-derived, and the only `root` inside
 # the checkout. Each file is the one its authors wrote, committed under
-# `data/dms/` with its provenance in `data/dms/PROVENANCE.md`, so a reader
-# without GISAID access rebuilds this figure from the checkout alone. The
-# conversion to the four columns `fig:dms` reads -- the effect column, the
+# `data/dms/` with its provenance in `data/dms/PROVENANCE.md`, so the DMS side
+# of this figure needs nothing fetched. Its other inputs -- the clade
+# founders, the censor and mask tables, and the per-leaf paths the leaf
+# frequency predictor tallies -- still come from the `mat_pcp` block above.
+# The conversion to the four columns `fig:dms` reads -- the effect column, the
 # regularization, the `times_seen` floor, the replicate average -- runs in
 # `scripts/dms_published.py`, where it can be read and tested.
 #
@@ -281,18 +283,15 @@ smoke_corpus:
 # Pango alias the papers use. `scripts/dms.py` requires each one to be in
 # `lib.clade_roster()`, so a homolog whose clade has no founder fails there
 # rather than joining to nothing.
-#
-# A `fixed` value needs its decimal point: YAML reads `4e-05` as a string and
-# only `4.0e-05` as a float, and a string matches no row. `lib._check_config`
-# refuses the first spelling.
 dms:
     root: data/dms
     homologs:
-        # BA.1 is the one file that is not published as such: it is an
-        # untracked output of the multidms repository's own fitting run, so
-        # the three choices below -- which regularization, how thin a
-        # measurement to keep, which replicates to average -- are the
-        # paper's, restated here because no published file carries them.
+        # BA.1 is the one file that is not published as such: it is an output
+        # of the multidms repository's own joint fit, absent from its `main`
+        # and surviving only on two feature branches. So the three choices
+        # below -- which regularization, how thin a measurement to keep, and
+        # that the replicates are averaged rather than picked between -- are
+        # the paper's, restated here because no maintained file carries them.
         # Gzipped: 16.3 MB of nine regularization strengths, of which this
         # figure reads one.
         BA.1:
@@ -308,15 +307,23 @@ dms:
                 column: times_seen_Omicron_BA1
                 value: 3
         # The summary table, which carries every phenotype in one file; the
-        # column below is spike-mediated entry.
+        # column below is spike-mediated entry, measured at HIGH ACE2 for this
+        # homolog and at medium for KP.3.1.1. Each is its study's own primary
+        # phenotype, so the two are not on one scale.
         XBB.1.5:
             clade: 23A
             file: dadonaite2024_XBB15_summary.csv
             md5: 780555ebc4431ff36b55fb0ddd52de6a
             effect_column: spike mediated entry
-        # KP.3.1.1 publishes no equivalent summary, so this is the
-        # per-phenotype table. Its `times_seen` and `n_selections` columns are
-        # the filtering EPIC #1's M5c would apply, and they are in this file.
+        # KP.3.1.1 publishes no file named `summary.csv`, so this is its own
+        # per-phenotype table, measured at medium ACE2. **This homolog is
+        # therefore scored on unfiltered measurements** while the other two are
+        # filtered -- no `min_times_seen` is set below, and the `times_seen`
+        # and `n_selections` columns sit unused in this file. That is EPIC #1's
+        # M5c, which this block makes a one-line change rather than an edit in
+        # another repository. Its `results/summaries/*.csv` do carry a `spike
+        # mediated entry` column with identical values on the rows they keep,
+        # so either route reaches the same filtered numbers.
         KP.3.1.1:
             clade: 24E
             file: dadonaite2025_KP311_func_effects.csv

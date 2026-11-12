@@ -50,6 +50,10 @@ import dasm2  # noqa: F401  (imported first for its side effects)
 assert_dasm2_is_this_repo()
 
 import pandas as pd
+
+# The four column names live with the conversion that emits them. mat-pcp and
+# this pipeline both say `aa_site`/`mutant_aa`; these are the studies'
+# spelling, and the rename happens once, on the way out of `load_dms`.
 from dms_published import (
     DMS_EFFECT_COL,
     DMS_MUT_COL,
@@ -89,14 +93,6 @@ ALL = "all"
 
 #: The strata every readout of this figure reports, in the order they are read.
 STRATA: tuple[str, ...] = (SINGLE_NT, MULTI_NT, ALL)
-
-#: The four columns the conversion emits. mat-pcp and this pipeline both say
-#: ``aa_site``/``mutant_aa``; these are the studies' spelling, and the rename
-#: happens once, on the way out of :func:`load_dms`.
-#:
-#: Defined with the conversion that produces them, in
-#: `scripts/dms_published.py`, and re-exported here because this module is
-#: where every consumer already reads them from.
 
 
 @dataclass(frozen=True)
@@ -229,9 +225,9 @@ def verify_dms_md5(homolog: str) -> str:
     A gate rather than a label. The file is the study's own, committed under
     ``data/dms/`` and received rather than built, so without this a dataset
     swapped for another would move every number the figure reports while the
-    pipeline kept running. It pins the file as its authors wrote it, not the
-    four columns :func:`load_dms` converts it into -- what the conversion does
-    with those bytes is the business of `tests/test_dms_published.py`.
+    pipeline kept running. It pins those bytes as the authors wrote them --
+    for BA.1 the gzipped archive, since that is what the repository carries --
+    and not the four columns :func:`load_dms` converts them into.
 
     Raises:
         ValueError: If the file's md5 is not the pinned one.
@@ -327,11 +323,18 @@ def load_dms(homolog: str, gene: str = GENE) -> tuple[pd.DataFrame, DmsAccountin
         mismatch_sites=mismatch_sites,
         retained_substitutions=len(tidy),
     )
-    # Every row is either counted as dropped or retained. `from_multidms`
-    # warns rather than raises on a row with no score or a mutant equal to its
-    # wildtype, and `to_dms_matrix` overwrites a duplicate `(site, mutant)`
-    # silently, so without this a repointed file could lose rows with nothing
-    # saying so. All three hold on today's files.
+    # Every row is either counted as dropped or retained, so a row
+    # `from_multidms` drops without saying so fails here.
+    #
+    # This telescopes to `len(tidy) == len(frame)`, and since #30 that is all
+    # it still tests. `normalise_published` now drops a missing score and a
+    # mutant equal to its wildtype from every dataset before `raw_rows` is
+    # taken, so neither can reach this point; a duplicate `(site, mutant)`
+    # does not change `len(tidy)` and is caught by the cell count below
+    # instead. What remains is a guard on `from_multidms` itself changing
+    # behaviour under the vendored fork, which is worth keeping and is less
+    # than this check covered when `raw_rows` came from a file this repository
+    # did not produce.
     counted = (
         accounting.dropped_stop_or_deletion
         + accounting.dropped_masked_site
@@ -341,9 +344,10 @@ def load_dms(homolog: str, gene: str = GENE) -> tuple[pd.DataFrame, DmsAccountin
     if counted != accounting.raw_rows:
         raise ValueError(
             f"{homolog}: {accounting.raw_rows} rows in, {counted} accounted "
-            f"for. {accounting.raw_rows - counted} were dropped by a filter "
-            f"this accounting does not name -- a missing score, a mutation "
-            f"equal to its wildtype, or a duplicate `(site, mutant)`."
+            f"for. {accounting.raw_rows - counted} were dropped inside "
+            f"`from_multidms`, which warns rather than raises; the conversion "
+            f"in `scripts/dms_published.py` has already removed every row it "
+            f"is documented to drop."
         )
     measured = int(matrix.notna().to_numpy().sum())
     if measured != accounting.retained_substitutions:
