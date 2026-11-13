@@ -1,0 +1,127 @@
+# ci-484k: the context-independent baseline the transformers are read against.
+#
+# TEMPLATE. `scripts/render_config.py` fills the brace-delimited slots below
+# and writes the rendered file into the artifact root. Do not train against
+# this file directly -- the censor paths are not real paths here.
+#
+# This is not a weaker transformer. Its selection factor is a function of
+# (site, parent amino acid, child amino acid) and nothing else, so a thinly
+# sampled clade gives it that clade's own evidence and no more: it cannot pool
+# across clades the way the transformer can. Per-clade counts have exactly the
+# same limitation, which is why the DASM is expected to overtake them at all.
+# The transformer-minus-this gap is the pooling advantage measured inside one
+# model family rather than across two.
+#
+# 509,200 parameters allocated, 483,740 of them effective: the head's
+# [1273, 20, 20] table has its parent->parent diagonal zapped in every forward
+# (`zap_predictions_along_diagonal`), so 1273 x 20 of its entries can never
+# receive a gradient.
+
+model:
+    # No encoder. `CoreModel.forward` calls `self.encoder(...)` before it
+    # dispatches to heads, so a model with no encoder still needs an object
+    # there; `IdentityEncoder` returns a zero tensor the head ignores and
+    # contributes no parameters. Pairing this head with a TransformerEncoder
+    # instead would put a transformer's parameters in the optimizer with no
+    # path from them to the loss.
+    encoder:
+        type: IdentityEncoder
+
+    # Required here, and not a free choice: `PerSiteParentChildHead` sizes its
+    # [max_aa_seq_len, 20, 20] parameter from this value, and
+    # `ModelConfig.validate_heads` raises when a head that needs it has none.
+    # A table shorter than the sequence raises IndexError on the first batch
+    # at `factors[pos_indices, aa_parents_safe]`.
+    #
+    # Rendered from the corpus's own Parquet metadata -- the length the writer
+    # measured on the file this run trains against -- rather than written down
+    # here, so the two cannot drift apart.
+    max_aa_seq_len: {MAX_AA_SEQ_LEN}
+
+    heads:
+        - head_type: PerSiteParentChildHead
+
+tasks:
+    - head_type: PerSiteParentChildHead
+      loss_config:
+          loss_type: whichmut
+      loss_weight: 1.0
+
+# 5e-4, the sampling-depth ladder's value for this arm, carried unchanged so
+# the comparison against that campaign is not confounded by the rate.
+optimizer:
+    optimizer_name: AdamW
+    learning_rate: 0.0005
+    weight_decay: 1.0e-04
+    betas: [0.9, 0.999]
+
+# No scheduler block, so the trainer's default ReduceLROnPlateau applies.
+# Three of its values are library defaults that appear in no config file and
+# that together decide when this run stops: `min_learning_rate` 1e-6, plateau
+# `factor` 0.5 and plateau `eval_patience` 10. Ten halvings of 1e-3 reach that
+# floor and nine of 5e-4 do, which is the whole derivation of where a run
+# ends. Every model in this repository stops by that same rule, so the three
+# values are load-bearing across the whole pipeline rather than private to
+# this file.
+
+max_train_steps: {MAX_TRAIN_STEPS}
+# 2,000 is load-bearing: the reference curves these architectures are compared
+# against have one point every 2,000 steps, and the plateau scheduler counts
+# its patience in evaluations rather than in steps, so changing the cadence
+# changes where every run stops. A placeholder only because the CPU smoke
+# trains four steps, and `TrainingConfig` rejects a cycle too short to hold
+# one evaluation.
+eval_every_steps: {EVAL_EVERY_STEPS}
+
+# null, as in `1863-v12-size-ladder-dense`, so every arm is compared at a
+# matched step budget. Patience is checked *before* the learning-rate floor,
+# so leaving it on adds a third way to stop that could fire on one size and
+# not another -- an asymmetry inside a size comparison. At
+# `early_stopping_min_delta: 0.0` it is close to inert anyway (gate3 ran at
+# the coarser 1e-4 and still stopped on the floor), so disabling it costs
+# nothing and removes the asymmetry. What ends a run is now the floor or the
+# step budget, and `scripts/check_run.py` reports which.
+early_stopping_patience: null
+
+# Zero, which is neither reference campaign's value, and the reason is that it
+# is not a training parameter at all. It reaches `Trainer._update_best_model`
+# and the patience counter that method increments, and nothing else:
+# `_create_scheduler` builds its `ReduceLROnPlateau` with `mode`, `factor` and
+# `patience` only, and `_process_eval_metrics` steps it on the raw `val_loss`,
+# so the plateau threshold is torch's own and `min_delta` never touches the
+# optimizer trajectory. Two runs at one seed differing only in this value
+# descend identically; the coarser one is a prefix of the finer one, stopping
+# sooner only because its patience counter advances faster.
+#
+# So at zero, `best_val_loss` is the validation curve's own minimum, and any
+# other campaign's stopping point is recovered by replaying
+# `val_loss < best - delta` over this run's recorded evaluations --
+# `scripts/read_run.py` emits the 1e-3 and 1e-4 points as derived columns.
+# One value for all seven runs, because `dasm-85k` at full depth is at once
+# the bottom rung of the model-size supplement and the top rung of the
+# subsampling ladder, and cannot carry two.
+early_stopping_min_delta: 0.0
+
+batch_size: 128
+val_batch_size: 256
+dataset_mode: streaming
+num_dataloader_workers: 6
+save_training_state: true
+
+# The three censoring sources. All five of these are TrainingConfig fields,
+# read from this file rather than from viral-dasm's config.yaml -- which is
+# why config.yaml renders them in rather than replacing them.
+#
+# The reversion source is roughly 40x the other two on Spike, so losing it is
+# the most damaging possible thing to lose here. The transform prints a banner
+# at training start; a lost source shows up there as `4/4 bases present` going
+# missing.
+censored_mutations_file: {CENSORED_MUTATIONS_FILE}
+censored_clades_file: {CENSORED_CLADES_FILE}
+censor_mode: {CENSOR_MODE}
+masked_nt_sites_file: {MASKED_NT_SITES_FILE}
+reference_sequence_file: {REFERENCE_SEQUENCE_FILE}
+
+# No `neutral_model` block. This corpus carries `nt_rates` and `nt_csps`, so a
+# configured neutral model would be loaded and then never used -- it would
+# look like a setting with an effect and have none.

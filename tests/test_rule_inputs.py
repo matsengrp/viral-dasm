@@ -59,12 +59,21 @@ ENTRY_POINTS = {
     "prepare_parquet": "scripts/prepare_viral_parquet.py",
     "check_corpus": "scripts/check_corpus.py",
     "audit_censor": "scripts/audit_censor.py",
+    "render_config": "scripts/render_config.py",
+    "render_smoke_config": "scripts/render_config.py",
+    "check_params": "scripts/check_params.py",
+    "smoke": "scripts/train.py",
+    "train": "scripts/train.py",
+    "read_run": "scripts/read_run.py",
+    "check_run": "scripts/check_run.py",
+    "train_eval": "scripts/train_eval.py",
+    "runs_table": "scripts/runs_table.py",
 }
 
 #: Rules that execute nothing. Asserted, not asserted-by-assertion: each must
 #: carry snakemake's ``norun`` marker, so listing a rule here cannot excuse it
 #: from the import check while it quietly runs a shell command.
-AGGREGATORS = ("all", "corpora")
+AGGREGATORS = ("all", "corpora", "models")
 
 #: Rules that do run code and are still not import-checked, with the reason.
 #: Each must carry a ``shellcmd``, so an entry here describes a real

@@ -377,12 +377,52 @@ class EncoderConfig(BaseModel):
         return self.distance_encoding_mode != "none"
 
 
+class IdentityEncoderConfig(BaseModel):
+    """No-op encoder configuration, for the one head that has no encoder.
 
+    Pairs with ``dasm2.models.core.identity.IdentityEncoder``, a thin
+    ``nn.Module`` that returns ``torch.zeros([B, L, d_model])`` on every
+    forward and contributes zero learnable parameters.
 
+    ``PerSiteParentChildHead`` ignores the encoder output in its
+    ``forward()``: its selection factor is a function of (site, parent amino
+    acid, child amino acid) only. Configuring it with this encoder makes the
+    "no transformer" architectural choice explicit, rather than training a
+    transformer whose output is discarded.
 
+    Attributes:
+        d_model: Nominal embedding dimension. Defaults to 1 because the
+            output tensor is never read by an encoder-free head, but the
+            field is kept so a non-default value can be set if a future head
+            ever wants this encoder for shape compatibility.
 
+    Note: ``ModelConfig.validate_heads`` auto-sets ``head_config.input_dim =
+    encoder.d_model`` for every head in the model, so setting ``d_model``
+    here also sets ``input_dim`` on all paired heads. The encoder-free head
+    ignores that field by design, but a head that read
+    ``sequence_embeddings`` while paired with this encoder would receive
+    ``input_dim=1`` and fail with a shape mismatch rather than a clear config
+    error.
+    """
 
+    type: Literal["IdentityEncoder"] = Field(
+        default="IdentityEncoder", description="Encoder type"
+    )
+    d_model: int = Field(
+        default=1,
+        gt=0,
+        description="Nominal embedding dimension. Default 1; the output "
+        "tensor is never read by an encoder-free head. Setting this also "
+        "controls each paired head's auto-set input_dim — see class "
+        "docstring for the coupling.",
+    )
 
+    @property
+    def supports_tdi(self) -> bool:
+        """Whether this encoder supports 3Di structural tokens (always False)."""
+        return False
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class BaseHeadConfig(BaseModel):
@@ -831,7 +871,11 @@ class SelectionFactorProjectionConfig(BaseModel):
 class ModelConfig(BaseModel):
     """Model architecture configuration (encoder + heads + optional SF projection)."""
 
-    encoder: EncoderConfig
+    #: ``EncoderConfig`` is the transformer; ``IdentityEncoderConfig`` is
+    #: the no-op one ``PerSiteParentChildHead`` takes, which has no encoder.
+    #: A plain union rather than a discriminated one, so a config that omits
+    #: ``type`` still validates against the transformer's default.
+    encoder: Union[EncoderConfig, IdentityEncoderConfig]
     heads: List[HeadConfig]
     sf_projection: Optional[SelectionFactorProjectionConfig] = Field(
         default=None,

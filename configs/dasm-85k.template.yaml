@@ -1,4 +1,4 @@
-# dasm-85k: the smaller of the paper's two transformers.
+# dasm-85k: the smallest of the paper's three transformers.
 #
 # TEMPLATE. `scripts/render_config.py` fills the brace-delimited slots below
 # and writes the rendered file into the artifact root. Do not train against
@@ -6,10 +6,11 @@
 #
 # The architecture is `dasm2-experiments`' `center` arm, unchanged. M1 checked
 # the port against that arm's recorded run -- `2026-09-21-v12-replicate-
-# training` rep0, on the same corpus, the same fold and the same seed -- and
-# the only line that differs from that run's rendered config is
-# `flash_attention`. Keeping the architecture identical is what makes the
-# paper's smallest transformer the same model that run trained.
+# training` rep0, on the same corpus, the same fold and the same seed.
+# Keeping the architecture identical is what makes the paper's smallest
+# transformer the same model that run trained. Two lines differ from that
+# run's rendered config, and neither is architecture: `flash_attention`, and
+# `early_stopping_min_delta` -- see the note on each below.
 #
 # 144,516 parameters allocated, 84,884 of them effective: `positional_
 # embedding.weight` is allocated (5000, 16) against a corpus whose longest
@@ -66,17 +67,42 @@ optimizer:
 # load-bearing across the whole pipeline rather than private to this file.
 
 max_train_steps: {MAX_TRAIN_STEPS}
-eval_every_steps: 2000
+# 2,000 is load-bearing: the reference curve this architecture is compared
+# against has one point every 2,000 steps, and the plateau scheduler counts
+# its patience in evaluations rather than in steps, so changing the cadence
+# changes where every run stops. A placeholder only because the CPU smoke
+# trains four steps, and `TrainingConfig` rejects a cycle too short to hold
+# one evaluation.
+eval_every_steps: {EVAL_EVERY_STEPS}
 
-# Patience 30 never fires on this run -- the LR floor is reached first, with
-# the last improvement 12 evals before the stop.
-early_stopping_patience: 30
+# null, as in `1863-v12-size-ladder-dense`, so every arm is compared at a
+# matched step budget. Patience is checked *before* the learning-rate floor,
+# so leaving it on adds a third way to stop that could fire on one size and
+# not another -- an asymmetry inside a size comparison. At
+# `early_stopping_min_delta: 0.0` it is close to inert anyway (gate3 ran at
+# the coarser 1e-4 and still stopped on the floor), so disabling it costs
+# nothing and removes the asymmetry. What ends a run is now the floor or the
+# step budget, and `scripts/check_run.py` reports which.
+early_stopping_patience: null
 
-# 1e-4, not the sampling-depth ladder's 1e-3. It gates best-model tracking as
-# well as stopping (`trainer.py`, `if val_loss < self.best_val_loss -
-# self.early_stopping_min_delta`), and at 1e-3 the reference's step-16,000
-# eval stops counting as an improvement. One flipped flag in the Gate-2 table.
-early_stopping_min_delta: 0.0001
+# Zero, which is neither reference campaign's value, and the reason is that it
+# is not a training parameter at all. It reaches `Trainer._update_best_model`
+# and the patience counter that method increments, and nothing else:
+# `_create_scheduler` builds its `ReduceLROnPlateau` with `mode`, `factor` and
+# `patience` only, and `_process_eval_metrics` steps it on the raw `val_loss`,
+# so the plateau threshold is torch's own and `min_delta` never touches the
+# optimizer trajectory. Two runs at one seed differing only in this value
+# descend identically; the coarser one is a prefix of the finer one, stopping
+# sooner only because its patience counter advances faster.
+#
+# So at zero, `best_val_loss` is the validation curve's own minimum, and any
+# other campaign's stopping point is recovered by replaying
+# `val_loss < best - delta` over this run's recorded evaluations --
+# `scripts/read_run.py` emits the 1e-3 and 1e-4 points as derived columns.
+# One value for all seven runs, because `dasm-85k` at full depth is at once
+# the bottom rung of the model-size supplement and the top rung of the
+# subsampling ladder, and cannot carry two.
+early_stopping_min_delta: 0.0
 
 batch_size: 128
 val_batch_size: 256

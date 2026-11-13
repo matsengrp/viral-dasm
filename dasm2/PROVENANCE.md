@@ -58,13 +58,16 @@ scores the reference checkpoint in this tree: once that reproduces to seven
 significant figures, each deletion is checked rather than argued.
 
 By feature area, it removed the other encoders (ESM2, MPNN light-attention,
-site-masked, MLM, identity); the datasets this pipeline has no input for
+site-masked, MLM, identity -- see *The identity encoder came back*, below);
+the datasets this pipeline has no input for
 (HERMES structures, antibody binding, ProteinGym and Tsuboyama DMS, MLM
 corruption, MPNN features); the neutral-model family and the molevol serving
 it; branch-length optimization; and the heads and losses the paper does not
 train. Three registries now state what this repository can build rather than
-what `dasm2` could: one encoder, two heads (`SelectionFactorHead` for
-`dasm-85k` and `dasm-293k`, `PerSiteParentChildHead` for `ci-484k`), one loss.
+what `dasm2` could: two encoders (`TransformerEncoder` for the three models
+named by parameter count, `IdentityEncoder` for the one with no encoder), two
+heads (`SelectionFactorHead` for the transformers, `PerSiteParentChildHead`
+for `ci-484k`), one loss.
 
 It also removed 3Di structural tokens entirely. That one came last and by a
 different route: `_load_whichmut_head_data` was typed `neutral_model: None`
@@ -103,6 +106,38 @@ known failure mode in each direction, and both fired:
 
 So the trace was evidence, not a work order; what decided each cut was
 whether the tree still trained the same model afterwards.
+
+### The identity encoder came back (#14)
+
+`models/core/identity.py`, `IdentityEncoderConfig` and the registry's
+`IdentityEncoder` entry went out with the other encoders, and they should not
+have: they are not an encoder this repository does not train, they are how it
+expresses *having no encoder*.
+
+`ci-484k`, the context-independent baseline the paper reads its transformers
+against, is `PerSiteParentChildHead` with nothing in front of it. That head
+ignores the encoder output entirely -- its selection factor is a function of
+(site, parent amino acid, child amino acid) -- but `CoreModel.forward` calls
+`self.encoder(...)` unconditionally before dispatching to heads, so the model
+still needs an object there. `IdentityEncoder` is a zero-parameter module
+returning a zero tensor nothing reads. Pairing the head with a
+`TransformerEncoder` instead would put a transformer's parameters in the
+optimizer with no path from them to the loss.
+
+The head, its config, its `HEAD_REGISTRY` entry and the whichmut loss all
+survived the prune; only the encoder side went, which left `type:
+IdentityEncoder` raising a pydantic `ValidationError`. What came back is the
+module, the config class, that class in `ModelConfig.encoder`'s union, and the
+registry entry -- and nothing else from the same commit: `ESM2EncoderConfig`
+and `MPNNLightAttentionEncoderConfig` were in the same union and stay out.
+
+The restored comments were read rather than carried. The module's docstring
+listed five other encoder-free heads this repository does not have, cited
+another project's model as prior art, and quoted a dead-parameter count
+measured on configs that are not here. The reason is kept; the examples a
+reader of this repository cannot look up are not. `ModelConfig.encoder` is a
+plain union rather than a discriminated one, as it was upstream, so a config
+that omits `type` still validates against the transformer's default.
 
 ### Checkpoint migrations are gone
 

@@ -174,6 +174,31 @@ neutral_archives:
     omicron: 85478573d0fb18b133a47c41b7f631c828a9b478240a325c049f7d80d96071b9
     pooled: 076b311626e71dd469aa203c56f53a7c65665602f704e9114c48d7b9757b0aa2
 
+# The wiring smoke's corpus: 400 PCPs spanning 46 clades and both eras, with
+# the same `max_aa_seq_len` of 1,273 as every corpus the paper trains on.
+#
+# Received, not built. It is a slice of the sampling-depth ladder's own tree,
+# and the smoke it serves is a wiring test -- config to dataset to
+# tokenisation at the gene's real length to censor load to forward to backward
+# to evaluation -- so what it needs is to be a real corpus of this gene, not to
+# be a corpus of any particular size. Its fold-0 draw leaves about 40
+# validation rows, which is enough to reach an evaluation and is not a
+# measurement.
+#
+# The md5 is recorded, not gated -- the same standing `full_depth`'s has. What
+# makes a changed file rerun the smoke is that this one is 866 KB, under
+# snakemake's 1 MB checksum threshold, so its content is tracked rather than
+# its mtime; the `smoke` rule therefore declares it plainly rather than
+# `ancient()`. The md5 is here so a reader can identify the file this
+# pipeline's smokes were run against.
+#
+# No `parquet_cache_budget_gb`: the file is 866 KB and the library's own 2 GB
+# default covers it many times over, while `lib.parquet_cache_budget_gb`
+# assumes a corpus with more row groups than this one has.
+smoke_corpus:
+    path: /fh/fast/matsen_e/shared/bcr-mut-sel/dasm2/experiments/2026-09-02-v12-sampling-depth-ladder/fast_test/S/fast_test.parquet
+    md5: 72b90961147b20649a9ca59ff148d998
+
 # The split every reference run held out, and every model in the paper holds
 # out. Only the three numbers every arm shares live here; the resulting fold
 # sizes are per corpus, because the draw sizes itself from that corpus's

@@ -30,9 +30,22 @@ from lib import CONFIG, mat_pcp_path
 PLACEHOLDER = re.compile(r"\{([A-Z0-9_]+)\}")
 
 
-def substitutions(max_train_steps: int) -> dict[str, str]:
-    """Every value a training template may ask for."""
-    return {
+def substitutions(
+    max_train_steps: int,
+    eval_every_steps: int | None = None,
+    max_aa_seq_len: int | None = None,
+) -> dict[str, str]:
+    """Every value a training template may ask for.
+
+    The two optional values are included **only when supplied**, because
+    :func:`render` raises on a value the template does not use. Every template
+    carries ``{EVAL_EVERY_STEPS}``; only ``configs/ci-484k.template.yaml``
+    carries ``{MAX_AA_SEQ_LEN}``, since ``PerSiteParentChildHead`` is the one
+    head that sizes a parameter from it. Passing it to a transformer template
+    is the mistake that silently truncates every sequence in other trees, and
+    here it is a ``KeyError`` instead.
+    """
+    values = {
         "MAX_TRAIN_STEPS": str(max_train_steps),
         "CENSORED_MUTATIONS_FILE": str(mat_pcp_path("censored_mutations_file")),
         "CENSORED_CLADES_FILE": str(mat_pcp_path("censored_clades_file")),
@@ -40,6 +53,11 @@ def substitutions(max_train_steps: int) -> dict[str, str]:
         "REFERENCE_SEQUENCE_FILE": str(mat_pcp_path("reference_sequence_file")),
         "CENSOR_MODE": str(CONFIG["mat_pcp"]["censor_mode"]),
     }
+    if eval_every_steps is not None:
+        values["EVAL_EVERY_STEPS"] = str(eval_every_steps)
+    if max_aa_seq_len is not None:
+        values["MAX_AA_SEQ_LEN"] = str(max_aa_seq_len)
+    return values
 
 
 def render(template: str, values: dict[str, str]) -> str:
@@ -80,9 +98,35 @@ def main() -> None:
         type=int,
         help="the step budget this run gets",
     )
+    parser.add_argument(
+        "--eval-every-steps",
+        type=int,
+        default=None,
+        help=(
+            "evaluations cadence, in optimizer steps. Every template asks for "
+            "it; the training rules supply runs.EVAL_EVERY_STEPS and the "
+            "smoke supplies a value small enough that a four-step cycle "
+            "contains an evaluation."
+        ),
+    )
+    parser.add_argument(
+        "--max-aa-seq-len",
+        type=int,
+        default=None,
+        help=(
+            "the corpus's longest amino-acid sequence, read from its own "
+            "Parquet metadata. Only ci-484k asks for it; supplying it to a "
+            "template that does not raises rather than rendering an unused "
+            "value."
+        ),
+    )
     args = parser.parse_args()
 
-    values = substitutions(args.max_train_steps)
+    values = substitutions(
+        args.max_train_steps,
+        eval_every_steps=args.eval_every_steps,
+        max_aa_seq_len=args.max_aa_seq_len,
+    )
     for key, value in values.items():
         if key.endswith("_FILE") and not Path(value).exists():
             raise SystemExit(
