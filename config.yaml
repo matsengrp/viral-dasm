@@ -7,7 +7,7 @@
 #
 # GISAID: everything under `inputs` and `corpora` is GISAID-derived and stays
 # on the cluster. Nothing here is published; the pipeline's own outputs that
-# are publishable go to `data/`, which is tracked.
+# are publishable go to `results/`, which is tracked. `data/` is input only.
 
 # Where the pipeline writes. Large, and not in the repository.
 artifact_root: /fh/fast/matsen_e/shared/bcr-mut-sel/dasm2/experiments/viral-dasm
@@ -29,7 +29,7 @@ mat_pcp:
     reference_sequence_file: clade_founders/S/19A.fa
     censor_mode: both
     # The fitted mutation-rate tables, one per era plus the pooled fit. The
-    # era partition is viral-dasm's own choice (see `data/era_map.yaml`); these
+    # era partition is viral-dasm's own choice (see `data/eras-pre-omicron-omicron.yaml`); these
     # are the inputs it picks between, not the partition itself.
     master_table_file: glm/master_table.csv
     master_table_pre_omicron_file: glm/master_table_pre_omicron.csv
