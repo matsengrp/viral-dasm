@@ -38,7 +38,6 @@ effects and selection factors are publishable; no panel carries a sequence.
 # invocation, and importing the panel code here would pull `dasm2`, pandas and
 # pyarrow into a dry run to learn five file names.
 from panel_spec import (
-    AUDIT_JSON,
     DEFAULT_SELECTION,
     LADDER_PANELS,
     MUTATION_PANELS,
@@ -107,7 +106,6 @@ rule agreement_mutations:
         dasm2_init="dasm2/__init__.py",
         notebook="notebooks/agreement_mutations.py",
         table=SCORED_TABLE,
-        audit=AUDIT_JSON,
         # The founders the shift panel drops identical pairs on -- those four
         # clades', not the roster's 56. `rule score` declares the whole glob
         # because it scores every clade; this reads `SHIFT_CLADES` alone.
@@ -121,7 +119,7 @@ rule agreement_mutations:
         mem_mb=PANEL_MEM_MB,
     shell:
         "marimo export html {input.notebook} -o {output.html} --force"
-        " -- --table {input.table} --audit {input.audit}"
+        " -- --table {input.table}"
         " --selection {wildcards.selection}"
         " > {log} 2>&1"
 
@@ -150,7 +148,6 @@ rule agreement_ladders:
         dasm2_init="dasm2/__init__.py",
         notebook="notebooks/agreement_ladders.py",
         table=SCORED_TABLE,
-        audit=AUDIT_JSON,
         clade_founders=shift_clade_fastas,
     output:
         html=f"{NOTEBOOK_DIR}/agreement_ladders_{{selection}}.html",
@@ -161,7 +158,7 @@ rule agreement_ladders:
         mem_mb=PANEL_MEM_MB,
     shell:
         "marimo export html {input.notebook} -o {output.html} --force"
-        " -- --table {input.table} --audit {input.audit}"
+        " -- --table {input.table}"
         " --selection {wildcards.selection}"
         " > {log} 2>&1"
 

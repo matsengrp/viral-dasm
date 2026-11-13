@@ -241,14 +241,18 @@ the clade set is pinned across the rungs -- raising the floor removes the thin,
 poorly-measured clades first, so a sweep that let each rung keep its own clades
 would show r rising with the threshold even if no surviving clade moved.
 
-**The reverting exclusion comes from the censor audit, not from the table.**
-A comparison is only meaningful where the models trained normally, so masked,
-censored and reverting sites all come out. The first two are columns of the
-scored table. The third is not: `censored_directional` is the censor table's
-directional entries and a subset of `censored` by construction, so substituting
-it would add no exclusions at all while looking like the third layer.
-`audit/{gene}.json` is the source, derived by `rule audit_censor` from the
-corpus the models trained on.
+**The exclusion comes from mat-pcp, one mutation at a time.** A masked site, a
+masked mutation or a founder→reference reversion sets mat-pcp's `exclude` flag
+on the nucleotide route, and excluded routes are dropped before any fitness
+effect is computed — so a mutation it excluded outright has no row to join
+against, arrives with null counts, and leaves at `base_frames`' `dropna`.
+
+Nothing here widens that to the codon. An earlier version did, dropping every
+mutation at a site carrying any flag, and it cost 1,067 of the 33,782
+comparable mutations across the figure's 22 clades — including 21K's R346K at
+753 observed against 22.2 expected, whose counts come from the clade founder's
+own background and are untouched by the censoring that flagged its site
+([#36](https://github.com/matsengrp/viral-dasm/issues/36)).
 
 ## The vendored training code
 

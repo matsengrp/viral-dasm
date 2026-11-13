@@ -61,21 +61,19 @@ def _(mo):
 
     import pandas as pd
 
-    # Required, not defaulted. A fallback spelling of either path is a second
+    # Required, not defaulted. A fallback spelling of the path is a second
     # spelling of a fact `workflow/figures.smk` already states, and the rule
-    # passes both in; missing one should stop here rather than quietly read a
+    # passes it in; missing it should stop here rather than quietly read a
     # different file from the one the rule declared.
     _args = mo.cli_args()
     TABLE_PATH = Path(str(_args["table"]))
-    AUDIT_PATH = Path(str(_args["audit"]))
     SELECTION = str(_args.get("selection") or panels.DEFAULT_SELECTION)
     MODELS = panels.selection_models(SELECTION)
-    return AUDIT_PATH, MODELS, SELECTION, TABLE_PATH, charts, panels, pd
+    return MODELS, SELECTION, TABLE_PATH, charts, panels, pd
 
 
 @app.cell
-def _(AUDIT_PATH, MODELS, TABLE_PATH, mo, panels, SELECTION):
-    REVERTING = panels.reverting_sites_by_clade(AUDIT_PATH)
+def _(MODELS, TABLE_PATH, mo, panels, SELECTION):
     SPEC = panels.BASE_SPEC
     # Panel C scores every clade that can be scored, so the roster is the
     # clade axis here rather than a selection; panel E draws pairs from the
@@ -85,7 +83,6 @@ def _(AUDIT_PATH, MODELS, TABLE_PATH, mo, panels, SELECTION):
     BASE = panels.base_frames(
         TABLE,
         spec=SPEC,
-        reverting_by_clade=REVERTING,
         models=MODELS,
         clades=CLADES,
     )

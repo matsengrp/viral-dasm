@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from lib import ARTIFACT_ROOT, GENE, REPO_ROOT, TEX_FIGURE_DIR
+from lib import ARTIFACT_ROOT, REPO_ROOT, TEX_FIGURE_DIR
 
 #: Where the panel images go: under the artifact root, not in the tree. A panel
 #: is a rebuildable picture of the CSV committed beside it, and `README.md`'s
@@ -29,11 +29,6 @@ FIGURE_DIR = ARTIFACT_ROOT / "figures"
 #: Where the tables go: tracked, one CSV per panel, holding exactly what that
 #: panel plots.
 PANEL_CSV_DIR = REPO_ROOT / "results" / "panels"
-
-#: The censor audit, which is the only source of the reverting exclusion. The
-#: table carries `censored` and `globally_masked` as columns and does not carry
-#: this layer, and `censored_directional` is not it.
-AUDIT_JSON = ARTIFACT_ROOT / "audit" / f"{GENE}.json"
 
 #: Peak RSS for one panel job, in MB. One model's full-depth rows across every
 #: clade is about 1.4M rows over 15 columns; the `fidelity` selection reads two

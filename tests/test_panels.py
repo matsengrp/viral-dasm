@@ -1,19 +1,17 @@
 """What a wrong agreement panel would show, and what catches it.
 
 Every failure mode here returns a full-looking panel. A null fitness column
-read as a zero effect, a shift join that compares D614G against E614G, a
-two-layer site exclusion believed to be three: each draws a picture with the
-right shape and the wrong numbers, and none of them raises.
+read as a zero effect, a shift join that compares D614G against E614G, an
+exclusion widened from the mutation to its whole codon: each draws a picture
+with the right shape and the wrong numbers, and none of them raises.
 
-The checks over a hand-built table run always. The ones that need this
-repository's own censor audit -- the reverting exclusion, which is the layer
-the scored table does not carry -- skip when it is absent, and
+The checks over a hand-built table run always. The one that reads this
+repository's own scored table skips when it is absent, and
 ``VIRAL_DASM_REQUIRE_AUDIT=1`` turns that skip into a failure.
 """
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 from pathlib import Path
@@ -23,7 +21,6 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
-import lib
 
 import dasm2  # noqa: F401
 
@@ -34,13 +31,6 @@ import panels
 from runs import MODELS, RUNS
 
 from dasm2.analysis.viral_fitness_eval import COUNT_THRESHOLD_LADDER
-from dasm2.sequence.masking import censored_codon_sites, load_censor_table
-
-#: The canary clade for the reverting exclusion. Its reverting sites are the
-#: largest set that neither of the two layers the table *does* carry covers, so
-#: it is where substituting `censored_directional` for the audit would go
-#: furthest wrong while still producing a panel.
-CANARY_CLADE = "21L"
 
 #: Two models and three clades is the smallest table that exercises everything
 #: the panels do: a model axis to group by, a clade the shift panel can pair,
@@ -120,22 +110,9 @@ def table(tmp_path_factory) -> pd.DataFrame:
 
 
 @pytest.fixture(scope="module")
-def reverting() -> dict[str, set[int]]:
-    """A different reverting site per clade.
-
-    Different per clade on purpose: with one shared set, a lookup hoisted out of
-    `base_frames`' clade loop -- which would score every clade against the first
-    clade's sites -- produces exactly the same frames, and nothing here would
-    notice.
-    """
-    return {clade: {3 + index} for index, clade in enumerate(FAKE_CLADES)}
-
-
-@pytest.fixture(scope="module")
-def frames(table, reverting) -> dict[tuple[str, str], pd.DataFrame]:
+def frames(table) -> dict[tuple[str, str], pd.DataFrame]:
     return panels.base_frames(
         table,
-        reverting_by_clade=reverting,
         models=FAKE_MODELS,
         clades=FAKE_CLADES,
     )
@@ -156,12 +133,8 @@ def test_null_fitness_rows_are_dropped(table, frames):
         (table["model"] == FAKE_MODELS[0])
         & table["delta_fitness_ratio"].notna()
         & ~table["is_synonymous"]
-        & ~table["aa_site"].isin({1, 2})
     ]
-    expected = sum(
-        len(frame[frame["aa_site"] != 3 + index])
-        for index, (_, frame) in enumerate(rows.groupby("clade", sort=False))
-    )
+    expected = len(rows)
     produced = sum(
         len(frame) for (model, _), frame in frames.items() if model == FAKE_MODELS[0]
     )
@@ -169,29 +142,66 @@ def test_null_fitness_rows_are_dropped(table, frames):
     assert expected > 0, "the fixture produced no estimated rows to correlate"
 
 
-def test_every_layer_of_the_site_exclusion_fires(frames, reverting):
-    """All three site classes come out, and each is a different site.
+def test_a_flagged_site_keeps_the_mutations_mat_pcp_estimated(table, frames):
+    """The exclusion is per mutation, so a flag on the codon is not a filter.
 
-    Site 1 is globally masked, site 2 is censored, and one site per clade
-    reverts. The first two are columns of the table and the third is not, so a
-    panel that read only the table would keep the reverting site -- a two-layer
-    exclusion believing it ran three.
+    Site 1 is globally masked and site 2 is censored in the fixture, and both
+    still carry mutations mat-pcp estimated. Those estimates are computed on the
+    clade founder's background and are not built from whatever was censored at
+    the codon, so they belong in the comparison; widening the flag to the site
+    is what #36 removed, and it cost 1,067 mutations across the figure's clades.
 
-    Checked per clade against that clade's own set, and the other clades'
-    reverting sites are asserted *present*: a lookup hoisted out of
-    `base_frames`' loop would drop the first clade's site everywhere, which
-    reads as a stricter filter rather than as a wrong one.
+    Asserted in both directions: the flagged rows that have an estimate are
+    present, and the rows with no estimate are absent however they are flagged.
     """
-    for (_, clade), frame in frames.items():
-        assert not frame["globally_masked"].any()
-        assert not frame["censored"].any()
-        sites = set(frame["aa_site"])
-        assert not (sites & reverting[clade])
-        elsewhere = set.union(*(reverting[other] for other in FAKE_CLADES))
-        assert elsewhere - reverting[clade] <= sites, (
-            f"{clade} lost a site that reverts in another clade, which is what "
-            f"a reverting lookup hoisted out of the clade loop would do."
-        )
+    for (model, clade), frame in frames.items():
+        present = set(zip(frame["aa_site"], frame["mutant_aa"]))
+        rows = table[(table["model"] == model) & (table["clade"] == clade)]
+        flagged = rows[rows["globally_masked"] | rows["censored"]]
+        estimated = flagged[flagged["delta_fitness_ratio"].notna()]
+        estimated = estimated[~estimated["is_synonymous"]]
+        assert len(estimated), "the fixture flagged no site that mat-pcp estimated"
+        for site, mutant in zip(estimated["aa_site"], estimated["mutant_aa"]):
+            assert (site, mutant) in present, (
+                f"{clade} dropped site {site} because the codon carries a flag, "
+                f"though mat-pcp estimated this mutation."
+            )
+        absent = rows[rows["delta_fitness_ratio"].isna()]
+        for site, mutant in zip(absent["aa_site"], absent["mutant_aa"]):
+            assert (site, mutant) not in present
+
+
+def test_the_published_table_still_compares_21k_r346k():
+    """The worked case of #36, against the table the manuscript cites.
+
+    21K's codon 346 carries no flag at all in the scored table -- the founder
+    residue is R and the reference codon is identical -- yet the site rule
+    dropped every mutation there, because the audit calls the site reverting:
+    55% of 21K's parents are BA.1.1, which carries R346K, so the *modal parent*
+    differs from the reference even though the founder does not. The reversions
+    that earn the flag are K->R on BA.1.1 parents, a different mutation on a
+    different background, contributing nothing to these counts.
+
+    R346K is the most strongly observed mutation it cost, at 753 actual against
+    22.2 expected, and the two approaches agree closely on it. Pinned against
+    the tracked table rather than a fixture, because the fixture cannot express
+    "the audit flags a site the table does not".
+    """
+    table_path = (
+        REPO_ROOT / "results" / "selection_factors" / "dasm-1077k_full_depth.parquet"
+    )
+    if not table_path.exists():
+        if os.environ.get("VIRAL_DASM_REQUIRE_AUDIT") == "1":
+            pytest.fail(f"{table_path} is missing")
+        pytest.skip(f"{table_path} is not present")
+    model = "dasm-1077k"
+    read = panels.read_scored_table(table_path, models=[model], clades=["21K"])
+    frames = panels.base_frames(read, models=[model], clades=["21K"])
+    frame = frames[(model, "21K")]
+    row = frame[frame["aa_mutation"] == "R346K"]
+    assert len(row) == 1, "R346K is absent from 21K's comparison frame"
+    assert float(row["actual_count"].iloc[0]) == 753.0
+    assert float(row["predicted_count"].iloc[0]) == pytest.approx(22.238403, abs=1e-5)
 
 
 def test_synonymous_rows_are_excluded(frames):
@@ -260,7 +270,7 @@ def test_the_cutoff_and_the_matching_rung_agree(frames):
         ).all()
 
 
-def test_the_shift_join_refuses_a_mismatched_wildtype(tmp_path, reverting):
+def test_the_shift_join_refuses_a_mismatched_wildtype(tmp_path):
     """D614G in one clade is never compared with E614G in another.
 
     The guard keys on ``clade_founder_aa`` and **silently does nothing when that
@@ -276,9 +286,7 @@ def test_the_shift_join_refuses_a_mismatched_wildtype(tmp_path, reverting):
     # hand-assigned column here would test the guard and not the rename.
     read = written_table(tmp_path, moved)
     assert (read["clade_founder_aa"] == read["parent_aa"]).all()
-    frames = panels.base_frames(
-        read, reverting_by_clade=reverting, models=[FAKE_MODELS[0]], clades=FAKE_CLADES
-    )
+    frames = panels.base_frames(read, models=[FAKE_MODELS[0]], clades=FAKE_CLADES)
     shift = panels.shift_frame(
         frames[(FAKE_MODELS[0], "21J")],
         frames[(FAKE_MODELS[0], "21L")],
@@ -326,86 +334,6 @@ def test_identical_founders_drop_the_pair_rather_than_scoring_it(frames):
         founders=mixed,
     )
     assert set(partial["pair_label"]) == {"21J\u219223A", "21L\u219223A"}
-
-
-def test_reverting_sites_raise_for_an_unmeasured_clade(reverting):
-    """Absent means unmeasured, not "reverts nowhere".
-
-    An empty set would read as the second, and would quietly widen the row set
-    of every clade the audit never saw.
-    """
-    with pytest.raises(KeyError, match="unmeasured rather than empty"):
-        panels.reverting_sites(reverting, "99Z")
-
-
-def test_a_stale_audit_is_refused(tmp_path):
-    """An audit without the key fails rather than excluding nothing."""
-    path = tmp_path / "S.json"
-    path.write_text(json.dumps({"something_else": {}}))
-    with pytest.raises(ValueError, match="reverting_codon_sites_by_clade"):
-        panels.reverting_sites_by_clade(path)
-    with pytest.raises(FileNotFoundError):
-        panels.reverting_sites_by_clade(tmp_path / "absent.json")
-
-
-def audit_or_skip() -> dict[str, set[int]]:
-    """This repository's own censor audit and the censor table, or skip.
-
-    Both, not just the audit: the canary compares the two, and a host with the
-    audit but no mat-pcp mount would otherwise error in the middle of the test
-    rather than say what is missing.
-
-    ``VIRAL_DASM_REQUIRE_AUDIT=1`` turns the skip into a failure, as
-    ``VIRAL_DASM_REQUIRE_CHECKPOINT`` does in `tests/test_score_run.py`. Set it
-    at merge time: the skip is right while a campaign is mid-flight, and after
-    it lands a silent ``s`` is the one outcome that looks like a pass.
-    """
-    missing = [
-        str(path)
-        for path in (
-            panels.AUDIT_JSON,
-            lib.mat_pcp_path("censored_mutations_file"),
-            lib.mat_pcp_path("censored_clades_file"),
-        )
-        if not path.is_file()
-    ]
-    if missing:
-        message = f"not readable here: {', '.join(missing)}"
-        if os.environ.get("VIRAL_DASM_REQUIRE_AUDIT") == "1":
-            pytest.fail(message)
-        pytest.skip(message)
-    return panels.reverting_sites_by_clade()
-
-
-def test_censored_directional_is_not_the_reverting_exclusion():
-    """The canary: what substituting the table's column would wrongly admit.
-
-    ``censored`` is ``codon_sites_of(site_nt_indices | directional[:, 0])`` and
-    ``censored_directional`` is ``codon_sites_of(directional[:, 0])``, so the
-    second is a subset of the first **by construction** -- substituting it adds
-    exactly zero exclusions. What that wrongly admits in this clade is the
-    reverting sites that neither layer in the table covers, and the number is
-    pinned so a change to the audit or the censor table fails here rather than
-    moving a published row set silently.
-    """
-    by_clade = audit_or_skip()
-    censor_table = load_censor_table(
-        lib.mat_pcp_path("censored_mutations_file"),
-        lib.mat_pcp_path("censored_clades_file"),
-    )
-    spec = censor_table[CANARY_CLADE]
-    censored = censored_codon_sites(spec)
-    directional = {int(index) // 3 + 1 for index in spec.directional[:, 0]}
-    assert directional <= censored, (
-        "censored_directional is meant to be a subset of censored by "
-        "construction; if it is not, the substitution argument has changed."
-    )
-    admitted = by_clade[CANARY_CLADE] - censored
-    assert len(admitted) == 24, (
-        f"{CANARY_CLADE} has {len(admitted)} reverting sites that `censored` "
-        f"does not cover, against the 24 measured when #19 was written. The "
-        f"audit or the censor table moved; re-measure rather than re-pinning."
-    )
 
 
 def test_the_ladder_is_the_library_ladder():

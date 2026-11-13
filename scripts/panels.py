@@ -8,21 +8,24 @@ module is the filter and the statistics, and the notebooks beside it are the
 layout.
 
 **No inference and no GPU.** ``rule score`` already did the forward passes. What
-is left is to read the table, drop the cells mat-pcp never estimated, exclude
-the three site classes the models did not train on normally, clip both axes to a
-common bound, and correlate. That replaces upstream's ``score_runs``, which did
-all of that *and* the inference, in one function per ``(model, clade)``.
+is left is to read the table, drop the cells mat-pcp never estimated, clip both
+axes to a common bound, and correlate. That replaces upstream's ``score_runs``,
+which did all of that *and* the inference, in one function per
+``(model, clade)``.
 
-**The three exclusions, and why the third is not in the table.** A comparison is
-only meaningful where the model trained normally, so masked, censored and
-reverting sites all come out. The table carries ``globally_masked`` and
-``censored`` as columns. It does not carry the reverting sites, and
-``censored_directional`` is not them: that column is the censor table's
-directional entries, which are a subset of ``censored`` by construction, so
-substituting it would run a two-layer exclusion while believing it ran three.
-The reverting sites come from ``audit/{gene}.json``, which ``rule audit_censor``
-derives from the corpus the models trained on -- not re-derived here, because a
-second derivation could disagree with what the model saw.
+**The exclusion is the null drop, and it is per mutation.** mat-pcp excludes a
+mutation one nucleotide route at a time -- the global masks, the per-clade site
+and mutation masks, and founder->reference reversions all set its ``exclude``
+flag, and ``OUTPUT_SCHEMA.md`` records that excluded routes are dropped before
+any fitness effect is computed. A mutation it excluded entirely therefore has no
+row in ``aamut_fitness``, arrives in the scored table's left join with null
+counts, and leaves at :func:`base_frames`' ``dropna``.
+
+Nothing here widens that to the codon. An earlier version did, dropping every
+mutation at a site carrying any flag, which cost 1,067 of the 33,782 mutations
+the figure can compare over its 22 clades -- among them 21K's R346K at 753
+observed against 22.2 expected, whose counts are computed on the clade founder's
+background and are untouched by the censoring that flagged its site. See #36.
 
 GISAID-derived: the table this reads descends from the cluster-only mat-pcp
 mount. The per-panel CSVs are counts, fitness effects and selection factors,
@@ -46,7 +49,6 @@ import dasm2  # noqa: F401  (imported first for its side effects)
 
 assert_dasm2_is_this_repo()
 
-import json
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
@@ -61,7 +63,6 @@ from founders import founder_aa_sequences
 # pyarrow to learn five file names.
 from panel_spec import (  # noqa: F401  (re-exported for the notebooks)
     ARM,
-    AUDIT_JSON,
     COUNT_LADDER,
     DEFAULT_SELECTION,
     FIDELITY_MODELS,
@@ -125,6 +126,14 @@ class FilterSpec:
     estimate rests on real observations *or* on a meaningful denominator.
     Collapsing it to one number is also what makes the ladder coherent: panels C
     and E sweep this field, so a rung and a cutoff are the same quantity.
+
+    **``exclude_masked`` is panel A's guard, not a filter.** No frame is
+    filtered on it: the correlation panels take their exclusion from mat-pcp,
+    through the null drop in :func:`base_frames`. It is read only by
+    :func:`lookup_frame`, which refuses to look up a mutation sitting on the
+    global artifact mask -- excluded in every clade, so the lookup would plot an
+    empty panel rather than a finding. It stays in :meth:`as_row` because the
+    panel CSVs carry it.
     """
 
     fitness_metric: str = "delta_fitness_ratio"
@@ -165,93 +174,6 @@ class FilterSpec:
 #: per-mutation panels re-apply :data:`PANEL_MIN_COUNT` to the same frames,
 #: which is what makes a dot in panel C and the cloud in panel B the same rows.
 BASE_SPEC = FilterSpec(min_count=0.0)
-
-
-def reverting_sites_by_clade(audit_json: Path = AUDIT_JSON) -> dict[str, set[int]]:
-    """``{clade: reverting codon sites}``, read from the censor audit.
-
-    ``scripts/audit_censor.py`` derives these from the corpus the models trained
-    on and writes them to ``audit/{gene}.json``. Not re-derived here, for the
-    reason the censor table is not either: a second derivation could disagree
-    with what the model saw.
-
-    Raises:
-        FileNotFoundError: If the audit has not been written. The sites come
-            from the corpus, not from a manifest, so there is nothing to fall
-            back to -- run ``rule audit_censor``.
-        ValueError: If the audit carries no ``reverting_codon_sites_by_clade``.
-            A stale audit would silently exclude nothing and report every site
-            as scored, which is the one failure mode that looks like success.
-    """
-    if not audit_json.exists():
-        raise FileNotFoundError(
-            f"{audit_json} does not exist, so the reverting exclusion cannot be "
-            f"applied. Run `rule audit_censor` -- the sites are derived "
-            f"from the corpus, not from a manifest."
-        )
-    payload = json.loads(audit_json.read_text())
-    if "reverting_codon_sites_by_clade" not in payload:
-        raise ValueError(
-            f"{audit_json} carries no reverting_codon_sites_by_clade. Delete it "
-            f"and re-run `rule audit_censor`; a stale audit would silently "
-            f"exclude nothing and report every site as scored."
-        )
-    return {
-        clade: {int(site) for site in sites}
-        for clade, sites in payload["reverting_codon_sites_by_clade"].items()
-    }
-
-
-def reverting_sites(by_clade: dict[str, set[int]], clade: str) -> set[int]:
-    """One clade's reverting sites.
-
-    Raises:
-        KeyError: If the clade contributed no PCPs to the audit. Omitted rather
-            than empty there deliberately: an empty set reads as "this clade
-            reverts nowhere" when nothing was measured.
-    """
-    if clade not in by_clade:
-        raise KeyError(
-            f"clade {clade!r} contributed no PCPs to {GENE}'s censor audit, so "
-            f"whether it reverts anywhere is unmeasured rather than empty. "
-            f"Clades present: {sorted(by_clade)}."
-        )
-    return by_clade[clade]
-
-
-def excluded_sites(
-    frame: pd.DataFrame,
-    *,
-    clade: str,
-    reverting_by_clade: dict[str, set[int]],
-    exclude_masked: bool = True,
-) -> pd.Series:
-    """The site exclusion for one clade's rows, as a boolean mask.
-
-    All three layers at once: the global artifact mask and the per-clade censor
-    table, both carried as columns of the scored table, and the per-clade
-    reversion rule, read from the audit. mat-pcp's ``aamut_fitness`` at a
-    censored site is still built from counts that contain the censored
-    observations, so it is not an independent yardstick there -- a model
-    deliberately trained not to fit those observations would be marked down for
-    succeeding.
-
-    **It takes the clade, not that clade's reverting set.** Of the three layers
-    only the reversion rule needs a lookup -- the other two are columns -- and a
-    caller handed the set could hoist the lookup out of its clade loop and score
-    every clade against the first clade's reversions, with the right number of
-    columns and no error. Looking it up here makes that unavailable.
-
-    ``exclude_masked=False`` leaves two layers rather than three, which is the
-    one caller-visible way to get the exclusion this module's docstring warns
-    about. Nothing in the panels passes it.
-    """
-    dropped = frame["censored"] | frame["aa_site"].isin(
-        reverting_sites(reverting_by_clade, clade)
-    )
-    if exclude_masked:
-        dropped = dropped | frame["globally_masked"]
-    return dropped
 
 
 def read_scored_table(
@@ -297,7 +219,6 @@ def base_frames(
     table: pd.DataFrame,
     *,
     spec: FilterSpec = BASE_SPEC,
-    reverting_by_clade: dict[str, set[int]],
     models: Sequence[str],
     clades: Sequence[str],
 ) -> dict[tuple[str, str], pd.DataFrame]:
@@ -305,21 +226,21 @@ def base_frames(
 
     The replacement for upstream's ``score_runs``: the inference and the join
     already happened in ``rule score``, so what is left is the null drop, the
-    three site exclusions, the count filter and the clip -- all of it here once,
-    so a dot in panel C and the cloud behind it in panel B are literally the
-    same rows.
+    count filter and the clip -- all of it here once, so a dot in panel C and
+    the cloud behind it in panel B are literally the same rows.
 
-    **The null drop is the inner join.** ``rule score`` writes a left join from
-    the model grid, so every cell mat-pcp never estimated carries a null fitness
-    column. Those rows are not zero-effect mutations, and a correlation over
-    them is undefined; dropping them recovers the row set upstream's inner join
-    produced.
+    **The null drop is the inner join, and it is the whole exclusion.**
+    ``rule score`` writes a left join from the model grid, so every cell mat-pcp
+    never estimated carries a null fitness column -- whether it was never
+    reachable, never observed with a usable denominator, or excluded by mat-pcp
+    as masked or reverting. Those rows are not zero-effect mutations, and a
+    correlation over them is undefined; dropping them recovers the row set
+    upstream's inner join produced, at mat-pcp's own per-mutation granularity.
 
     Args:
         table: :func:`read_scored_table`'s output.
         spec: The filter choices. Normally :data:`BASE_SPEC`, at cutoff zero, so
             each rung can apply its own.
-        reverting_by_clade: :func:`reverting_sites_by_clade`'s output.
         models: Models to score. One absent from ``table`` is skipped, since a
             campaign in flight is a normal state.
         clades: Clades to score.
@@ -339,14 +260,6 @@ def base_frames(
             if frame.empty:
                 continue
             frame = frame.dropna(subset=[spec.fitness_metric])
-            frame = frame[
-                ~excluded_sites(
-                    frame,
-                    clade=clade,
-                    reverting_by_clade=reverting_by_clade,
-                    exclude_masked=spec.exclude_masked,
-                )
-            ]
             frame = filter_merged_fitness(
                 frame,
                 exclude_synonymous=spec.exclude_synonymous,
