@@ -330,6 +330,41 @@ dms:
             md5: 3ffae2185b691e40bd35359feb55489e
             effect_column: effect
 
+# antiGen as panel C's published-model comparison, in `dms`'s spelling: a
+# `root` inside the checkout, and per-artifact `file` and `md5` gates.
+#
+# **`checkout` is the one path here that a clone cannot reproduce.** antiGen is
+# MIT-licensed and public, but its own `pyproject.toml` pins `torch>=2.7`
+# while this repository runs 2.6.0 and the inference needs nothing 2.7 added,
+# so taking it as a git dependency would drag a torch upgrade in behind it.
+# Naming a checkout keeps that out of `pyproject.toml` until the pin is worth
+# taking; a reader without this path gets an error naming it rather than a
+# wrong number.
+#
+# `cutoff` identifies which rung of the authors' own time-cutoff grid the
+# checkpoint is from. The grid trains one model per cutoff on the branches
+# whose parent node predates it, and this is its last rung -- chosen because
+# it is the only one whose training split contains all three DMS parent
+# sequences, so every cell panel C reports is scored by a model that saw its
+# background. `data/antigen/PROVENANCE.md` records that evidence.
+#
+# `parents` is what the model is fed: the WH1 projection of the construct each
+# assay expressed, not the clade founder the other predictors score against.
+# The two differ at 8 / 6 / 11 columns and `scripts/dms.py` has already
+# dropped every one of them, so the choice moves no measured cell -- it moves
+# only the 1,273-residue context the transformer conditions on, and the
+# construct is both the sequence the assay measured and the one antiGen saw.
+antigen:
+    root: data/antigen
+    checkout: /fh/fast/matsen_e/shared/specht-antigen/repo
+    cutoff: 5.93893
+    checkpoint:
+        file: fitness_simple_d128_n2_lr0.0001_20261112_104225.pt
+        md5: cd560fda4bd0e151a60d21238ab0514b
+    parents:
+        file: dms_parents.fasta
+        md5: 87903175ad401a2ff567bbec6221336d
+
 # The split every reference run held out, and every model in the paper holds
 # out. Only the three numbers every arm shares live here; the resulting fold
 # sizes are per corpus, because the draw sizes itself from that corpus's

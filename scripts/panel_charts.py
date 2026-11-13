@@ -241,17 +241,28 @@ DMS_PREDICTOR_COLORS: dict[str, str] = {
     "pooled counts": "#b0975f",
     "BLOSUM62": "#9ec4b8",
     "leaf frequency": "#1f4e79",
+    "antiGen": "#456324",
 }
 
 #: Measured CIELAB separation of :data:`DMS_PREDICTOR_COLORS`, worst pair, as
-#: seen normally and simulated for deuteranopia: 28.7 and 21.3. The five
-#: lightnesses are 76, 63, 52, 33 and 32, which is the property that does the
-#: work -- three muted mid-tones at one lightness read as one colour to a
-#: deuteranope however different their hues are. An earlier palette put BLOSUM62
-#: at #5b8c7b and the leaf predictor at #3d7ea6, both near DASM purple's L* of
-#: 52, and the DASM/BLOSUM62 pair simulated to 12.6, which is indistinguishable.
-#: A new predictor added here should be checked the same way rather than chosen
-#: by hue.
+#: seen normally and simulated for deuteranopia: 28.7 and 21.4, which is the
+#: DASM/leaf-frequency pair both ways. The six lightnesses are 76, 64, 52, 38,
+#: 33 and 32, and the spread is the property that does the work -- muted
+#: mid-tones at one lightness read as one colour to a deuteranope however
+#: different their hues are. An earlier palette put BLOSUM62 at #5b8c7b and the
+#: leaf predictor at #3d7ea6, both near DASM purple's L* of 52, and the
+#: DASM/BLOSUM62 pair simulated to 12.6, which is indistinguishable.
+#:
+#: antiGen's #456324 was chosen by measurement, not by hue, and the measurement
+#: is why it is a green: its floors are 34.9 normally and 27.8 simulated, both
+#: above the worst pair above, so adding it leaves that pair the worst. Every
+#: muted red tried first failed -- #a4553f, #b5503c and #b85c44 simulate to
+#: 15.8, 14.3 and 11.1 against the tan "pooled counts", because deuteranopia
+#: collapses red onto yellow and the two sit at a similar lightness.
+#:
+#: Reproduced with a plain sRGB-to-CIELAB conversion, CIE76 as the distance,
+#: and the Vienot/Brettel/Mollon 1999 deuteranopia projection. A new predictor
+#: added here should be checked the same way.
 
 #: What each predictor id is called on a chart. The ids are join keys and CSV
 #: values -- each predictor module defines its own and `results/panels/dms/`
@@ -262,6 +273,7 @@ DMS_PREDICTOR_COLORS: dict[str, str] = {
 DMS_PREDICTOR_LABELS: dict[str, str] = {
     "blosum62": "BLOSUM62",
     "leaf_logfreq": "leaf frequency",
+    "antigen": "antiGen",
 }
 
 

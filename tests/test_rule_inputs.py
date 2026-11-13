@@ -112,11 +112,12 @@ ENTRY_POINTS = {
     "agreement_mutations": "notebooks/agreement_mutations.py",
     "agreement_ladders": "notebooks/agreement_ladders.py",
     "subsampling_depth": "notebooks/subsampling_depth.py",
-    # `fig:dms`'s predictor arms run scripts rather than notebooks: panel C's
-    # chart waits on the DASM's own column, so what these build is the table it
-    # will be drawn from.
+    # `fig:dms`'s predictor arms run scripts rather than notebooks: each writes
+    # one narrow Parquet, and the notebook below draws the table they are joined
+    # into.
     "dms_leaf_counts": "scripts/dms_leaf_freq.py",
     "dms_blosum_scores": "scripts/dms_blosum.py",
+    "dms_antigen_scores": "scripts/dms_antigen.py",
     "dms_leaf_scores": "scripts/dms_leaf_scores.py",
     "dms_predictor_summary": "scripts/dms_summary.py",
     "dms_predictors": "notebooks/dms_predictors.py",

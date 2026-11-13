@@ -246,10 +246,10 @@ rule agreement_ladders:
 # `fig:dms` panel C: the predictors that are not the DASM
 # ---------------------------------------------------------------------------
 #
-# Three rules rather than two. The leaf tally is the expensive one -- clade 21K
-# is 1.9M leaves and 1.7 GB of paths -- and it does not depend on BLOSUM62, so
-# folding both predictors into one rule would rebuild it on every edit to the
-# substitution matrix.
+# One rule per predictor, plus the leaf tally on its own. The tally is the
+# expensive one -- clade 21K is 1.9M leaves and 1.7 GB of paths -- and neither
+# BLOSUM62 nor antiGen reads it, so folding the predictors together would
+# rebuild it on every edit to the substitution matrix.
 #
 # Scores and tallies go under the artifact root; only the correlation table is
 # tracked. `panel_spec.DMS_LEAF_COUNT_DIR` records why.
@@ -279,12 +279,13 @@ def dms_all_counts(*_):
 
 
 rule dms:
-    """`fig:dms`'s predictor table, as far as this stage of the port builds it.
+    """`fig:dms` panel C: the predictors that are not the DASM, and the chart.
 
-    Panel C's two reference predictors and the join they land through. The DASM's
-    own column is a filter on `selection_factors.parquet`, so it arrives with
-    `rule score`'s table; the chart waits on it, and a target that demanded it now
-    would be red for the whole gap.
+    Two reference floors and the published model the paper claims to beat, each
+    through the join `scripts/dms_models.py` defines. The DASM's own column is a
+    filter on `selection_factors.parquet`, so it arrives with `rule score`'s
+    table; it is a fourth bar on a chart that is already drawn, not a condition
+    on drawing it.
     """
     input:
         [
@@ -378,6 +379,57 @@ rule dms_blosum_scores:
         scores=str(dms_score_path("blosum62", "{homolog}")),
     log:
         f"{ARTIFACT_ROOT}/logs/dms_scores_blosum62_{{homolog}}.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "python {input.script}"
+        " --homolog {wildcards.homolog}"
+        " --output {output.scores}"
+        " > {log} 2>&1"
+
+
+rule dms_antigen_scores:
+    """antiGen's log probability for every cell one homolog's assay measured.
+
+    **Claims no GPU.** `antiGen/infer.py` takes CUDA whenever a card is visible
+    and the figure rules hold no slot from `scripts/gpu_slot.py`, so the script
+    pins the device rather than defaulting it; the pass is a few seconds of CPU
+    on one 1,273-residue query.
+
+    Declares no leaf tally, for `dms_blosum_scores`' reason, and declares two
+    files no import walk can see: the checkpoint and the query FASTA, which the
+    script reaches through `config.yaml`'s `antigen` block. It does **not**
+    declare the antiGen source tree -- that lives outside the checkout, is not
+    content-tracked here, and is pinned by the commit
+    `data/antigen/PROVENANCE.md` records.
+    """
+    wildcard_constraints:
+        homolog="|".join(re.escape(homolog) for homolog in dms_homologs()),
+    input:
+        script="scripts/dms_antigen.py",
+        models="scripts/dms_models.py",
+        dms="scripts/dms.py",
+        published="scripts/dms_published.py",
+        founder_reader="scripts/founders.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        constants="dasm2/sequence/constants.py",
+        parquet_backend="dasm2/data/parquet_backend.py",
+        dasm2_init="dasm2/__init__.py",
+        dms_csv=lambda w: str(dms_dataset(w.homolog).path),
+        clade_founders=founder_fastas,
+        censored=mat_pcp_path("censored_mutations_file"),
+        clades=mat_pcp_path("censored_clades_file"),
+        masked=mat_pcp_path("masked_nt_sites_file"),
+        # The model, and the construct projection it is fed. Both gated on the
+        # md5 `config.yaml` pins, as the DMS CSVs are, so a replaced checkpoint
+        # fails rather than moving panel C's antiGen bar quietly.
+        checkpoint=str(antigen_model().checkpoint),
+        parents=str(antigen_model().parents),
+    output:
+        scores=str(dms_score_path("antigen", "{homolog}")),
+    log:
+        f"{ARTIFACT_ROOT}/logs/dms_scores_antigen_{{homolog}}.log",
     resources:
         mem_mb=PANEL_MEM_MB,
     shell:

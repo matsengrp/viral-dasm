@@ -38,9 +38,12 @@ results/      the publishable tables it writes, tracked
 ```
 
 The two data directories split by direction, not by provenance. `data/` holds
-input: the era template, the shift candidates, and under `data/dms/` the three
+input: the era template, the shift candidates, under `data/dms/` the three
 deep mutational scans, each as its authors' own file with its provenance in
-[`data/dms/PROVENANCE.md`](data/dms/PROVENANCE.md). `results/` holds what
+[`data/dms/PROVENANCE.md`](data/dms/PROVENANCE.md), and under `data/antigen/`
+the antiGen checkpoint `fig:dms` panel C compares against together with the
+three sequences it is fed, likewise with their provenance in
+[`data/antigen/PROVENANCE.md`](data/antigen/PROVENANCE.md). `results/` holds what
 the pipeline produces and the repository keeps: `runs.csv`, and from M5 one
 CSV per figure panel. Everything large or intermediate -- corpora,
 checkpoints, the scored table, logs -- goes under `artifact_root` on the

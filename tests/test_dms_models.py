@@ -29,6 +29,7 @@ import dasm2  # noqa: F401
 pd = pytest.importorskip("pandas")
 
 import dms
+import dms_antigen
 import dms_blosum
 import dms_leaf_scores
 import dms_models
@@ -208,6 +209,7 @@ def test_the_predictor_ids_the_rules_resolve_are_the_ones_the_modules_score():
     assert tuple(panel_spec.DMS_PREDICTORS) == (
         dms_blosum.BLOSUM62,
         dms_leaf_scores.LEAF_LOGFREQ,
+        dms_antigen.ANTIGEN,
     )
 
 

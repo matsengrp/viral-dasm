@@ -316,9 +316,9 @@ DMS_SELECTION = "dms"
 #: this module stays stdlib-and-`lib` only and does no config lookup of its own.
 SCATTER_HOMOLOG = "KP.3.1.1"
 
-#: `fig:dms`'s stems, one tuple per producing notebook. Panel C -- the
-#: comparison against published deep-learning models -- is not here: it needs
-#: antiGen and CoVFit, and it is added when the rule that draws it exists.
+#: `fig:dms`'s stems, one tuple per producing notebook. Panel C is absent
+#: because it has a notebook of its own, `notebooks/dms_predictors.py`, and so
+#: its own stem tuple: :data:`DMS_PREDICTOR_PANELS`.
 DMS_CORRELATION_PANELS = (
     "panel_a_homolog_scatter",
     "panel_b_homolog_correlations",
@@ -331,12 +331,16 @@ DMS_PROBABILITY_PANELS = ("panel_d_fitness_vs_probability",)
 #: Biopython and `dasm2`: this module is stdlib-plus-`lib` so that
 #: `workflow/figures.smk` stays cheap to parse. `tests/test_dms_models.py` pins
 #: the two together.
-DMS_PREDICTORS: tuple[str, ...] = ("blosum62", "leaf_logfreq")
+#:
+#: The two reference floors first and the published model last, which is the
+#: order a reader needs: what a substitution matrix and a per-site conservation
+#: statistic already explain, and only then the model the paper claims to beat.
+DMS_PREDICTORS: tuple[str, ...] = ("blosum62", "leaf_logfreq", "antigen")
 
 #: Panel C's table: every predictor's correlation with the DMS, per homolog and
-#: per stratum. A stem rather than a drawn panel -- the chart waits on the DASM's
-#: own column, which needs `selection_factors.parquet`, so this is the CSV's name
-#: and :data:`DMS_CORRELATION_PANELS` is unchanged.
+#: per stratum. `rule dms_predictors` draws the chart from it. The DASM's own
+#: column needs `selection_factors.parquet` and is still to come -- a column of
+#: this table rather than a condition on drawing it.
 DMS_PREDICTOR_CORRELATIONS = "panel_c_predictor_correlations"
 
 #: `fig:dms` panel C's stem, as both the table's name and the image's: a panel
