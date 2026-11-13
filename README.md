@@ -217,9 +217,19 @@ writes its own copies and reports that it skipped the copy.
 Each runs per `{selection}`, which names the models it draws. `figure` is
 `dasm-1077k` -- the largest transformer, which is what every panel of the paper
 shows -- and `fidelity` is `dasm-293k` and `dasm-85k`, the pair the published
-panels were drawn from, which is how the port is shown to compute what the old
-code computed. Both come out of one table and one `groupby`, so the second
-costs no rescoring.
+panels were drawn from. Both come out of one table and one `groupby`, so the
+second costs no rescoring, and `snakemake figures` builds both: tracked tables
+that nothing in the DAG rebuilds are tables that quietly stop matching the code
+beside them.
+
+`fidelity` showed the port computing what the old code computed, and did, at
+the port ([#21](https://github.com/matsengrp/viral-dasm/pull/21)).
+[#36](https://github.com/matsengrp/viral-dasm/issues/36) then narrowed the
+exclusion from the codon site to the mutation, which the old code does not do,
+so the two now differ by exactly that -- 67,564 mutations at rung 10 against
+65,430, over the same 22 clades, at a pooled median r of 0.9662 against 0.9664.
+It is a second model pair through the same code and a diff to read when this
+filter changes again, not a live claim about upstream.
 
 **Where the two kinds of output go.** The tables land in tracked
 `results/panels/<selection>/`, one CSV per panel holding exactly what that
@@ -253,6 +263,18 @@ comparable mutations across the figure's 22 clades — including 21K's R346K at
 753 observed against 22.2 expected, whose counts come from the clade founder's
 own background and are untouched by the censoring that flagged its site
 ([#36](https://github.com/matsengrp/viral-dasm/issues/36)).
+
+**What makes that fair is that training censors the same routes.** The two
+sides are one set applied twice: mat-pcp's `censor_table.py` splits the five
+reasons behind `exclude` across the two files a training run reads, and its
+`masked_nt_sites.py` reconciles the mask file against the count table's flag in
+both directions. So the model was not trained on a route the counts kept, and
+the counts do not rest on a route the model was taught to ignore.
+`tests/test_panels.py::test_training_censors_exactly_what_mat_pcp_excludes`
+re-derives that equality here, from the configured censor files against
+mat-pcp's own per-clade count tables, rather than taking upstream's word: it is
+the premise the whole comparison stands on, and nothing in the code enforces
+it.
 
 ## The vendored training code
 

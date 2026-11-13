@@ -544,3 +544,15 @@ sequence, so asking it for two parent haplotypes under one clade returns the
 first twice — silently. And `merge_and_filter` is an **inner** join, while the
 table this repository writes is a left join from the model grid; the docstring
 now says which of the two a caller is getting.
+
+**One rationale went stale here, and was corrected (#36).** `merge_and_filter`'s
+`exclude_sites` argument was documented as "not redundant with the pipeline:
+mat-pcp's `exclude` flag is per nucleotide mutation while the mask file is per
+codon, so masked codons still carry fitness rows reachable through their
+unexcluded nucleotide positions — while DASM training masked the whole codon and
+so never saw them." The first half still holds. The second does not: training in
+this repository reads `masked_nt_sites_file`, which is nucleotide-granular, so
+for `S` it masks 18 nucleotides rather than the 51 their codons span, and a
+mutation reachable through the other 33 is one both sides estimated. The
+docstring now says that, and says no caller here passes the argument. The code is
+untouched, and the AST comparison above still holds.

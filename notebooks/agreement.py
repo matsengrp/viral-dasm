@@ -113,20 +113,25 @@ def _(PANELS, fl, spec):
 
 @app.cell
 def _(MODELS, PANEL_DIR, SELECTION, composed, fl, mo, spec):
-    _tex = spec.tex_figure_dir()
+    _tex = spec.tex_figure_dir(SELECTION)
     _written = fl.save_figure(
         composed, PANEL_DIR, spec.FIGURE_STEM, tex_figure_dir=_tex
     )
-    _copied = any(_p.parent == _tex for _p in _written)
-    _note = (
-        ""
-        if _copied
-        else (
+    _copied = _tex is not None and any(_p.parent == _tex for _p in _written)
+    if SELECTION != spec.DEFAULT_SELECTION:
+        _note = (
+            f"\n\nNo manuscript copy: **{SELECTION}** is not the selection the "
+            f"paper publishes, and every selection composes to the same file "
+            f"name. The figure itself is written."
+        )
+    elif _copied:
+        _note = ""
+    else:
+        _note = (
             f"\n\nThe manuscript copy was **skipped**: `config.yaml`'s "
             f"`tex_figure_dir` is `{_tex}`, which is not checked out here. "
             f"The figure itself is written."
         )
-    )
     mo.md(
         f"Selection **{SELECTION}** → `{'`, `'.join(MODELS)}`. Wrote:\n\n"
         + "\n".join(f"- `{_p}`" for _p in _written)

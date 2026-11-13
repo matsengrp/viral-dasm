@@ -291,19 +291,24 @@ def merge_and_filter(
     Args:
         fitness_df: One (gene, clade) slice of mat-pcp's per-clade effects.
         sf_df: The matching frame from :meth:`SelectionFactorSource.log_sf_frame`.
-        exclude_sites: Codon sites to drop, normally the globally masked ones.
-            Not redundant with the pipeline: mat-pcp's ``exclude`` flag is per
-            *nucleotide* mutation while the mask file is per *codon*, so masked
-            codons still carry fitness rows reachable through their unexcluded
-            nucleotide positions -- while DASM training masked the whole codon
-            and so never saw them.
+        exclude_sites: Codon sites to drop. **No caller here passes any, and
+            the agreement panels deliberately pass none.** The argument's
+            original justification -- that mat-pcp's ``exclude`` flag is per
+            nucleotide while training masked the whole codon, so masked codons
+            keep fitness rows the model never saw -- stopped being true of this
+            repository when training moved to the nucleotide-granular
+            ``masked_nt_sites_file``. For ``S`` that mask is 18 nucleotides,
+            which widen to 51 at codon granularity, and a mutation reachable
+            through the other 33 is one both sides estimated. Dropping its codon
+            would narrow the comparison rather than make it fair; see #36 and
+            ``scripts/panels.py``.
         restrict_to_sites: Keep only these codon sites, applied *before* the
             other filters. This is the site-class split: pass
             :func:`~dasm2.sequence.masking.censored_codon_sites` for the class
             censoring acts on, and its complement for the rest. Composes with
             ``exclude_sites`` rather than replacing it, so a censored *and*
-            problematic site is still dropped: the comparison is about censoring,
-            and a site DASM never trained on cannot speak to it.
+            problematic site is still dropped -- which costs nothing here, since
+            the caller passes no ``exclude_sites``.
         exclude_synonymous: Drop wildtype-to-wildtype rows, whose log SF is a
             structural 0 rather than a prediction.
         min_actual_count: Minimum ``actual_count`` to keep a mutation.

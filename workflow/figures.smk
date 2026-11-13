@@ -204,6 +204,18 @@ rule compose_agreement:
 
 
 rule figures:
-    """Every composed figure of the paper, and so every panel beneath them."""
+    """Every composed figure of the paper, and so every panel beneath them.
+
+    Both selections, not just the published one. `fidelity`'s tables are
+    tracked beside `figure`'s, and until #36 nothing in the DAG built them: a
+    filter change rewrote five CSVs and left the other five as they were, with
+    `--dry-run all` reporting nothing to do over tracked tables that no longer
+    matched the code beside them. They cost one more pass over the same scored
+    table, which is how they stay a diff rather than a fossil.
+    """
     input:
-        [str(path) for path in composed_paths(DEFAULT_SELECTION)],
+        [
+            str(path)
+            for selection in SELECTIONS
+            for path in composed_paths(selection)
+        ],

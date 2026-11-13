@@ -5,9 +5,10 @@ read as a zero effect, a shift join that compares D614G against E614G, an
 exclusion widened from the mutation to its whole codon: each draws a picture
 with the right shape and the wrong numbers, and none of them raises.
 
-The checks over a hand-built table run always. The one that reads this
-repository's own scored table skips when it is absent, and
-``VIRAL_DASM_REQUIRE_AUDIT=1`` turns that skip into a failure.
+The checks over a hand-built table run always. The two that read real data --
+this repository's own scored table, and mat-pcp's count tables -- skip when it
+is absent, and
+``VIRAL_DASM_REQUIRE_DATA=1`` turns those skips into failures.
 """
 
 from __future__ import annotations
@@ -27,7 +28,9 @@ import dasm2  # noqa: F401
 pd = pytest.importorskip("pandas")
 numpy = pytest.importorskip("numpy")
 
+import lib
 import panels
+from lib import GENE
 from runs import MODELS, RUNS
 
 from dasm2.analysis.viral_fitness_eval import COUNT_THRESHOLD_LADDER
@@ -41,6 +44,13 @@ FAKE_CLADES = ("21J", "21L", "23A")
 #: Enough mutations per clade to clear the adequacy floor at every rung, so a
 #: test that means to measure the filter is not measuring the floor.
 FAKE_SITES = 60
+
+
+def read_founder_nt(clade: str) -> str:
+    """One clade's founder nucleotide sequence for the gene, as a string."""
+    path = lib.mat_pcp_path("clade_founders_dir") / f"{clade}.fa"
+    lines = path.read_text().splitlines()
+    return "".join(line.strip() for line in lines if not line.startswith(">"))
 
 
 def fake_table(seed: int = 0) -> pd.DataFrame:
@@ -176,11 +186,12 @@ def test_the_published_table_still_compares_21k_r346k():
 
     21K's codon 346 carries no flag at all in the scored table -- the founder
     residue is R and the reference codon is identical -- yet the site rule
-    dropped every mutation there, because the audit calls the site reverting:
-    55% of 21K's parents are BA.1.1, which carries R346K, so the *modal parent*
-    differs from the reference even though the founder does not. The reversions
-    that earn the flag are K->R on BA.1.1 parents, a different mutation on a
-    different background, contributing nothing to these counts.
+    dropped every mutation there, because the audit called the site reverting.
+    Its rule is the *modal parent* base rather than the founder: most of 21K's
+    parents carry A at the codon's second nucleotide where the reference carries
+    G, so the site is flagged though the founder matches the reference. The
+    reversions behind that modal base are K->R on those parents, a different
+    mutation on a different background, contributing nothing to these counts.
 
     R346K is the most strongly observed mutation it cost, at 753 actual against
     22.2 expected, and the two approaches agree closely on it. Pinned against
@@ -191,7 +202,7 @@ def test_the_published_table_still_compares_21k_r346k():
         REPO_ROOT / "results" / "selection_factors" / "dasm-1077k_full_depth.parquet"
     )
     if not table_path.exists():
-        if os.environ.get("VIRAL_DASM_REQUIRE_AUDIT") == "1":
+        if os.environ.get("VIRAL_DASM_REQUIRE_DATA") == "1":
             pytest.fail(f"{table_path} is missing")
         pytest.skip(f"{table_path} is not present")
     model = "dasm-1077k"
@@ -202,6 +213,93 @@ def test_the_published_table_still_compares_21k_r346k():
     assert len(row) == 1, "R346K is absent from 21K's comparison frame"
     assert float(row["actual_count"].iloc[0]) == 753.0
     assert float(row["predicted_count"].iloc[0]) == pytest.approx(22.238403, abs=1e-5)
+
+
+def test_training_censors_exactly_what_mat_pcp_excludes():
+    """The premise that makes the comparison fair, re-derived from the files.
+
+    #36 takes the comparison's exclusion from mat-pcp alone: a mutation with no
+    counts estimate leaves at the null drop, and nothing else is dropped. That
+    is fair only if the model was trained on what is left -- if training censored
+    a route mat-pcp kept, the DASM would be scored on a mutation it was taught
+    to ignore, and the panel would report a disagreement the pipeline created.
+
+    Nothing in the code enforces it: ``censor_table.py`` partitions mat-pcp's
+    five exclusion reasons across the two files a training run reads, and the
+    agreement between them is upstream's invariant rather than this
+    repository's. So this check re-derives both sides here. Training's censored
+    routes are rebuilt from the three configured inputs -- the global mask, the
+    per-clade censor table, and founder->reference reversions against the
+    reference sequence -- and mat-pcp's excluded routes are the grid of
+    single-nucleotide routes off the clade founder minus the routes its own
+    per-clade count table carries. The two sets must be equal.
+
+    A drift either way is silent in every other test, because both sides would
+    still produce full-looking panels.
+    """
+    root = Path(lib.CONFIG["mat_pcp"]["root"])
+    if not root.exists():
+        if os.environ.get("VIRAL_DASM_REQUIRE_DATA") == "1":
+            pytest.fail(f"{root} is missing")
+        pytest.skip(f"{root} is not mounted")
+
+    masked = pd.read_csv(lib.mat_pcp_path("masked_nt_sites_file"))
+    # The gene's first nucleotide site, from the file's own two spellings of
+    # one position. Taken rather than hardcoded: a gene change would move it,
+    # and a stale constant would shift every route by a frame.
+    starts = set(masked["nt_site"] - masked["nt_index"])
+    assert len(starts) == 1, f"masked_nt_sites.csv disagrees on where {GENE} starts"
+    start = int(starts.pop())
+    masked_sites = {int(site) for site in masked["nt_site"]}
+
+    censor = pd.read_csv(lib.mat_pcp_path("censored_mutations_file"))
+    reference = read_founder_nt("19A")
+
+    for clade in ("21K", "24A"):
+        counts_path = root / "fitness" / "ntmut_counts" / f"{clade}_ntmut_counts.csv"
+        if not counts_path.exists():
+            pytest.skip(f"{counts_path} is not present")
+        founder = read_founder_nt(clade)
+        grid = {
+            (start + index, base)
+            for index, parent in enumerate(founder)
+            for base in "ACGT"
+            if base != parent
+        }
+        counts = pd.read_csv(counts_path, usecols=["nt_site", "nt_mutation", "gene"])
+        counts = counts[counts["gene"] == GENE]
+        kept = {
+            (int(site), mutation[-1])
+            for site, mutation in zip(counts["nt_site"], counts["nt_mutation"])
+        }
+        assert not kept - grid, f"{clade}'s count table carries a route off the grid"
+        excluded = grid - kept
+
+        rows = censor[censor["clade"] == clade]
+        whole_site = {int(site) for site in rows.loc[rows["from_nt"].isna(), "nt_site"]}
+        directional = rows[rows["from_nt"].notna()]
+        one_route = {
+            (int(site), to_nt)
+            for site, to_nt in zip(directional["nt_site"], directional["to_nt"])
+        }
+        censored = {
+            (site, base)
+            for site, base in grid
+            if site in masked_sites
+            or site in whole_site
+            or (site, base) in one_route
+            or (
+                base == reference[site - start]
+                and founder[site - start] != reference[site - start]
+            )
+        }
+
+        assert censored, f"{clade} censors nothing, so the check proves nothing"
+        assert censored == excluded, (
+            f"{clade}: training censors {len(censored - excluded)} routes mat-pcp "
+            f"kept and misses {len(excluded - censored)} routes mat-pcp dropped, "
+            f"so the two sides of fig:agreement do not see the same mutations."
+        )
 
 
 def test_synonymous_rows_are_excluded(frames):
@@ -560,6 +658,29 @@ def test_the_manuscript_copy_is_skipped_rather_than_invented(tmp_path):
     assert (present / "x.pdf").is_file(), (
         "the manuscript is checked out and its figures/ did not get the PDF"
     )
+
+
+def test_only_the_published_selection_reaches_the_manuscript():
+    """Every selection composes to one file name, so only one may be copied.
+
+    ``snakemake figures`` builds both, and both write ``FIGURE_STEM``. A
+    ``fidelity`` composition that carried a ``tex_figure_dir`` would land on
+    the manuscript's ``agreement.pdf`` with a figure drawn from two other
+    models -- same layout, same size, different numbers, and no later stage
+    that could tell. This is the only thing standing between those two facts.
+    """
+    import panel_spec as spec
+
+    for selection in spec.SELECTIONS:
+        destination = spec.tex_figure_dir(selection)
+        if selection == spec.DEFAULT_SELECTION:
+            assert destination == spec.TEX_FIGURE_DIR
+        else:
+            assert destination is None, (
+                f"{selection} would copy over the manuscript's "
+                f"{spec.FIGURE_STEM}.pdf, which the paper draws from "
+                f"{spec.DEFAULT_SELECTION}."
+            )
 
 
 # Three ways this port drifted from the figure in the manuscript. Each drew a

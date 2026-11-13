@@ -27,6 +27,18 @@ the figure can compare over its 22 clades -- among them 21K's R346K at 753
 observed against 22.2 expected, whose counts are computed on the clade founder's
 background and are untouched by the censoring that flagged its site. See #36.
 
+**What makes that fair is that training censors the same routes.** mat-pcp's
+``exclude`` and this pipeline's censoring are two applications of one set:
+``censor_table.py`` partitions the five reasons of ``masking.compute_exclusions``
+between ``pcps/{gene}/censored_mutations.csv`` and
+``pcps/{gene}/masked_nt_sites.csv``, with founder->reference reversions in
+neither because a training run derives them, and ``masked_nt_sites.py``
+reconciles its file against ``counts_all.csv``'s flag in both directions. So a
+mutation the model was trained on is one mat-pcp estimated, and the comparison
+holds no route one side saw and the other did not.
+:func:`tests.test_panels.test_training_censors_exactly_what_mat_pcp_excludes`
+re-derives that set equality from the two files and the counts table.
+
 GISAID-derived: the table this reads descends from the cluster-only mat-pcp
 mount. The per-panel CSVs are counts, fitness effects and selection factors,
 which are publishable; no panel carries a sequence.
@@ -127,20 +139,20 @@ class FilterSpec:
     Collapsing it to one number is also what makes the ladder coherent: panels C
     and E sweep this field, so a rung and a cutoff are the same quantity.
 
-    **``exclude_masked`` is panel A's guard, not a filter.** No frame is
-    filtered on it: the correlation panels take their exclusion from mat-pcp,
-    through the null drop in :func:`base_frames`. It is read only by
-    :func:`lookup_frame`, which refuses to look up a mutation sitting on the
-    global artifact mask -- excluded in every clade, so the lookup would plot an
-    empty panel rather than a finding. It stays in :meth:`as_row` because the
-    panel CSVs carry it.
+    **There is no mask field.** An earlier spec carried ``exclude_masked``, and
+    after #36 it filtered nothing: the exclusion comes from mat-pcp through the
+    null drop in :func:`base_frames`, and :func:`lookup_frame` now refuses a
+    mutation on the evidence -- no clade carries an estimate -- rather than on
+    the ``globally_masked`` flag, which is the nucleotide mask widened to the
+    codon and so refuses mutations mat-pcp did estimate. Keeping the field would
+    have written ``spec_exclude_masked,True`` into panels that carry masked
+    sites.
     """
 
     fitness_metric: str = "delta_fitness_ratio"
     min_count: float = 0.0
     clip_lower: float = CLIP_LOWER
     min_clade_mutations: int = DEFAULT_MIN_CLADE_MUTATIONS
-    exclude_masked: bool = True
     exclude_synonymous: bool = True
 
     def __post_init__(self) -> None:
@@ -163,7 +175,6 @@ class FilterSpec:
             "spec_min_count": self.min_count,
             "spec_clip_lower": self.clip_lower,
             "spec_min_clade_mutations": self.min_clade_mutations,
-            "spec_exclude_masked": self.exclude_masked,
             "spec_exclude_synonymous": self.exclude_synonymous,
             "spec_count_filter_mode": COUNT_FILTER_MODE,
         }
@@ -305,17 +316,19 @@ def lookup_frame(
     approaches disagree, which is not confined to the clades a correlation
     panel happens to score.
 
-    **The per-clade exclusions are not applied here, and that is the panel.**
-    A censored clade is shown and flagged in ``censored_here`` rather than
-    dropped: a reader asking "what does this mutation do across the tree" is
-    owed the clades where the answer is suspect, labelled. Excluding them
-    instead would leave the flag constantly ``False`` -- a column that reads as
-    informative and cannot be.
+    **A censored clade is shown and flagged rather than dropped.** ``censored_
+    here`` carries the flag: a reader asking "what does this mutation do across
+    the tree" is owed the clades where the answer is suspect, labelled.
+    Excluding them instead would leave the flag constantly ``False`` -- a column
+    that reads as informative and cannot be.
 
-    The global mask is different, and refuses the whole panel. It is a
-    sequencing artifact rather than a clade-specific judgment, so a mutation at
-    a masked site has no reading anywhere and a per-clade flag would imply it
-    had one somewhere.
+    **The mask flags refuse nothing.** ``globally_masked`` is mat-pcp's
+    nucleotide mask widened to the codon -- 18 masked nucleotides become 51 at
+    codon granularity for ``S`` -- so a flagged codon routinely carries
+    mutations mat-pcp estimated normally, reached through its unmasked
+    nucleotides. Refusing on the flag would refuse rows the correlation panels
+    plot. What refuses is the evidence: a mutation no clade carries an estimate
+    of would draw an empty panel.
 
     **The count cutoff does apply.** The panel is captioned as the clades that
     carry at least ``min_count`` actual or expected counts of this mutation, so
@@ -332,9 +345,10 @@ def lookup_frame(
         ``table``.
 
     Raises:
-        ValueError: If the mutation is synonymous, or its site is on the global
-            mask. Both are states where no clade carries a reading, so an empty
-            frame would be indistinguishable from a misspelled label.
+        ValueError: If the mutation is synonymous, or mat-pcp estimated it in
+            no clade. Both are states where no clade carries a reading, so an
+            empty frame would be indistinguishable from a misspelled label --
+            which is what a mutation absent from the table returns.
     """
     rows = table[(table["model"] == model) & (table["aa_mutation"] == mutation)]
     if len(rows) and rows["is_synonymous"].all():
@@ -343,13 +357,14 @@ def lookup_frame(
             f"structural 0 rather than a prediction, so there is nothing to "
             f"compare against the counts."
         )
-    if spec.exclude_masked and len(rows) and rows["globally_masked"].all():
+    estimated = rows.dropna(subset=[spec.fitness_metric])
+    if len(rows) and estimated.empty:
         raise ValueError(
-            f"{mutation} sits on mat-pcp's global mask for {GENE} -- a "
-            f"sequencing artifact rather than a clade-specific censoring -- so "
-            f"it is excluded in every clade, not just some."
+            f"mat-pcp estimated {mutation} in no clade: every nucleotide route "
+            f"to it is excluded in every clade, so there is nothing to plot "
+            f"the DASM against."
         )
-    rows = rows.dropna(subset=[spec.fitness_metric])
+    rows = estimated
     rows = filter_merged_fitness(
         rows,
         min_actual_count=min_count,
