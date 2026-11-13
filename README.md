@@ -152,6 +152,12 @@ never receive a gradient: a transformer's positional table is allocated at
 it back out of the config, because a template transcribed from the wrong arm
 renders, validates and trains perfectly well.
 
+**These are the counts the manuscript quotes**, which is why the explanation
+lives here rather than in its Methods. The allocated totals are larger --
+1,315,284 for `dasm-1077k` against the 1,076,756 above -- and
+`<artifact_root>/param_guard/{model}_{corpus}.json` records both for every
+run, with the parameter names that never receive a gradient.
+
 **One stopping rule for all seven.** Each run trains until `ReduceLROnPlateau`
 has driven the learning rate below 1e-6. `max_train_steps` is a budget guard,
 and a run that reaches it instead writes *no record at all* -- the trainer
