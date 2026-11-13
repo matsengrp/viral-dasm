@@ -16,12 +16,14 @@ registry that resolved dataset nicknames by scanning directories named in
 changed what the code did. It is not vendored. Nothing here consults anything
 outside the checkout and the paths `config.yaml` names.
 
-**Status: milestone 3 of 7.** The training code is vendored and shown to still
+**Status: milestone 5 of 7.** The training code is vendored and shown to still
 train the model it was ported from, the pipeline builds its own corpora and the
-neutral model they carry, and `snakemake models` trains the paper's seven
-models on them. The scoring tables, the four analyses, the figure composition
-and the release are issues
-[#1](https://github.com/matsengrp/viral-dasm/issues/1) tracks.
+neutral model they carry, `snakemake models` trains the paper's seven models on
+them, and `rule score` reads those models into one table of selection factors.
+Of the paper's four analyses the agreement analysis is ported, and
+`fig:agreement` composes itself from it -- see [*Drawing the
+figures*](#drawing-the-figures). The other three analyses and the release are
+issues [#1](https://github.com/matsengrp/viral-dasm/issues/1) tracks.
 
 ## Layout
 
@@ -39,15 +41,24 @@ results/      the publishable tables it writes, tracked
 
 The two data directories split by direction, not by provenance. `data/` holds
 input a reader may edit -- today just the era template. `results/` holds what
-the pipeline produces and the repository keeps: `runs.csv`, and from M5 one
-CSV per figure panel. Everything large or intermediate -- corpora,
+the pipeline produces and the repository keeps: `runs.csv`, and one CSV per
+figure panel. Everything large or intermediate -- corpora,
 checkpoints, the scored table, logs -- goes under `artifact_root` on the
 cluster, outside this tree.
 
 What may be tracked is a data rule, not a size rule: mutation counts, fitness
 effects and selection factors are publishable, raw GISAID sequences are not.
-Nothing in `results/` carries a sequence. `selection_factors.parquet` is kept
-out because it is 1,425,760 rows per run, not because of the rules.
+The seven-run `selection_factors.parquet` is kept out because it is 209 MB,
+not because of the rules; the single run the manuscript cites is tracked, at
+23 MiB, by `rule publish_scored_table`.
+
+**That tracked table gives up the 56 clade founder protein sequences**, and so
+does every per-panel CSV beside it: a mutation label spells the founder
+residue, so `D574V` in clade 22D says 22D's founder carries D at 574, and
+`panel_b_within_clade_scatter.csv` alone pins 1,246 of Delta's 1,273. This is
+deliberate. A clade founder is reconstructible from the public UShER tree
+without GISAID credentials, so it is not the thing the data rules protect --
+what stays out is the per-sample material, the PCPs and the leaf sequences.
 
 ## Running it
 
@@ -61,10 +72,13 @@ snakemake --cores 4
 
 ## What is not here, and why
 
-**Nothing GISAID-derived.** No sequences from the UShER tree, no PCPs, no
-censor tables, no founders, no counts tables, no derived per-site or
-per-sample slice. That is the condition the data is held under, not a
-limitation to work around.
+**No per-sample GISAID material.** No sequences from the UShER tree's leaves,
+no PCPs, no censor tables, no counts tables, no derived per-sample slice. That
+is the condition the data is held under, not a limitation to work around.
+
+The clade founders are the one derived sequence that *is* published, inside
+the scored table and the panel CSVs — see the layout note above for why they
+do not fall under this.
 
 Reproducibility therefore runs through the code, not the data. Both pipelines
 are published: a reader with their own GISAID access runs `mat-pcp` on the
@@ -212,6 +226,15 @@ costs no rescoring.
 panel plots, with the filter spec as columns so a reader who opens one alone
 knows which cutoff and which clip produced it. The images go under
 `artifact_root`: a panel is a rebuildable picture of the CSV beside it.
+
+**What the manuscript cites is neither of those.** It names
+`results/selection_factors/dasm-1077k_full_depth.parquet`, the whole scored
+table for the model the figures are drawn from: 1,425,760 rows, every amino
+acid at every spike site on all 56 founders, carrying the DASM's selection
+factor beside both the per-clade and the clade-pooled counts estimate. Every
+panel here is a filter on it and the three remaining figures will read it too,
+so one file covers the paper where five per-panel CSVs would cover one figure.
+`rule publish_scored_table` copies it in.
 
 **The count cutoff is the x axis, not a setting.** Panels C and E sweep it, and
 the clade set is pinned across the rungs -- raising the floor removes the thin,

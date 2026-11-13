@@ -129,6 +129,12 @@ DELIBERATE_EXEMPTIONS = {
         "the rule declares every test file instead and relies on the suite's "
         "own assertions"
     ),
+    "publish_scored_table": (
+        "it runs `cp` and no repository code, so there is no entry point to "
+        "read imports from. What it copies is `rule score`'s output and what "
+        "it copies to is a path this repository tracks; neither depends on a "
+        "module whose edit should invalidate the copy"
+    ),
 }
 
 #: Read and validated at ``scripts/lib.py`` import time rather than imported.
