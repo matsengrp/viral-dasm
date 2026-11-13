@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from lib import ARTIFACT_ROOT, GENE, REPO_ROOT, TEX_FIGURE_DIR
+from lib import ARTIFACT_ROOT, REPO_ROOT, TEX_FIGURE_DIR
 
 #: Where the panel images go: under the artifact root, not in the tree. A panel
 #: is a rebuildable picture of the CSV committed beside it, and `README.md`'s
@@ -29,11 +29,6 @@ FIGURE_DIR = ARTIFACT_ROOT / "figures"
 #: Where the tables go: tracked, one CSV per panel, holding exactly what that
 #: panel plots.
 PANEL_CSV_DIR = REPO_ROOT / "results" / "panels"
-
-#: The censor audit, which is the only source of the reverting exclusion. The
-#: table carries `censored` and `globally_masked` as columns and does not carry
-#: this layer, and `censored_directional` is not it.
-AUDIT_JSON = ARTIFACT_ROOT / "audit" / f"{GENE}.json"
 
 #: Peak RSS for one panel job, in MB. One model's full-depth rows across every
 #: clade is about 1.4M rows over 15 columns; the `fidelity` selection reads two
@@ -54,9 +49,18 @@ FIDELITY_MODELS: tuple[str, ...] = ("dasm-293k", "dasm-85k")
 #: The two model selections the panels are drawn for, and the one name each is
 #: built under. Two, because they answer different questions: `figure` is what
 #: `fig:agreement` publishes, and `fidelity` is the pair the published CSVs were
-#: drawn from, which is how the port is shown to compute what the old code
-#: computed. Both come out of one table and one `groupby`, so the second costs
+#: drawn from. Both come out of one table and one `groupby`, so the second costs
 #: no rescoring.
+#:
+#: **`fidelity` no longer reproduces upstream, and is not meant to.** It showed
+#: the port computing what `score_runs` computed, and did, at the port (#21).
+#: #36 then narrowed the exclusion from the codon site to the mutation, which
+#: upstream does not do, so the two now differ by exactly that: 67,564 mutations
+#: at rung 10 against upstream's 65,430, over the same 22 clades, at a pooled
+#: median r of 0.9662 against 0.9664. What the selection is still good for is a
+#: second model pair through the same code, and a diff a reviewer can read when
+#: this filter changes again. Reproducing upstream is now the port's history
+#: rather than a live gate, and it lives in #21.
 #:
 #: Panels C and E pool the models of their selection under one median, which is
 #: what the published numbers do -- so pooling is a property of the selection
@@ -195,12 +199,21 @@ def composed_paths(selection: str) -> list[Path]:
     return [composed_path(selection, ext) for ext in COMPOSED_FORMATS]
 
 
-def tex_figure_dir() -> Path | None:
+def tex_figure_dir(selection: str) -> Path | None:
     """Where the composed PDF is copied for the manuscript, if anywhere.
 
     Re-exported from `lib` so a notebook and `workflow/figures.smk` read this
     module alone for every path in this figure.
+
+    **Only the published selection is copied.** Every selection composes to
+    `FIGURE_STEM`, so a `fidelity` composition would land on the manuscript's
+    `agreement.pdf` and replace the paper's figure with a panel set drawn from
+    two other models -- same size, same layout, different numbers, and nothing
+    downstream to notice. `snakemake figures` builds both, which is how that
+    became reachable.
     """
+    if selection != DEFAULT_SELECTION:
+        return None
     return TEX_FIGURE_DIR
 
 

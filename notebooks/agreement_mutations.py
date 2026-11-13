@@ -58,13 +58,12 @@ def _(mo):
 
     # The rule passes the table in; a second spelling in a notebook is a path
     # that can drift from `workflow/score.smk`'s.
-    # Required, not defaulted. A fallback spelling of either path is a second
+    # Required, not defaulted. A fallback spelling of the path is a second
     # spelling of a fact `workflow/figures.smk` already states, and the rule
-    # passes both in; missing one should stop here rather than quietly read a
+    # passes it in; missing it should stop here rather than quietly read a
     # different file from the one the rule declared.
     _args = mo.cli_args()
     TABLE_PATH = Path(str(_args["table"]))
-    AUDIT_PATH = Path(str(_args["audit"]))
     SELECTION = str(_args.get("selection") or panels.DEFAULT_SELECTION)
     MODELS = panels.selection_models(SELECTION)
     # Panels A, B and D are per-model pictures, so both the panel and its CSV
@@ -74,7 +73,6 @@ def _(mo):
     return (
         MODELS,
         PANEL_MODEL,
-        AUDIT_PATH,
         SELECTION,
         TABLE_PATH,
         charts,
@@ -84,8 +82,7 @@ def _(mo):
 
 
 @app.cell
-def _(AUDIT_PATH, MODELS, SELECTION, TABLE_PATH, mo, panels):
-    REVERTING = panels.reverting_sites_by_clade(AUDIT_PATH)
+def _(MODELS, SELECTION, TABLE_PATH, mo, panels):
     # Every clade these three panels need, read once: panel B's one clade and
     # the shift panel's four.
     CLADES = sorted({panels.SCATTER_CLADE, *panels.SHIFT_CLADES})
@@ -97,7 +94,6 @@ def _(AUDIT_PATH, MODELS, SELECTION, TABLE_PATH, mo, panels):
     BASE = panels.base_frames(
         TABLE,
         spec=SPEC,
-        reverting_by_clade=REVERTING,
         models=MODELS,
         clades=CLADES,
     )
@@ -107,7 +103,7 @@ def _(AUDIT_PATH, MODELS, SELECTION, TABLE_PATH, mo, panels):
         f"{sum(len(frame) for frame in BASE.values()):,} mutations before any "
         f"count cutoff."
     )
-    return BASE, REVERTING, SPEC
+    return BASE, SPEC
 
 
 @app.cell
