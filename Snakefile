@@ -13,7 +13,9 @@ it: building a training corpus, and its neutral model, from a mat-pcp run.
 Issue #8 then removed the apparatus that checked the port, so what remains is
 pipeline rather than scaffolding. Milestone 3 (issue #14) added the stage
 after it: the paper's seven models, each stopping on the learning-rate floor
-and each read back out of its own log into ``data/runs.csv``.
+and each read back out of its own log into ``data/runs.csv``. Milestone 4
+(issue #16) scores them: every run's best checkpoint against mat-pcp's
+amino-acid fitness effects on every clade founder, in one tidy table.
 """
 
 import sys
@@ -37,6 +39,7 @@ from lib import (  # noqa: E402
 
 include: "workflow/corpus.smk"
 include: "workflow/train.smk"
+include: "workflow/score.smk"
 
 
 rule all:
@@ -50,3 +53,4 @@ rule all:
     input:
         rules.corpora.input,
         rules.models.input,
+        rules.scored.input,

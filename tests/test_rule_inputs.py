@@ -68,12 +68,15 @@ ENTRY_POINTS = {
     "check_run": "scripts/check_run.py",
     "train_eval": "scripts/train_eval.py",
     "runs_table": "scripts/runs_table.py",
+    "check_clades": "scripts/check_clades.py",
+    "score": "scripts/score_run.py",
+    "scored_table": "scripts/scored_table.py",
 }
 
 #: Rules that execute nothing. Asserted, not asserted-by-assertion: each must
 #: carry snakemake's ``norun`` marker, so listing a rule here cannot excuse it
 #: from the import check while it quietly runs a shell command.
-AGGREGATORS = ("all", "corpora", "models")
+AGGREGATORS = ("all", "corpora", "models", "scored")
 
 #: Rules that do run code and are still not import-checked, with the reason.
 #: Each must carry a ``shellcmd``, so an entry here describes a real
