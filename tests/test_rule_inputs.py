@@ -616,3 +616,96 @@ def test_every_rule_is_classified():
         f"AGGREGATORS/DELIBERATE_EXEMPTIONS entry saying why it is not "
         f"import-checked."
     )
+
+
+# The retrain hazard. Both halves of it: the edge that scheduled a retrain of
+# seven finished runs on 2026-11-13, and the refusal that now stands behind
+# wherever else such an edge might appear.
+
+
+def test_the_test_gate_is_a_sibling_of_the_corpora_not_a_precondition():
+    """`tests_passed.done` must not sit upstream of a corpus.
+
+    It did, as `prepare_parquet`'s input, and the chain ran on to training:
+    a test edit rewrote the corpus, which rewrote `corpus_guard`, which
+    `train` declares un-ancient and *should* retrain on. So a one-line test
+    edit scheduled a retrain of seven runs that had finished days earlier,
+    and the only thing that stopped it was every GPU being busy.
+
+    The gate itself is kept -- `rule corpora` asks for the marker, so the
+    suite runs in the default DAG and an edited test still reruns pytest --
+    but as a sibling, exactly as `rule models` treats the smokes.
+
+    Read off the `.smk` source rather than through `parsed_rules`, which
+    keeps only plain string literals and so cannot see an input built from
+    an f-string. Pinned structurally rather than by dry-running the DAG,
+    because the failure is one line anyone can reintroduce and what it
+    reaches is days of GPU time.
+    """
+    marker = "tests_passed.done"
+    rule_header = re.compile(r"^rule ([A-Za-z_][A-Za-z0-9_]*):", re.MULTILINE)
+    consumers: set[str] = set()
+    producers: set[str] = set()
+    for smk in sorted((REPO_ROOT / "workflow").glob("*.smk")):
+        text = smk.read_text()
+        starts = [(m.group(1), m.start()) for m in rule_header.finditer(text)]
+        for index, (name, begin) in enumerate(starts):
+            finish = starts[index + 1][1] if index + 1 < len(starts) else len(text)
+            body = text[begin:finish]
+            # Only the declaration blocks, not the prose around them: these
+            # files discuss this marker at length, and a docstring naming it
+            # is the opposite of a problem.
+            for section, found in (("input", consumers), ("output", producers)):
+                block = re.search(
+                    rf"\n    {section}:\n(.*?)(?=\n    [a-z_]+:\n|\Z)",
+                    body,
+                    re.DOTALL,
+                )
+                if block and marker in _without_comments(block.group(1)):
+                    found.add(name)
+
+    assert producers == {"validate_tests"}, (
+        f"{marker} is written by {sorted(producers)}; it is the test "
+        f"suite's own marker and nothing else should produce it."
+    )
+    assert consumers == {"corpora"}, (
+        f"{marker} is an input of {sorted(consumers)}. Only `corpora` may "
+        f"ask for it, as the aggregator that keeps the suite in the default "
+        f"DAG. A rule that *produces* something training reads puts a test "
+        f"edit upstream of a multi-day run."
+    )
+    assert "corpora" in AGGREGATORS and parsed_rules()["corpora"].norun, (
+        "`corpora` runs a command, so asking it for the marker is not the "
+        "sibling arrangement this test is checking for."
+    )
+
+
+def _without_comments(block: str) -> str:
+    """A declaration block with its `#` comments removed."""
+    return "\n".join(line.split("#", 1)[0] for line in block.splitlines())
+
+
+def test_train_is_handed_the_guard_that_refuses_a_finished_run():
+    """`rule train` passes `--refuse-if-complete`, and its shell uses it.
+
+    The parameter is the whole mechanism: `scripts/train.py` cannot protect
+    a run whose guard path it is never given, and a `params` entry that no
+    shell interpolates is silently inert -- the rule would look guarded and
+    train anyway.
+    """
+    shell = parsed_rules()["train"].shellcmd or ""
+    assert "{params.completed}" in shell, (
+        f"rule train's shell is {shell!r}, which never passes the "
+        f"completion guard to scripts/train.py, so every finished run is "
+        f"unprotected."
+    )
+    source = (REPO_ROOT / "workflow" / "train.smk").read_text()
+    assert "completed=completion_guard," in source, (
+        "rule train interpolates {params.completed} but declares no "
+        "`completed` param, so snakemake would fail the rule rather than "
+        "guard it."
+    )
+    assert "--refuse-if-complete" in source, (
+        "`completion_guard` no longer passes --refuse-if-complete, so the "
+        "param expands to something scripts/train.py ignores."
+    )

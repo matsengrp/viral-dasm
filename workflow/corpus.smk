@@ -93,6 +93,21 @@ rule corpora:
     input:
         expand(f"{ARTIFACT_ROOT}/corpus_guard/{{corpus}}.json", corpus=CORPUS_NAMES),
         f"{ARTIFACT_ROOT}/audit/{GENE}.json",
+        # **The suite is a sibling here, not a precondition of
+        # `prepare_parquet`.** It used to be that rule's input, and the edge
+        # cost more than it bought: editing any test file rebuilt a 1.8 GB
+        # corpus, which rewrote `corpus_guard`, which `train` declares
+        # un-ancient and *should* retrain on -- so a one-line test edit
+        # scheduled a retrain of seven finished runs. That happened on
+        # 2026-11-13 and only a busy GPU stopped it.
+        #
+        # This is the same move `workflow/train.smk`'s `rule models` makes
+        # with the smokes, for the same reason: asking for the marker here
+        # keeps the suite in the default DAG -- `corpora` does not succeed
+        # until pytest passes, and an edited test still reruns it, because
+        # `validate_tests` declares the test files -- while keeping a
+        # `touch()` output from sitting upstream of a multi-day run.
+        tested=f"{VALIDATION_DIR}/tests_passed.done",
 
 
 rule build_neutral:
@@ -286,7 +301,6 @@ rule prepare_parquet:
         script="scripts/prepare_viral_parquet.py",
         era_map=ERA_MAP,
         verified=f"{VALIDATION_DIR}/neutral_verified_{GENE}.done",
-        tested=f"{VALIDATION_DIR}/tests_passed.done",
         config="config.yaml",
         lib="scripts/lib.py",
         # The data the corpus is made of, declared so the DAG records what

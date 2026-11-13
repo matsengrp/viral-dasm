@@ -28,6 +28,19 @@ slow gate now that it imports torch. The suite still runs ahead of the
 corpora, which is where a regression in the corpus builder would do its
 damage. Every other rule here declares the code it runs, as #12 requires.
 
+**That alone was not enough, and a finished run is now refused outright.**
+The protection above had a hole: a test edit reached ``prepare_parquet``,
+which rewrote a corpus, which rewrote ``corpus_guard``, which ``train``
+declares un-ancient and *should* retrain on. On 2026-11-13 that scheduled a
+retrain of a run finished three days earlier, and the only thing that stopped
+it was every GPU being busy. The hole itself is closed -- ``prepare_parquet``
+takes the marker ``ancient`` now -- and ``scripts/train.py`` additionally
+refuses any run whose ``run_guard`` reports a pass, because training resumes
+from the last checkpoint rather than starting over, so a spurious schedule
+destroys the thing the paper reports. ``--config retrain=<run>`` lifts it.
+A run with no guard file is untouched by any of this, which is what a new
+model, a new corpus or a rule under test looks like.
+
 GISAID: every run directory, rendered config and log under ``ARTIFACT_ROOT``
 is GISAID-derived and stays on the cluster. ``results/runs.csv`` is aggregate
 per-run summary statistics and is tracked.
@@ -117,6 +130,39 @@ wildcard_constraints:
     # Required, not optional: corpus names contain underscores, so
     # `{model}_{corpus}` is ambiguous without pinning the model alternatives.
     model="|".join(MODEL_NAMES),
+
+
+#: Runs the caller has explicitly released for retraining, from
+#: ``--config retrain=<run>`` or ``--config retrain=all``. Everything else
+#: whose ``run_guard`` reports a pass is refused by ``scripts/train.py``; see
+#: ``refuse_if_complete`` there for why resuming a finished run is the hazard.
+#:
+#: Named runs rather than a boolean, and no ``1``/``true`` spelling, because
+#: the point is that releasing a run is deliberate and says which one.
+RETRAIN = str(config.get("retrain", "")).strip()
+
+
+def retrain_released(model, corpus):
+    """Has the caller explicitly asked for this run to train again?"""
+    if RETRAIN == "all":
+        return True
+    return run_id(model, corpus) in {
+        name.strip() for name in RETRAIN.split(",") if name.strip()
+    }
+
+
+def completion_guard(wildcards):
+    """``--refuse-if-complete`` for this run, unless it has been released.
+
+    Passed as a parameter rather than declared as an input: ``check_run``
+    writes this file downstream of training, so declaring it would close a
+    cycle. ``scripts/train.py`` treats a missing file as "not finished", so
+    a new model or corpus is unaffected.
+    """
+    if retrain_released(wildcards.model, wildcards.corpus):
+        return ""
+    run = run_id(wildcards.model, wildcards.corpus)
+    return f"--refuse-if-complete {ARTIFACT_ROOT}/run_guard/{run}.json"
 
 
 rule models:
@@ -329,6 +375,7 @@ rule train:
             f"{corpus(wc.corpus).parquet_cache_budget_gb}"
         ),
         run=lambda wc: require_run(wc.model, wc.corpus),
+        completed=completion_guard,
     log:
         f"{ARTIFACT_ROOT}/logs/train_{{model}}_{{corpus}}.log",
     resources:
@@ -340,6 +387,7 @@ rule train:
         " --parquet {input.parquet}"
         " --output-dir {params.outdir}"
         " --head {params.head}"
+        " {params.completed}"
         " --device cuda"
         # Appended, not truncated: `train.py` resumes from its latest
         # checkpoint, and `>` would discard everything the killed attempt
