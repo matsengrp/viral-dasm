@@ -213,5 +213,51 @@ def _(SELECTION, SHIFT_LADDER, SPEC, charts, panels):
     return
 
 
+@app.cell
+def _(SELECTION, SHIFT_LADDER, WITHIN_LADDER, mo, panels, pd):
+    # Every median `main.tex` quotes for this figure, computed from the same
+    # frames the two panels plot. The manuscript rounds to two places, so both
+    # forms are here: a reader checking the paper against the pipeline should
+    # be comparing 0.97 to 0.9707 rather than re-deriving it from a CSV.
+    def _medians(ladder, unit_field, panel, phrase):
+        return [
+            {
+                "panel": panel,
+                "quantity": phrase,
+                "cutoff": rung,
+                "dots": int(_rung_dots[unit_field].nunique()),
+                "median r": round(float(_rung_dots["pearson_r"].median()), 4),
+                "as quoted": f"{_rung_dots['pearson_r'].median():.2f}",
+            }
+            for rung in panels.COUNT_LADDER
+            if len(_rung_dots := ladder[ladder["min_count"] == rung])
+        ]
+
+    MANUSCRIPT_MEDIANS = pd.DataFrame(
+        _medians(WITHIN_LADDER, "clade", "C", "median r across clades")
+        + _medians(SHIFT_LADDER, "pair_label", "E", "median r across clade pairs")
+    )
+    mo.vstack(
+        [
+            mo.md(
+                f"""
+                ### The medians the manuscript quotes
+
+                Selection **{SELECTION}**, pooled over its models exactly as
+                the panels pool them: one dot per (model, unit, rung). The
+                paper's within-clade sentence cites panel C and its shift
+                sentence cites the pairs drawn in panel D, whose correlations
+                are panel E's dots.
+
+                `main.tex` is checked against this table, not against a number
+                carried across by hand.
+                """
+            ),
+            MANUSCRIPT_MEDIANS,
+        ]
+    )
+    return
+
+
 if __name__ == "__main__":
     app.run()
