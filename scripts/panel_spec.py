@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from lib import ARTIFACT_ROOT, GENE, REPO_ROOT
+from lib import ARTIFACT_ROOT, GENE, REPO_ROOT, TEX_FIGURE_DIR
 
 #: Where the panel images go: under the artifact root, not in the tree. A panel
 #: is a rebuildable picture of the CSV committed beside it, and `README.md`'s
@@ -137,6 +137,71 @@ TABLE_COLUMNS: tuple[str, ...] = (
     "globally_masked",
     "censored",
 )
+
+
+#: The composed figure's stem, which is its LaTeX label: `main.tex` includes
+#: `figures/agreement.pdf` and refers to `\\autoref{fig:agreement}`. One
+#: spelling, so the file the manuscript includes and the file this pipeline
+#: writes cannot drift apart.
+FIGURE_STEM = "agreement"
+
+#: What the composition writes beside the panels, in `save_figure`'s order.
+#: The PDF is what the manuscript includes; the PNG is what the HTML export
+#: embeds; the SVG is what a journal asks for.
+COMPOSED_FORMATS: tuple[str, ...] = ("png", "pdf", "svg")
+
+#: Which panels sit on which row of the composed figure, left to right. Two
+#: rows: the lookup and the within-clade pair on top, the shift grid and its
+#: ladder beneath. Rows are left justified and top aligned, so row 2 being
+#: narrower leaves whitespace on the right rather than being stretched.
+#:
+#: The keys are the letters drawn on the figure, which is also the order the
+#: caption reads them in.
+FIGURE_ROWS: tuple[tuple[str, ...], ...] = (("A", "B", "C"), ("D", "E"))
+
+#: Which panel stem each letter is. Derived nowhere: a letter is a caption
+#: fact and a stem is a filename, and nothing in either implies the other.
+PANEL_LETTERS: dict[str, str] = {
+    "A": "panel_a_mutation_lookup",
+    "B": "panel_b_within_clade_scatter",
+    "C": "panel_c_within_clade_ladder",
+    "D": "panel_d_shift_grid",
+    "E": "panel_e_shift_ladder",
+}
+
+#: The box the composed figure has to fit inside, in inches, and the fraction
+#: of it to use. `FIGURE_SCALE` shrinks the box and every margin and gap
+#: alike, so the composition stays in proportion; the figure fits the box
+#: exactly in one dimension, so this is the only way to make it smaller on the
+#: page.
+BOX_IN: tuple[float, float] = (7.5, 8.0)
+FIGURE_SCALE = 0.9
+
+#: What one panel's title measures in the Vega-Lite spec, which is what the
+#: panel letters are sized against. It is `scripts/panel_charts.py`'s
+#: `PANEL_FONT_SIZE`, and `tests/test_panels.py` pins the two together: a
+#: letter sized against a title the panels no longer draw is a letter that
+#: drifts every time the type does.
+PANEL_TITLE_PX = 18
+
+
+def composed_path(selection: str, extension: str) -> Path:
+    """Where one selection's composed figure goes, in one format."""
+    return figure_dir(selection) / f"{FIGURE_STEM}.{extension}"
+
+
+def composed_paths(selection: str) -> list[Path]:
+    """One selection's composed figure, in every format it is written in."""
+    return [composed_path(selection, ext) for ext in COMPOSED_FORMATS]
+
+
+def tex_figure_dir() -> Path | None:
+    """Where the composed PDF is copied for the manuscript, if anywhere.
+
+    Re-exported from `lib` so a notebook and `workflow/figures.smk` read this
+    module alone for every path in this figure.
+    """
+    return TEX_FIGURE_DIR
 
 
 def selection_models(selection: str) -> tuple[str, ...]:

@@ -6,8 +6,8 @@ takes a GPU: ``rule score`` did the forward passes, so a panel rule reads
 
 The DAG:
 
-    scored ---> agreement_mutations  (panels A, B, D)
-            \\-> agreement_ladders    (panels C, E)
+    scored ---> agreement_mutations  (panels A, B, D) --\\
+            \\-> agreement_ladders    (panels C, E)    ----> compose_agreement
 
 **The two selections.** Each notebook is run per ``{selection}``, which names
 which models it draws: ``figure`` is ``dasm-1077k``, what the paper publishes,
@@ -19,6 +19,11 @@ costs no rescoring. ``scripts/panels.py`` owns the mapping.
 embeds a failed cell in the HTML and exits 0, so a rule whose only output was
 the export would succeed with no panel written. Naming every PNG and CSV is
 what makes a raised cell fail the rule.
+
+**Composition is a third rule, not a cell in either notebook.** The panels
+read a 1.4M-row Parquet per model; the layout reads five PNGs. Keeping them
+apart is what lets the spacing be nudged and re-run in a second instead of
+rescoring four clades to move a panel by a tenth of an inch.
 
 The images go under the artifact root and the tables into tracked
 ``results/panels/``: a panel is a rebuildable picture of the CSV beside it, and
@@ -37,9 +42,11 @@ from panel_spec import (
     DEFAULT_SELECTION,
     LADDER_PANELS,
     MUTATION_PANELS,
+    PANEL_LETTERS,
     PANEL_MEM_MB,
     SELECTIONS,
     SHIFT_CLADES,
+    composed_paths,
     figure_dir,
     panel_csv_path,
 )
@@ -157,3 +164,49 @@ rule agreement_ladders:
         " -- --table {input.table} --audit {input.audit}"
         " --selection {wildcards.selection}"
         " > {log} 2>&1"
+
+
+rule compose_agreement:
+    """`fig:agreement` itself, laid out from the five panels the exports wrote.
+
+    No scoring and no table: it reads PNGs. `scripts/figure_layout.py` solves
+    the dpi rather than taking one, so the figure is as large as it can be
+    inside the page box with nothing resampled and no panel moved relative to
+    another.
+
+    The manuscript copy is not a declared output. `config.yaml`'s
+    `tex_figure_dir` points outside both this repository and the artifact
+    root, and snakemake deletes a job's declared outputs when it fails -- so
+    naming it would hand a failed layout the power to delete the figure
+    currently in the paper. The notebook copies it and says whether it did.
+    """
+    wildcard_constraints:
+        selection="|".join(SELECTIONS),
+    input:
+        layout="scripts/figure_layout.py",
+        spec="scripts/panel_spec.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        notebook="notebooks/agreement.py",
+        # The panels themselves, by the letters the figure draws. The PNGs
+        # only: `compose` reads raster, and declaring the SVGs too would make
+        # this rule rerun on a vector copy it never opens.
+        panels=[
+            str(figure_dir("{selection}") / f"{stem}.png")
+            for stem in PANEL_LETTERS.values()
+        ],
+    output:
+        html=f"{NOTEBOOK_DIR}/agreement_{{selection}}.html",
+        figure=[str(path) for path in composed_paths("{selection}")],
+    log:
+        f"{ARTIFACT_ROOT}/logs/compose_agreement_{{selection}}.log",
+    shell:
+        "marimo export html {input.notebook} -o {output.html} --force"
+        " -- --selection {wildcards.selection}"
+        " > {log} 2>&1"
+
+
+rule figures:
+    """Every composed figure of the paper, and so every panel beneath them."""
+    input:
+        [str(path) for path in composed_paths(DEFAULT_SELECTION)],

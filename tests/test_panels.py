@@ -442,3 +442,193 @@ def test_panel_selections_name_runs_the_pipeline_trains():
     # pool whatever their selection names, so a second model here would change
     # what `fig:agreement` shows without changing any code.
     assert len(panels.SELECTIONS[panels.DEFAULT_SELECTION]) == 1
+
+
+# The composition. A wrong layout here is a figure that looks finished: a
+# panel silently not placed, letters that no longer match the caption, or
+# type that drifted from the panels it labels. None of it raises.
+
+
+def test_the_layout_places_every_panel_exactly_once():
+    """A letter missing from the rows is a panel silently not drawn.
+
+    ``figure_layout.compose`` takes the panels and the rows separately and
+    draws whatever the rows name, so a letter left out of ``FIGURE_ROWS``
+    produces a complete-looking figure with one panel gone -- and the rule
+    still succeeds, because its outputs are the composed files rather than
+    the count of panels in them.
+    """
+    import panel_spec as spec
+
+    placed = [letter for row in spec.FIGURE_ROWS for letter in row]
+    assert sorted(placed) == sorted(spec.PANEL_LETTERS), (
+        f"the rows place {sorted(placed)} but the figure has panels "
+        f"{sorted(spec.PANEL_LETTERS)}. A letter in one and not the other is "
+        f"either a panel drawn and not placed, or a placement with no panel."
+    )
+    assert len(placed) == len(set(placed)), (
+        f"a letter is placed twice: {placed}. The same panel would be drawn "
+        f"in two cells of the figure."
+    )
+
+
+def test_the_composed_letters_are_the_panels_the_rules_write():
+    """The caption's letters and the rules' outputs are one set.
+
+    These are two spellings of the same five panels -- ``MUTATION_PANELS``
+    and ``LADDER_PANELS`` are what the two rules declare as outputs, and
+    ``PANEL_LETTERS`` is what the composition reads. A stem added to one and
+    not the other is a panel that is drawn, declared and never composed.
+    """
+    import panel_spec as spec
+
+    assert set(spec.PANEL_LETTERS.values()) == set(
+        spec.MUTATION_PANELS + spec.LADDER_PANELS
+    ), (
+        f"the composition reads {sorted(spec.PANEL_LETTERS.values())} and the "
+        f"rules write {sorted(spec.MUTATION_PANELS + spec.LADDER_PANELS)}."
+    )
+
+
+def test_the_panel_letters_are_sized_against_the_type_the_panels_draw():
+    """The letters are sized from the panels' own font constants.
+
+    ``panel_spec`` is stdlib plus ``lib`` on purpose -- ``workflow/
+    figures.smk`` imports it on every invocation -- so it cannot import
+    ``panel_charts`` to read these, and restates them. Restated numbers
+    drift: a panel font bumped in ``panel_charts`` alone would leave the
+    letters sized against type the figure no longer carries, which is a
+    figure whose labels are quietly the wrong size rather than one that
+    fails.
+    """
+    import figure_layout as fl
+    import panel_charts
+    import panel_spec as spec
+
+    assert spec.PANEL_TITLE_PX == panel_charts.PANEL_FONT_SIZE, (
+        f"panel_spec says the panels' titles are {spec.PANEL_TITLE_PX} px and "
+        f"panel_charts draws them at {panel_charts.PANEL_FONT_SIZE}."
+    )
+    assert fl.VEGA_WRITE_PPI == panel_charts.VEGA_WRITE_PPI, (
+        f"figure_layout converts spec px to disk px at "
+        f"{fl.VEGA_WRITE_PPI} ppi and panel_charts saves at "
+        f"{panel_charts.VEGA_WRITE_PPI}. The letters would be sized against "
+        f"a panel rendered at a different resolution."
+    )
+
+
+def test_the_composition_fits_the_page_box_and_keeps_the_panels_in_proportion():
+    """The solved dpi is a fit, not a setting, and it resamples nothing.
+
+    ``compose`` picks the largest dpi whose figure still fits the box, so the
+    two things worth asserting are that the result *is* inside the box and
+    that the panels kept their relative sizes. A layout that quietly stretched
+    one panel to fill its row would pass every file-level check in the rule.
+    """
+    import figure_layout as fl
+    import panel_spec as spec
+
+    # Panels of deliberately unequal shape, so a stretch is visible as a
+    # changed ratio rather than hidden by squares.
+    shapes = {
+        "A": (400, 700),
+        "B": (400, 500),
+        "C": (400, 500),
+        "D": (600, 900),
+        "E": (300, 600),
+    }
+    panels_in = {
+        letter: numpy.zeros((h, w, 4), dtype=float) for letter, (h, w) in shapes.items()
+    }
+    composed = fl.compose(
+        panels_in,
+        [list(row) for row in spec.FIGURE_ROWS],
+        box_in=spec.BOX_IN,
+        scale=spec.FIGURE_SCALE,
+        title_px_on_disk=fl.vega_title_px_on_disk(title_px=spec.PANEL_TITLE_PX),
+    )
+    box_w, box_h = (
+        spec.BOX_IN[0] * spec.FIGURE_SCALE,
+        spec.BOX_IN[1] * spec.FIGURE_SCALE,
+    )
+    assert composed.width_in <= box_w + 1e-9 and composed.height_in <= box_h + 1e-9, (
+        f"the composition is {composed.width_in:.3f} x {composed.height_in:.3f} in, "
+        f"outside the {box_w:.3f} x {box_h:.3f} in box it solved its dpi against."
+    )
+    # Every panel lands at the one solved dpi, so a panel's inches are its
+    # pixels over that dpi and the ratio between any two is their pixel ratio.
+    placed = {
+        letter: (w / composed.dpi, h / composed.dpi)
+        for letter, (h, w) in shapes.items()
+    }
+    assert placed["D"][0] / placed["A"][0] == pytest.approx(900 / 700), (
+        "D and A no longer stand in their pixel ratio, so a panel was resized "
+        "relative to another rather than the whole figure being scaled."
+    )
+
+
+def test_save_figure_writes_every_format_the_rule_declares(tmp_path):
+    """The declared outputs and the written files are one list.
+
+    A format in ``COMPOSED_FORMATS`` that ``save_figure`` does not write
+    fails the rule outright, which is fine. The quiet direction is the other
+    one: a file written but not declared is one snakemake will not clean up
+    after a failed job, so a half-written PDF would survive the rerun that
+    replaced its PNG -- and that PDF is what the manuscript includes.
+    """
+    import figure_layout as fl
+    import panel_spec as spec
+
+    composed = fl.compose(
+        {
+            letter: numpy.zeros((40, 60, 4), dtype=float)
+            for letter in spec.PANEL_LETTERS
+        },
+        [list(row) for row in spec.FIGURE_ROWS],
+        box_in=spec.BOX_IN,
+        scale=spec.FIGURE_SCALE,
+    )
+    written = fl.save_figure(composed, tmp_path, spec.FIGURE_STEM, tex_figure_dir=None)
+    assert sorted(p.suffix.lstrip(".") for p in written) == sorted(
+        spec.COMPOSED_FORMATS
+    ), (
+        f"save_figure wrote {[p.name for p in written]} and the rule declares "
+        f"{sorted(spec.COMPOSED_FORMATS)}."
+    )
+    for path in written:
+        assert path.stat().st_size > 0, f"{path.name} was written empty."
+
+
+def test_the_manuscript_copy_is_skipped_rather_than_invented(tmp_path):
+    """An absent manuscript is reported, not created.
+
+    ``save_figure`` keys on the *parent* of ``tex_figure_dir`` existing, so a
+    clone that is not checked out is a skip and a clone that is gets its
+    ``figures/`` created. Were it to key on the directory itself, a first copy
+    into a fresh clone would be silently skipped; were it to mkdir the parent,
+    a typo in ``config.yaml`` would grow a stray directory beside the
+    repository and report a copy that no reader will find.
+    """
+    import figure_layout as fl
+    import panel_spec as spec
+
+    composed = fl.compose(
+        {
+            letter: numpy.zeros((40, 60, 4), dtype=float)
+            for letter in spec.PANEL_LETTERS
+        },
+        [list(row) for row in spec.FIGURE_ROWS],
+        box_in=spec.BOX_IN,
+        scale=spec.FIGURE_SCALE,
+    )
+    absent = tmp_path / "no-such-clone" / "figures"
+    written = fl.save_figure(composed, tmp_path / "out", "x", tex_figure_dir=absent)
+    assert not absent.exists(), "a copy was made into a manuscript that is not here"
+    assert all(p.parent == tmp_path / "out" for p in written)
+
+    present = tmp_path / "clone" / "figures"
+    present.parent.mkdir()
+    written = fl.save_figure(composed, tmp_path / "out2", "x", tex_figure_dir=present)
+    assert (present / "x.pdf").is_file(), (
+        "the manuscript is checked out and its figures/ did not get the PDF"
+    )

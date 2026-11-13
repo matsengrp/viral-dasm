@@ -179,6 +179,26 @@ already did the forward passes, so a panel rule reads
 |---|---|
 | `agreement_mutations` | panels A, B and D: one mutation across the clades, one clade's cloud, the shift grid |
 | `agreement_ladders` | panels C and E: both correlations against the count cutoff |
+| `compose_agreement` | the figure itself, laid out from those five PNGs |
+
+`snakemake figures` runs all three. **Composition is its own rule because the
+two costs are not alike**: a panel rule reads a 1.4M-row Parquet per model and
+takes a minute, and the layout reads five PNGs and takes a second, so the
+spacing can be nudged and re-run without rescoring anything. It also means the
+figure cannot disagree with its panels -- it *is* their output rather than a
+second drawing of them. `scripts/figure_layout.py` solves the dpi rather than
+taking one: panels arrive as pixels, so the smallest dpi whose figure still
+fits the page box is the largest the figure can legibly be, and nothing is
+resampled or moved relative to anything else.
+
+The composed PDF is also copied to `config.yaml`'s `tex_figure_dir`, the
+manuscript's `figures/`, because a stale PDF in the paper is the failure this
+stage exists to prevent. That copy is deliberately *not* a declared output: it
+is outside both the repository and the artifact root, and snakemake deletes a
+job's declared outputs when it fails, so naming it would let a failed layout
+delete the figure currently in the paper. Set the key to `null` when the
+manuscript is not checked out beside this repository; the composition then
+writes its own copies and reports that it skipped the copy.
 
 Each runs per `{selection}`, which names the models it draws. `figure` is
 `dasm-1077k` -- the largest transformer, which is what every panel of the paper

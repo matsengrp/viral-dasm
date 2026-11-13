@@ -57,4 +57,4 @@ rule all:
         rules.corpora.input,
         rules.models.input,
         rules.scored.input,
-        rules.panels.input,
+        rules.figures.input,
