@@ -154,8 +154,16 @@ def _(PANEL_MODEL, SELECTION, SPEC, TABLE_PATH, charts, mo, panels):
             series_colors=(charts.COUNTS_GREY, charts.DASM_PURPLE),
             series_shapes=("circle", "triangle"),
             title=(f"estimated per-clade fitness effect of {panels.LOOKUP_MUTATION}"),
-            interval_columns=("count_noise_lo", "count_noise_hi"),
-            interval_label=f"{panels.COUNT_NOISE_COVERAGE:.0%} count noise",
+            # **No shaded band.** The interval is computed and carried -- it
+            # rides into the tooltip as `count_noise_p` and into the panel's
+            # CSV as `count_noise_lo`/`_hi` -- but it is not drawn. Shading it
+            # is a separate question from having it, and the published panel
+            # answers no: the band widens the y domain to cover the thinnest
+            # clade's Poisson tail, which costs the two series the contrast
+            # the panel exists to show, and makes panel A taller than B and C
+            # beside it in the composed row. Upstream's
+            # `lookup_band_checkbox` defaults to False for the same reason,
+            # and the figure in the manuscript was saved with it off.
             extra_tooltips={"count_noise_p": "Poisson p (DASM vs count)"},
             **charts.lookup_panel_sizing(len(LOOKUP)),
         )

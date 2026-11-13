@@ -632,3 +632,188 @@ def test_the_manuscript_copy_is_skipped_rather_than_invented(tmp_path):
     assert (present / "x.pdf").is_file(), (
         "the manuscript is checked out and its figures/ did not get the PDF"
     )
+
+
+# Three ways this port drifted from the figure in the manuscript. Each drew a
+# complete, plausible panel, and the first two were only visible once the
+# whole figure was composed. They are pinned here against the notebooks
+# `main.tex`'s provenance block names as the published figure's source.
+
+
+def _marks(spec) -> set[str]:
+    """Every mark type in a Vega-Lite spec, at any depth."""
+    found: set[str] = set()
+
+    def walk(node):
+        if isinstance(node, dict):
+            mark = node.get("mark")
+            if isinstance(mark, str):
+                found.add(mark)
+            elif isinstance(mark, dict) and "type" in mark:
+                found.add(mark["type"])
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(spec)
+    return found
+
+
+def test_panel_a_does_not_shade_the_count_noise_interval():
+    """The published panel draws no band, and the machinery for one exists.
+
+    `with_count_noise_interval` computes the interval and the panel's CSV
+    carries it, so passing `interval_columns` is one keyword away and draws a
+    grey band that looks like a considered choice. It is not: the band widens
+    the y domain to cover the thinnest clade's Poisson tail, which costs the
+    two series the contrast the panel exists to show, and makes panel A
+    taller than B and C beside it in the composed row. Upstream's checkbox
+    for it defaults to off and the manuscript figure was saved with it off.
+    """
+    import panel_charts as charts
+
+    frame = pd.DataFrame(
+        {
+            "clade": ["21J", "21L", "23A"],
+            "delta_fitness": [0.8, -1.2, 2.6],
+            "log_sf": [0.78, -2.5, 2.1],
+            "count_noise_lo": [0.5, -1.7, 2.1],
+            "count_noise_hi": [1.0, -0.6, 3.0],
+        }
+    )
+    banded = charts.mutation_lookup_line(
+        frame,
+        "F456L",
+        interval_columns=("count_noise_lo", "count_noise_hi"),
+    ).to_dict()
+    assert "area" in _marks(banded), (
+        "the band is meant to be one keyword away -- if this fails, "
+        "`interval_columns` no longer draws one and the test below proves "
+        "nothing."
+    )
+
+    plain = charts.mutation_lookup_line(frame, "F456L").to_dict()
+    assert "area" not in _marks(plain), (
+        f"panel A drew a shaded band; marks are {sorted(_marks(plain))}. The "
+        f"figure in the manuscript has none."
+    )
+
+
+def test_panel_a_is_sized_as_the_published_panel_is():
+    """Panel A's height is a property of the whole page, not of panel A.
+
+    `FIGURE_ROWS` puts A beside B and C, and `compose` solves one dpi for the
+    figure, so a taller panel A does not make itself bigger -- it pushes the
+    row down, forces a smaller dpi, and shrinks the type on *every* panel of
+    the figure. That is a layout bug with no local symptom: panel A alone
+    looks fine, panel A's rule succeeds, and only the composed figure shows
+    it. This port had it, at 420x350 against the published 0.8x336x232.
+
+    Pinned as the two constants rather than as a rendered size, because what
+    a panel measures on disk also depends on how many clades it places and
+    how wide its tick labels are, neither of which is a decision.
+    """
+    import panel_charts as charts
+    import panel_spec as spec
+
+    row = next(row for row in spec.FIGURE_ROWS if "A" in row)
+    assert set(row) == {"A", "B", "C"}, (
+        f"panel A's row is {row}; this test's reasoning is about the row it "
+        f"shares, so it needs rewriting for the new layout."
+    )
+    assert (charts.LOOKUP_PANEL_SCALE, charts.LOOKUP_PANEL_HEIGHT) == (0.8, 290), (
+        f"panel A is sized at {charts.LOOKUP_PANEL_SCALE} x "
+        f"{charts.LOOKUP_PANEL_HEIGHT}, where the published figure uses "
+        f"0.8 x 290."
+    )
+    assert charts.lookup_panel_sizing(n_clades=15) == {"width": 336, "height": 232}
+
+
+def test_the_rendered_panel_a_is_no_taller_than_panel_b():
+    """The invariant the constants above are standing in for.
+
+    Runs against the panels this repository last built, so it is the check
+    that would actually have caught the drift; it skips where they have not
+    been built. A difference of a tick row is data -- a clade whose estimate
+    needs one more label -- so this allows the margin one row of type costs
+    and fails on the 500 px the band added.
+    """
+    import panel_spec as spec
+
+    directory = spec.figure_dir(spec.DEFAULT_SELECTION)
+    paths = {letter: directory / f"{spec.PANEL_LETTERS[letter]}.png" for letter in "AB"}
+    missing = [str(p) for p in paths.values() if not p.exists()]
+    if missing:
+        pytest.skip(f"panels not built here: {', '.join(missing)}")
+
+    import matplotlib.image as mpimg
+
+    heights = {letter: mpimg.imread(path).shape[0] for letter, path in paths.items()}
+    # One row of 18 px type at 300 ppi is 75 px on disk; allow one.
+    assert heights["A"] <= heights["B"] + 75, (
+        f"panel A is {heights['A']} px tall and panel B is {heights['B']}. "
+        f"Panel A sets the height of the row, so the whole figure composes "
+        f"at a smaller dpi and every panel's type shrinks."
+    )
+
+
+def test_each_cell_of_the_shift_grid_names_the_pair_it_draws():
+    """Panel D's cells are titled, and with their *own* pair.
+
+    The grid is lower-triangular, so without a title a reader works out which
+    pair a cell holds by counting rows and columns against a layout whose
+    axes are labelled only on the bottom row and the first column. A title
+    taken from the wrong cell is worse than none: a correct-looking panel
+    attributing a correlation to the wrong clades, which no file-level check
+    can see.
+
+    Driven through `shift_grid` rather than `shift_panel`, because the
+    wiring is the thing that can be wrong -- a `shift_panel` called directly
+    with a title is given the answer.
+    """
+    import panel_charts as charts
+
+    clades = ["21J", "21L", "23A"]
+    pairs = ["21J\u219221L", "21J\u219223A", "21L\u219223A"]
+    shift_df = pd.concat(
+        [
+            pd.DataFrame(
+                {
+                    "pair": pair,
+                    "sf_shift": [0.1, -0.4, 1.2, 0.7],
+                    "fitness_shift": [0.2, -0.3, 1.0, 0.9],
+                    "mutation_label": ["A1C", "D2E", "F3G", "H4I"],
+                }
+            )
+            for pair in pairs
+        ],
+        ignore_index=True,
+    )
+    metrics = pd.DataFrame(
+        {
+            "pair_label": pairs,
+            "pearson_r": [0.9, 0.8, 0.7],
+            "n_mutations": [4, 4, 4],
+            "sf_shift_is_constant": [False, False, False],
+        }
+    )
+    grid = charts.shift_grid(shift_df, metrics, clades).to_dict()
+
+    # Row r holds clades[1:][r] as its later clade and clades[:r+1] as its
+    # columns, which is the layout the docstring promises and what a reader
+    # reads the grid by.
+    expected = [
+        [f"{earlier}\u2192{later}" for earlier in clades[:row]]
+        for row, later in enumerate(clades[1:], start=1)
+    ]
+    drawn = [
+        [cell.get("title", {}).get("text") for cell in row["hconcat"]]
+        for row in grid["vconcat"]
+    ]
+    assert drawn == expected, (
+        f"the grid's cells are titled {drawn}, and their positions say they "
+        f"hold {expected}. A cell titled with another cell's pair attributes "
+        f"its correlation to the wrong clades."
+    )

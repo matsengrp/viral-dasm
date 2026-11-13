@@ -237,6 +237,7 @@ SHIFT_TICKS = [-6, -3, 0, 3, 6]
 def shift_panel(
     frame: pd.DataFrame,
     *,
+    title: str,
     stat: str,
     domain: list[float],
     size: int,
@@ -294,8 +295,16 @@ def shift_panel(
     fit = points.transform_regression("sf_shift", "fitness_shift").mark_line(
         strokeWidth=2, color=FIT_FIREBRICK
     )
+    # The pair, over its own cell. Only the bottom row carries an x title and
+    # only the first column a y title, so without this a reader has to count
+    # rows and columns against the grid's axes to learn which pair a cell is
+    # -- and the grid is lower-triangular, so the counting is not the obvious
+    # kind. `offset=3` keeps the label tight to the cell it names rather than
+    # drifting toward the one above.
     return (points + diagonal + fit + _corner_label(stat)).properties(
-        width=size, height=size
+        width=size,
+        height=size,
+        title=alt.TitleParams(title, fontSize=PANEL_FONT_SIZE, offset=3),
     )
 
 
@@ -384,6 +393,7 @@ def shift_grid(
             cells.append(
                 shift_panel(
                     drawn,
+                    title=pair,
                     stat=stat,
                     domain=domain,
                     size=cell,
@@ -528,9 +538,28 @@ def ladder_clade_count(long_df: pd.DataFrame, unit_field: str) -> int:
     return int(long_df[unit_field].nunique())
 
 
+#: Panel A comes down to 80% in both directions. Bigger type in a smaller
+#: frame is the trade this panel wants: one mutation across a few dozen clades
+#: needs legible axes far more than it needs area, and the two series are far
+#: enough apart that the extra pixels only bought whitespace.
+LOOKUP_PANEL_SCALE = 0.8
+
+#: Height separately from width, because the two are constrained by different
+#: things. The width has to hold a few dozen rotated clade labels; the height
+#: only has to resolve two series that are far apart. **In the composed figure
+#: panel A shares a row with B and C**, so a taller panel A does not make
+#: itself bigger -- it pushes the whole row down, forces `compose` to solve a
+#: smaller dpi for the page, and shrinks the type on every other panel while
+#: leaving B and C floating in whitespace. This brings it level with them.
+LOOKUP_PANEL_HEIGHT = 290
+
+
 def lookup_panel_sizing(n_clades: int) -> dict[str, int]:
     """Panel A's width and height, from how many clades it has to place."""
     return {
-        "width": max(420, 20 * n_clades),
-        "height": 350,
+        "width": max(
+            round(LOOKUP_PANEL_SCALE * 420),
+            round(LOOKUP_PANEL_SCALE * 20) * n_clades,
+        ),
+        "height": round(LOOKUP_PANEL_SCALE * LOOKUP_PANEL_HEIGHT),
     }
