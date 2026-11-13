@@ -12,13 +12,20 @@ A run is scored from its ``training_complete.done`` marker rather than from a
 checkpoint path, because ``lib.select_checkpoint`` resolves the checkpoint by
 glob and no rule declares one as an output.
 
-The table stays under the artifact root because of its size -- 1.4M rows per
-run -- not because of the data rules. Counts, fitness effects and selection
-factors are publishable; what M5 commits to tracked ``results/`` is one CSV
-per figure panel, drawn from this table.
+The seven-run concatenation stays under the artifact root because of its size
+-- 1.4M rows per run, 209 MB in all -- not because of the data rules. Counts,
+fitness effects and selection factors are publishable, and so are the clade
+founders that a per-clade mutation label reconstructs: `aa_mutation` spells
+the founder residue, so any mutation-level table published here gives them up,
+the per-panel CSVs included. They are reconstructible from the public UShER
+tree without GISAID, so this is not the line the data rules draw.
+
+What is tracked is the single run the manuscript cites -- see
+``publish_scored_table`` at the foot of this file.
 """
 
-from lib import FITNESS_SUFFIX
+from lib import FITNESS_SUFFIX, FULL_DEPTH
+from panel_spec import FIGURE_MODEL
 from runs import SCORE_MEM_MB
 
 SCORED_DIR = f"{ARTIFACT_ROOT}/scored"
@@ -30,6 +37,21 @@ SCORED_TABLE = f"{SCORED_DIR}/selection_factors.parquet"
 #: out of mat-pcp's directories, so a run scored before the three readings are
 #: known to agree could silently cover fewer clades than the run has.
 CLADE_GUARD = f"{ARTIFACT_ROOT}/clade_guard/clades.json"
+
+#: The one scored run the manuscript cites, and the only one tracked.
+#:
+#: `FIGURE_MODEL` rather than a second spelling of the model's name: the table
+#: the paper publishes is the model its figures are drawn from, so if that ever
+#: moves, this moves with it instead of going quietly stale.
+PUBLISHED_RUN = run_id(FIGURE_MODEL, FULL_DEPTH.name)
+
+#: Tracked. 23 MiB of parquet, 1,425,760 rows: every amino acid at every spike
+#: site on every one of the 56 clade founders, carrying the DASM's selection
+#: factor beside both the per-clade and the clade-pooled counts estimate. Every
+#: panel of `fig:agreement` is a filter on it, and the three remaining figures
+#: read it too, which is why the manuscript names this one file rather than the
+#: per-panel CSVs drawn from it.
+PUBLISHED_TABLE = f"results/selection_factors/{PUBLISHED_RUN}.parquet"
 
 
 # The per-clade mat-pcp files the scoring stage reads, declared by globbing the
@@ -73,6 +95,7 @@ rule scored:
         # naming it here is what makes the guard visible from the top target.
         guard=CLADE_GUARD,
         table=SCORED_TABLE,
+        published=PUBLISHED_TABLE,
 
 
 rule check_clades:
@@ -121,6 +144,10 @@ rule score:
         script="scripts/score_run.py",
         gpu_slot="scripts/gpu_slot.py",
         lib="scripts/lib.py",
+        # The founder reader, shared with the panel rules so that editing one
+        # side does not mark the other's outputs out of date. It is what reads
+        # `dasm2/io.py`, `conversion.py` and `scov2_rates.py` below.
+        founder_reader="scripts/founders.py",
         config="config.yaml",
         guard=CLADE_GUARD,
         analysis_viral="dasm2/analysis/viral.py",
@@ -199,3 +226,24 @@ rule scored_table:
         " --inputs {input.tables}"
         " --output {output.table}"
         " > {log} 2>&1"
+
+
+rule publish_scored_table:
+    """Copy the cited run's scored table into tracked ``results/``.
+
+    A copy rather than a second output of ``rule score``, because ``score``
+    claims a GPU: declaring this path there would mean that publishing a file
+    which already exists re-staled seven GPU jobs.
+
+    It runs ``cp`` and no repository code, which is why
+    ``tests/test_rule_inputs.py`` carries it as a deliberate exemption rather
+    than an entry point. The table's *content* is ``score``'s to be right
+    about; this rule is only responsible for the copy being of the run
+    ``PUBLISHED_RUN`` names.
+    """
+    input:
+        table=f"{SCORED_DIR}/{PUBLISHED_RUN}.parquet",
+    output:
+        table=PUBLISHED_TABLE,
+    shell:
+        "cp {input.table} {output.table}"

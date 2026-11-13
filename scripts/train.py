@@ -32,6 +32,7 @@ already enumerated the devices before any line of `main` runs.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -84,6 +85,60 @@ def latest_resumable(output_dir: Path) -> Path | None:
     return checkpoints[0] if checkpoints else None
 
 
+def refuse_if_complete(guard_path: Path | None) -> None:
+    """Stop before a finished run is trained over.
+
+    **This exists because training resumes rather than refusing.** A run
+    whose guard says it passed has its weights on disk and its row in
+    `results/runs.csv`; scheduling it again does not no-op, it loads the
+    last checkpoint and carries on, and the stopping point the paper reports
+    is then a thing that happened to a model nobody has any more. Those runs
+    cost days of GPU time and cannot be reproduced exactly -- the campaign
+    spanned two torch versions -- so the cost of one spurious schedule is
+    unbounded and the cost of this check is a stat call.
+
+    It fires on exactly the runs that are finished. **A run with no guard
+    file trains normally**, which is what a new model arm, a new corpus or a
+    rule being tested all look like, so this protects the campaign without
+    standing in the way of the next one. A guard reporting `passed: false`
+    also trains: that run is not finished, and retrying it is the point.
+
+    The guard file is deliberately **not** a declared input of `rule train`.
+    It is written by `check_run`, which is downstream of training, so
+    declaring it would close a cycle (`train` -> `read_run` -> `check_run`
+    -> `train`). The rule passes the path as a parameter instead, and this
+    is the one undeclared read in the pipeline.
+    """
+    if guard_path is None or not guard_path.is_file():
+        return
+    try:
+        guard = json.loads(guard_path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        # An unreadable guard is not permission to train. It is the only
+        # evidence that the run finished, so losing track of it means
+        # stopping and looking, not overwriting what it was describing.
+        raise SystemExit(
+            f"cannot read the run guard at {guard_path}: {exc}. Refusing to "
+            f"train, because this file is what says whether the run is "
+            f"already finished."
+        ) from exc
+    if not guard.get("passed"):
+        return
+    raise SystemExit(
+        f"{guard_path.stem} has already trained: {guard_path} reports "
+        f"passed, stopping at step {guard.get('steps_to_stop')} with "
+        f"{guard.get('stop_reason')!r}. Training resumes from the last "
+        f"checkpoint rather than starting over, so this would continue a "
+        f"run the paper has already reported and leave no copy of what it "
+        f"reported.\n\n"
+        f"If a rule upstream went stale and you only meant to rebuild "
+        f"something else, run `snakemake --touch` first and check "
+        f"`--dry-run` lists no `train`. If you really do mean to retrain, "
+        f"pass `--config retrain={guard_path.stem}` (or `retrain=all`), "
+        f"which is the only thing that lifts this."
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True, type=Path)
@@ -117,7 +172,19 @@ def main() -> None:
         action="store_true",
         help="start fresh even if the output directory holds a checkpoint",
     )
+    parser.add_argument(
+        "--refuse-if-complete",
+        type=Path,
+        default=None,
+        metavar="RUN_GUARD_JSON",
+        help=(
+            "refuse to train if this run guard reports the run already "
+            "passed; the campaign's finished runs are protected this way"
+        ),
+    )
     args = parser.parse_args()
+
+    refuse_if_complete(args.refuse_if_complete)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     resume = None if args.no_resume else latest_resumable(args.output_dir)

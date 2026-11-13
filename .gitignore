@@ -6,3 +6,6 @@ _ignore/
 
 # `results/` is deliberately not ignored; see README's Layout for why.
 *.egg-info/
+
+# marimo writes a session cache beside a notebook when it exports one.
+notebooks/__marimo__/

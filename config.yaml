@@ -231,3 +231,15 @@ cv_split:
 
 # Training seed. 42 everywhere, so a run here is comparable to the reference.
 train_seed: 42
+
+# Where `rule compose_agreement` copies the composed figure's PDF, as a path
+# relative to this repository's root. The manuscript is a sibling clone and
+# `main.tex` includes `figures/agreement.pdf` from it, so the copy is part of
+# composing rather than a step someone remembers: a stale PDF in the paper is
+# the one failure this stage exists to prevent.
+#
+# It is not a declared output, because it is outside both the repository and
+# the artifact root and snakemake would delete it on a failed job. Set it to
+# `null` when the manuscript is not checked out; the composition then writes
+# its own copies and says the copy was skipped, rather than failing.
+tex_figure_dir: ../viral-dasm-tex/figures

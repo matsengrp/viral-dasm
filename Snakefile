@@ -16,6 +16,8 @@ after it: the paper's seven models, each stopping on the learning-rate floor
 and each read back out of its own log into ``results/runs.csv``. Milestone 4
 (issue #16) scores them: every run's best checkpoint against mat-pcp's
 amino-acid fitness effects on every clade founder, in one tidy table.
+Milestone 5 reads that table back out into the figures: issue #19 is the
+first of its four analyses, `fig:agreement`'s five panels.
 """
 
 import sys
@@ -40,6 +42,7 @@ from lib import (  # noqa: E402
 include: "workflow/corpus.smk"
 include: "workflow/train.smk"
 include: "workflow/score.smk"
+include: "workflow/figures.smk"
 
 
 rule all:
@@ -54,3 +57,4 @@ rule all:
         rules.corpora.input,
         rules.models.input,
         rules.scored.input,
+        rules.figures.input,

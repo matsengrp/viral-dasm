@@ -62,6 +62,7 @@ assert_dasm2_is_this_repo()
 import argparse
 
 import pandas as pd
+from founders import founder_aa_sequence
 from gpu_slot import claim_card
 
 from dasm2.analysis.viral import (
@@ -69,9 +70,6 @@ from dasm2.analysis.viral import (
     slice_fitness_for_gene,
 )
 from dasm2.analysis.viral_fitness_eval import SelectionFactorSource
-from dasm2.io import read_fasta_first_sequence
-from dasm2.neutral.scov2_rates import GENE_NT_LENGTH
-from dasm2.sequence.conversion import translate_sequence
 from dasm2.sequence.masking import (
     censored_codon_sites,
     load_censor_table,
@@ -97,29 +95,6 @@ POOLED_VALUE_COLUMNS = [
     "delta_fitness_bayesian",
     "source_clade",
 ]
-
-
-def founder_aa_sequence(clade: str, gene: str) -> str:
-    """One clade's founder protein sequence, length-checked.
-
-    Read from mat-pcp's own ``clade_founders/{gene}/{clade}.fa``, *not* derived
-    from the fitness table. Taking the table's distinct ``aa_site`` values
-    instead drops sites that happen to carry no fitness rows, and the resulting
-    sequence is frame-shifted from the first gap onward with nothing raising.
-
-    Raises:
-        ValueError: If the translation's length disagrees with
-            ``GENE_NT_LENGTH``, which is how a founder for the wrong gene, or a
-            truncated FASTA, fails here rather than at the join.
-    """
-    path = mat_pcp_path("clade_founders_dir") / f"{clade}.fa"
-    aa = translate_sequence(read_fasta_first_sequence(path))
-    if len(aa) * 3 != GENE_NT_LENGTH[gene]:
-        raise ValueError(
-            f"{gene}/{clade}: founder translates to {len(aa)} codons but "
-            f"GENE_NT_LENGTH says {GENE_NT_LENGTH[gene] // 3}"
-        )
-    return aa
 
 
 def codon_sites_of(nt_indices: Iterable[int]) -> set[int]:

@@ -62,9 +62,6 @@ def _():
     import sys
     from pathlib import Path
 
-    import altair as alt
-    import pandas as pd
-
     # `runs` owns the run list and `lib` the artifact root, so this notebook
     # cannot name a run the workflow did not train, or miss one it did.
     REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -72,10 +69,16 @@ def _():
         if str(_path) not in sys.path:
             sys.path.insert(0, str(_path))
 
+    # `lib` and then `dasm2` above `pandas`, for the two reasons
+    # `tests/test_import_order.py` gives: `lib` is what puts the repository
+    # root on `sys.path`, and `pandas` pulls pyarrow in transitively.
     from lib import ARTIFACT_ROOT
     from runs import MODELS, RUNS, run_id
 
     from dasm2.training.log_reader import get_run_eval_losses
+
+    import altair as alt
+    import pandas as pd
 
     RUN_DIR = Path(ARTIFACT_ROOT) / "runs"
     return MODELS, RUNS, RUN_DIR, alt, get_run_eval_losses, pd, run_id

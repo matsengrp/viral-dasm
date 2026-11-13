@@ -106,6 +106,15 @@ ARTIFACT_ROOT = Path(
 )
 GENE = CONFIG["mat_pcp"]["gene"]
 
+#: Where a composed figure's PDF is copied for the manuscript, or ``None`` when
+#: the manuscript is not checked out beside this repository. Relative in
+#: ``config.yaml`` and resolved here, because the two clones are siblings
+#: wherever a reader puts them; an absolute value is honoured as given.
+_tex_figure_dir = CONFIG.get("tex_figure_dir")
+TEX_FIGURE_DIR = (
+    None if _tex_figure_dir is None else (REPO_ROOT / str(_tex_figure_dir)).resolve()
+)
+
 #: Where every process that takes a card writes its lock. One name, because the
 #: guarantee is that a training run and a scoring pass can never both hold one
 #: GPU, and that guarantee is only as strong as the agreement about the
@@ -575,6 +584,16 @@ def _check_config() -> None:
                 f"{name} is read pinned from {spec.path} but records no md5, "
                 f"so nothing identifies the file this pipeline was run against."
             )
+    # A `tex_figure_dir` that YAML read as something other than a string or
+    # null is a path this pipeline would silently not copy to. `null` is the
+    # documented way to say the manuscript is absent; a bare `~` or an empty
+    # value both parse to it, so only a wrong *type* is caught here.
+    if _tex_figure_dir is not None and not isinstance(_tex_figure_dir, str):
+        raise TypeError(
+            f"tex_figure_dir is {type(_tex_figure_dir).__name__} "
+            f"({_tex_figure_dir!r}); it is a path or null. A composed figure "
+            f"would be written but never reach the manuscript."
+        )
     if len(SMOKE_CORPUS_MD5) != 32:
         raise ValueError(
             f"smoke_corpus.md5 is {len(SMOKE_CORPUS_MD5)} hex characters; md5 gives 32."
