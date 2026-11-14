@@ -38,11 +38,13 @@ effects and selection factors are publishable; no panel carries a sequence.
 # invocation, and importing the panel code here would pull `dasm2`, pandas and
 # pyarrow into a dry run to learn five file names.
 from panel_spec import (
-    DEFAULT_SELECTION,
+    ARM,
     CANDIDATE_CSV,
+    DEFAULT_SELECTION,
     LADDER_PANELS,
     MUTATION_PANELS,
     OUTLIER_PANELS,
+    OUTLIER_TABLE_STEM,
     PANEL_LETTERS,
     PANEL_MEM_MB,
     SELECTIONS,
@@ -258,6 +260,53 @@ rule within_clade_outliers:
         panels=panel_outputs(OUTLIER_PANELS, "{selection}"),
     log:
         f"{ARTIFACT_ROOT}/logs/within_clade_outliers_{{selection}}.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "marimo export html {input.notebook} -o {output.html} --force"
+        " -- --table {input.table}"
+        " --selection {wildcards.selection}"
+        " > {log} 2>&1"
+
+
+rule outlier_ranking:
+    """Table S1: the mutations the two approaches most disagree about.
+
+    A table rather than a panel, and its own rule rather than a cell of a
+    panel notebook: it is the agreement comparison at a higher count floor,
+    read by the supplement, and nothing in a figure depends on it.
+    """
+    wildcard_constraints:
+        selection="|".join(SELECTIONS),
+    input:
+        panels="scripts/panels.py",
+        spec="scripts/panel_spec.py",
+        lib="scripts/lib.py",
+        founder_reader="scripts/founders.py",
+        config="config.yaml",
+        analysis_viral="dasm2/analysis/viral.py",
+        analysis_eval="dasm2/analysis/viral_fitness_eval.py",
+        io="dasm2/io.py",
+        conversion="dasm2/sequence/conversion.py",
+        scov2_rates="dasm2/neutral/scov2_rates.py",
+        dasm2_init="dasm2/__init__.py",
+        notebook="notebooks/outlier_ranking.py",
+        table=SCORED_TABLE,
+        # The clade roster, taken from the agreement figure's own tracked
+        # table so the two cannot disagree about which clades are compared.
+        roster=str(panel_csv_path(DEFAULT_SELECTION, "panel_c_within_clade_ladder")),
+        # The branches each clade's opportunity is measured over. mat-pcp's
+        # PCPs rather than this pipeline's Parquet: the Parquet drops the
+        # branch length the mass is weighted by.
+        pcps=str(corpus(ARM).source_pcp),
+        clade_founders=clade_founder_fastas,
+        masked_nt_sites=str(mat_pcp_path("masked_nt_sites_file")),
+        reference=str(mat_pcp_path("reference_sequence_file")),
+    output:
+        html=f"{NOTEBOOK_DIR}/outlier_ranking_{{selection}}.html",
+        table_csv=str(panel_csv_path("{selection}", OUTLIER_TABLE_STEM)),
+    log:
+        f"{ARTIFACT_ROOT}/logs/outlier_ranking_{{selection}}.log",
     resources:
         mem_mb=PANEL_MEM_MB,
     shell:

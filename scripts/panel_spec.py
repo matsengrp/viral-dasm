@@ -261,6 +261,23 @@ OUTLIER_PANELS = tuple(f"panel_a_outliers_{clade}" for clade in CANDIDATE_CLADES
 #: middle of the diagonal, where reaching the right edge means a leader drawn
 #: across the whole cloud and the space immediately to their left is empty.
 CANDIDATE_LABEL_SIDES = {"22D": "right", "20B": "left"}
+
+#: Table S1's cutoff and its cut. The ranking is the agreement comparison at a
+#: higher count floor: `main.tex` describes it as the mutations whose actual or
+#: expected count in the clade reached 50, ordered by the absolute difference
+#: between the two approaches, and printed down to a difference of 2.
+#:
+#: **Deliberately not `PANEL_MIN_COUNT`.** The panels' cutoff is 10 and this is
+#: 50, and the two answer different questions: a panel asks what the comparison
+#: looks like, a ranking of disagreements asks which rows are well enough
+#: measured to be worth explaining.
+OUTLIER_MIN_COUNT = 50.0
+OUTLIER_MIN_DIFFERENCE = 2.0
+
+#: Where the ranking lands. Not a panel -- it is a table in the supplement --
+#: but it is written through the same `write_panel_csv` choke point, so it
+#: carries the filter spec in its columns like every other tracked table here.
+OUTLIER_TABLE_STEM = "table_s1_outlier_ranking"
 BACKGROUND_PANELS = ("panel_b_background_effects",)
 SCAN_PANELS = ("panel_c_clade_row",)
 

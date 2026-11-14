@@ -62,7 +62,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 # `lib` first, so this repository's root is on `sys.path` before anything
 # imports `dasm2` and the vendored fork wins over an editable install.
-from lib import GENE, assert_dasm2_is_this_repo, mat_pcp_path
+from lib import GENE, assert_dasm2_is_this_repo, corpus, mat_pcp_path
 
 # Then `dasm2`, before pandas or pyarrow: `dasm2/arrow_pool.py` moves Arrow off
 # the bundled mimalloc, and can only do so if pyarrow has not been imported yet.
@@ -96,7 +96,10 @@ from panel_spec import (  # noqa: F401  (re-exported for the notebooks)
     LADDER_PANELS,
     LOOKUP_MUTATION,
     MUTATION_PANELS,
+    OUTLIER_MIN_COUNT,
+    OUTLIER_MIN_DIFFERENCE,
     OUTLIER_PANELS,
+    OUTLIER_TABLE_STEM,
     PANEL_CSV_DIR,
     PANEL_MIN_COUNT,
     SCATTER_CLADE,
@@ -136,6 +139,7 @@ from dasm2.analysis.viral_fitness_eval import (  # noqa: F401  (re-exported)
 )
 from dasm2.io import read_fasta_first_sequence
 from dasm2.neutral.scov2_rates import GENE_NT_LENGTH
+from dasm2.sequence.conversion import translate_sequence
 
 
 @dataclass(frozen=True)
@@ -329,6 +333,68 @@ def drop_unobservable_codons(frame: pd.DataFrame, clade: str) -> pd.DataFrame:
     if not codons:
         return frame
     return frame[~frame["aa_site"].isin(codons)]
+
+
+#: Rows per chunk when streaming the PCP corpus. The file is 112 MB gzipped
+#: and every row carries a 3,819-nucleotide parent, so it is read in pieces
+#: and reduced as it goes rather than held.
+PCP_CHUNK_ROWS = 200_000
+
+
+def founder_background_fraction(
+    wanted: dict[str, list[tuple[int, str]]], pcp_path: str | Path
+) -> dict[tuple[str, int, str], float]:
+    """The share of a clade's branch mass still carrying the founder residue.
+
+    **What the counts approach assumes, and cannot check.** A mutation's
+    expected count is the clade's fitted rate for that nucleotide change
+    scaled to the whole clade (mat-pcp ``rates.py``), while its actual count
+    is taken only on branches whose parent carries the founder codon
+    (``build_count_table.py``). For a mutation that has risen to high
+    frequency the two cover different branch sets: by the time most of the
+    clade already carries it, the opportunity left to acquire it again is a
+    fraction of what the expectation assumes. Dividing the expectation by
+    that fraction is what puts the two on the same footing.
+
+    Reads only the codon at each site asked for, not the whole translation:
+    the question is per site, and translating 1.5M spike sequences to answer
+    it for a handful would cost minutes for nothing.
+
+    Args:
+        wanted: ``{clade: [(1-indexed aa site, founder residue), ...]}``.
+        pcp_path: The corpus the clade's branches come from.
+
+    Returns:
+        ``{(clade, site, residue): fraction}``, weighted by branch length.
+    """
+    founder_mass = {
+        (clade, site, residue): 0.0
+        for clade, sites in wanted.items()
+        for site, residue in sites
+    }
+    total_mass = dict.fromkeys(wanted, 0.0)
+    for chunk in pd.read_csv(
+        pcp_path, usecols=["clade", "parent", "branch_length"], chunksize=PCP_CHUNK_ROWS
+    ):
+        chunk = chunk[chunk["clade"].isin(wanted)]
+        if chunk.empty:
+            continue
+        for clade, part in chunk.groupby("clade"):
+            lengths = part["branch_length"].to_numpy(float)
+            total_mass[clade] += lengths.sum()
+            parents = part["parent"].tolist()
+            for site, residue in wanted[clade]:
+                codons = (parent[3 * (site - 1) : 3 * site] for parent in parents)
+                carried = np.fromiter(
+                    (translate_sequence(codon) == residue for codon in codons),
+                    dtype=bool,
+                    count=len(parents),
+                )
+                founder_mass[(clade, site, residue)] += lengths[carried].sum()
+    return {
+        key: mass / total_mass[key[0]] if total_mass[key[0]] else float("nan")
+        for key, mass in founder_mass.items()
+    }
 
 
 def base_frames(
