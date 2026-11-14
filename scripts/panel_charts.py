@@ -302,7 +302,7 @@ def scatter_panel(
     metric: str,
     clade: str,
     clip_lower: float,
-    stat: str,
+    stat: str | None,
     size: int = 225,
     labelled: pd.DataFrame | None = None,
     label_side: str = "right",
@@ -333,6 +333,12 @@ def scatter_panel(
     to Vega, which would otherwise tick out across the gutter -- an axis that
     keeps going past the last point invites a reader to look for one. Neither
     applies without ``labelled``, so the agreement figure's panel is unchanged.
+
+    ``stat=None`` draws no corner statistic. `fig:agreement`'s panel reports
+    an ``r`` there, which is what that figure is about; these panels would
+    report only an ``n``, and the count of mutations passing a cutoff is not
+    a result -- it is a property of the cutoff, which the caption already
+    states.
     """
     high = float(max(frame["log_selection_factor"].max(), frame[metric].max()))
     padding = 0.04 * ((high - clip_lower) or 1)
@@ -391,7 +397,13 @@ def scatter_panel(
     # The cloud first, then the lines over it: a reference line under a dense
     # scatter is buried wherever the data is thickest, which is exactly where a
     # reader looks for it. The labels last of all, over everything.
-    layered = base + diagonal + fit + _corner_label(stat)
+    # `None` draws no corner at all, which is not the same as an empty
+    # string: an empty text mark still reserves its line, and the two panels
+    # that pass `None` are read as a column with the background rows beside
+    # them, where a blank top-left corner is visible as a ragged edge.
+    layered = base + diagonal + fit
+    if stat is not None:
+        layered = layered + _corner_label(stat)
     if labelled is not None and len(labelled):
         layered = layered + _candidate_labels(
             labelled,

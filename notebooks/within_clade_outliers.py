@@ -40,6 +40,15 @@ def _(mo):
     where the approaches *disagree*, and a label on a mark that is where it
     should be points at nothing to see.
 
+    Measured, because that constant is hand-set and nothing else checks it.
+    DASM minus counts, on this panel's own model and cutoff: 22D's R346T,
+    K356T and F490S are +3.25, +3.16 and +2.17, while 20B's P681H, T478K and
+    T732A are -0.45, +0.42 and -0.28 and 21K's R346K is +0.74. The evidence
+    is here rather than beside the constant in `panel_spec.py`, which every
+    figure rule declares as an input: a comment added there invalidates the
+    haplotype scoring and the pool counts, and this one is worth no corpus
+    passes at all.
+
     **Two lists, one labelled set.** The subjects come from
     `data/shift_candidates.csv`, which this panel and the next both read, so a
     candidate moved off the figure leaves both in one edit. The background
@@ -123,7 +132,11 @@ def _(BASE, CANDIDATES, CLADES, PANEL_MODEL, SELECTION, SPEC, charts, mo, panels
                 metric=SPEC.fitness_metric,
                 clade=_clade,
                 clip_lower=SPEC.clip_lower,
-                stat=charts.stat_label(None, len(_frame)),
+                # No corner statistic. It could only be an `n`, and the
+                # number of mutations clearing the count cutoff is a
+                # property of the cutoff rather than a result; the caption
+                # states the cutoff. `fig:agreement`'s panel keeps its `r`.
+                stat=None,
                 labelled=_labelled,
                 label_side=panels.CANDIDATE_LABEL_SIDES[_clade],
             ),
