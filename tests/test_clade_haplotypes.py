@@ -14,6 +14,7 @@ substitutions against it, and the branches are four hand-built parents.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -43,10 +44,18 @@ STOPPED_SITE = 320
 
 
 def founder_nt() -> str:
-    """The clade's founder nucleotides, or skip if mat-pcp is not readable."""
+    """The clade's founder nucleotides, honouring ``VIRAL_DASM_REQUIRE_DATA``.
+
+    Every test in this file needs the founders, so a silent skip here takes
+    the whole file with it -- including the contract with ``read_backgrounds``.
+    ``VIRAL_DASM_REQUIRE_DATA=1`` turns that into a failure, as it does for
+    the scored table in ``tests/test_panels.py``.
+    """
     try:
         return panels._founder_nt_sequence(CLADE)
     except (FileNotFoundError, KeyError) as error:  # pragma: no cover
+        if os.environ.get("VIRAL_DASM_REQUIRE_DATA") == "1":
+            pytest.fail(f"mat-pcp founders are not readable here: {error}")
         pytest.skip(f"mat-pcp founders are not readable here: {error}")
 
 
@@ -68,8 +77,13 @@ def enumerated(tmp_path_factory) -> pd.DataFrame:
     alanine_one = with_codon(founder, SUBSTITUTED_SITE, "GCT")
     alanine_two = with_codon(alanine_one, SILENT_SITE, founder_codon_synonym(founder))
     stopped = with_codon(founder, STOPPED_SITE, "TAA")
-    if len({founder, alanine_one, alanine_two, stopped}) != 4:
-        pytest.skip(f"{CLADE}'s founder already carries one of the test codons")
+    # A failure, not a skip: these codons are chosen to differ from the
+    # founder, so colliding with it means the founder moved under the
+    # test -- which is the thing worth being told about.
+    assert len({founder, alanine_one, alanine_two, stopped}) == 4, (
+        f"{CLADE}'s founder already carries one of the test codons, so "
+        f"the four parents are not distinct. Pick other sites."
+    )
 
     corpus = tmp_path_factory.mktemp("corpus") / "pcps.csv"
     pd.DataFrame(
@@ -97,7 +111,7 @@ def founder_codon_synonym(founder: str) -> str:
                 codon = first + second + third
                 if codon != current and translate_codon(codon) == residue:
                     return codon
-    pytest.skip(f"no synonymous alternative to {current}")
+    pytest.fail(f"no synonymous alternative to {current}; pick another site")
 
 
 def test_the_founder_identical_haplotype_is_labelled_not_left_empty(enumerated):

@@ -111,11 +111,13 @@ def _(PANEL_DIR, SELECTION, fl, mo, spec):
 
 @app.cell
 def _(PANELS, fl, spec):
-    # Every panel here is Vega-Lite written by `panel_charts.save_panel` at
-    # `VEGA_WRITE_PPI`, with titles at `PANEL_FONT_SIZE`, which is what the
-    # panel letters are sized against -- the same arrangement
-    # `fig:agreement`'s composition relies on, and for the same reason: both
-    # halves of this figure are Vega-Lite, so one title size serves all six.
+    # The two halves of this figure are drawn by different renderers: the
+    # scatters are Vega-Lite from `panel_charts.save_panel`, the background
+    # rows matplotlib from `save_mpl_panel`. One title size still serves all
+    # six, because both are written at `VEGA_WRITE_PPI` and a Vega-Lite pixel
+    # and a matplotlib point both land at `size * ppi / 72` on disk --
+    # `BACKGROUND_FONT_PT` is `PANEL_FONT_SIZE` converted on that basis. That
+    # is what the panel letters are sized against.
     composed = fl.compose(
         PANELS,
         [list(_row) for _row in spec.SHIFT_FIGURE_ROWS],

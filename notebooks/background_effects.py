@@ -139,7 +139,7 @@ def _(CELLS_PATH, SELECTION, SHIFTS_PATH, mo, panels, pd):
     _p = SHIFTS.drop_duplicates(["candidate", "p_value"]).set_index("candidate")
     FOCAL["p_label"] = [
         (
-            f"p < {1 / 10001:.0e}".replace("e-0", "e-")
+            f"p < {1 / (panels.DEFAULT_PERMUTATIONS + 1):.0e}".replace("e-0", "e-")
             if bool(_p.loc[candidate, "p_at_floor"])
             else f"p = {float(_p.loc[candidate, 'p_value']):.2g}"
         )
