@@ -142,16 +142,19 @@ def _(ARM, MODELS, TABLE_MODEL, TABLE_PATH, mo, np, panels, pd):
 
 @app.cell
 def _(OVER_CUT, SELECTION, SPEC, mo, panels, pd):
+    # The names `si.tex` prints, so the table on the page and the table here
+    # are read the same way. The CSV keeps the frame's own column names: it is
+    # written from `OVER_CUT` below rather than from this renamed copy.
     COLUMNS = {
         "clade": "Clade",
         "aa_mutation": "Mutation",
-        "actual_count": "a",
-        "predicted_count": "e",
-        "delta_fitness_ratio": "Counts",
-        "log_selection_factor": "DASM",
-        "founder_opportunity": "phi",
+        "actual_count": "Actual count",
+        "predicted_count": "Expected count",
+        "delta_fitness_ratio": "Fitness effect (counts)",
+        "log_selection_factor": "Fitness effect (DASM)",
+        "founder_opportunity": "Opportunity (%)",
         "difference": "Difference",
-        "adjusted": "Adjusted",
+        "adjusted": "Adjusted difference",
     }
     TABLE = OVER_CUT[list(COLUMNS)].rename(columns=COLUMNS).reset_index(drop=True)
     panels.write_panel_csv(
