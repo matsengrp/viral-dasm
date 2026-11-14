@@ -1,0 +1,6 @@
+model,clade,min_count,aa_mutation,aa_site,parent_aa,mutant_aa,log_selection_factor,log_selection_factor_raw,delta_fitness_ratio,delta_fitness_ratio_raw,actual_count,predicted_count,spec_fitness_metric,spec_min_count,spec_clip_lower,spec_min_clade_mutations,spec_exclude_synonymous,spec_count_filter_mode
+dasm-1077k,22D,10,K444T,444,K,T,5.025527477264404,5.025527477264404,3.1046756440576457,3.1046756440576457,25,0.6433960304182326,delta_fitness_ratio,0.0,-4.0,20,True,or
+dasm-1077k,22D,10,L452R,452,L,R,6.1391448974609375,6.1391448974609375,4.223380542982685,4.223380542982685,58,0.3569687814636601,delta_fitness_ratio,0.0,-4.0,20,True,or
+dasm-1077k,22D,10,F486S,486,F,S,5.393815040588379,5.393815040588379,3.68343710582938,3.68343710582938,93,1.85025616938788,delta_fitness_ratio,0.0,-4.0,20,True,or
+dasm-1077k,22D,10,F486V,486,F,V,5.706689834594727,5.706689834594727,3.626756829508449,3.626756829508449,32,0.3645754168109728,delta_fitness_ratio,0.0,-4.0,20,True,or
+dasm-1077k,22D,10,D574V,574,D,V,6.9382429122924805,6.9382429122924805,3.699854496558114,3.699854496558114,55,0.8723553870096011,delta_fitness_ratio,0.0,-4.0,20,True,or

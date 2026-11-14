@@ -85,6 +85,9 @@ from founders import founder_aa_sequences
 # pyarrow to learn five file names.
 from panel_spec import (  # noqa: F401  (re-exported for the notebooks)
     ARM,
+    CANDIDATE_CLADES,
+    CANDIDATE_CSV,
+    CANDIDATE_LABEL_SIDES,
     COUNT_LADDER,
     DEFAULT_SELECTION,
     FIDELITY_MODELS,
@@ -93,12 +96,14 @@ from panel_spec import (  # noqa: F401  (re-exported for the notebooks)
     LADDER_PANELS,
     LOOKUP_MUTATION,
     MUTATION_PANELS,
+    OUTLIER_PANELS,
     PANEL_CSV_DIR,
     PANEL_MIN_COUNT,
     SCATTER_CLADE,
     SELECTIONS,
     SHIFT_CLADES,
     TABLE_COLUMNS,
+    figure_candidates,
     figure_dir,
     panel_csv_path,
     selection_models,
@@ -396,6 +401,38 @@ def by_clade(
 ) -> dict[str, pd.DataFrame]:
     """One model's frames, keyed by clade, as the statistics functions want."""
     return {clade: frame for (m, clade), frame in frames.items() if m == model}
+
+
+def candidate_rows(
+    frame: pd.DataFrame, clade: str, candidates: Iterable[tuple[str, str]]
+) -> pd.DataFrame:
+    """One clade's labelled candidates, as rows of its own comparison frame.
+
+    Drawn from ``frame`` rather than joined from the candidate file, so a
+    label sits on the mark it names and carries the values the panel plots.
+
+    **A missing candidate raises.** These are the mutations
+    `fig:within_clade_shifts` is about, named in `data/shift_candidates.csv`
+    and discussed by name in `main.tex`; one that falls out of the comparison
+    -- below the cutoff after a recount, or dropped by a filter -- must stop
+    the panel rather than quietly draw six points where the caption says
+    seven. That is the failure this function exists to make loud, and it is
+    not hypothetical: #37, #39 and #40 each moved which mutations the
+    comparison holds.
+
+    Raises:
+        ValueError: If a candidate for ``clade`` is absent from ``frame``.
+    """
+    wanted = [mutation for candidate, mutation in candidates if candidate == clade]
+    rows = frame[frame["aa_mutation"].isin(wanted)]
+    missing = sorted(set(wanted) - set(rows["aa_mutation"]))
+    if missing:
+        raise ValueError(
+            f"{clade} has no comparison row for {', '.join(missing)}, which "
+            f"{CANDIDATE_CSV.name} names as a figure candidate. The panel "
+            f"would draw {len(rows)} of {len(wanted)} labelled mutations."
+        )
+    return rows
 
 
 #: Panel A's columns, which are not the table's: the two approaches arrive as

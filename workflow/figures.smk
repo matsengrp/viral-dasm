@@ -39,8 +39,10 @@ effects and selection factors are publishable; no panel carries a sequence.
 # pyarrow into a dry run to learn five file names.
 from panel_spec import (
     DEFAULT_SELECTION,
+    CANDIDATE_CSV,
     LADDER_PANELS,
     MUTATION_PANELS,
+    OUTLIER_PANELS,
     PANEL_LETTERS,
     PANEL_MEM_MB,
     SELECTIONS,
@@ -216,6 +218,55 @@ rule compose_agreement:
         " > {log} 2>&1"
 
 
+rule within_clade_outliers:
+    """`fig:within_clade_shifts` panel A: the candidate mutations, two clades.
+
+    Its own rule rather than a third panel of `rule agreement_mutations`,
+    which draws a different figure: these two are built and read together, and
+    a rule that wrote panels of two figures would rebuild one whenever the
+    other's notebook changed.
+    """
+    wildcard_constraints:
+        selection="|".join(SELECTIONS),
+    input:
+        panels="scripts/panels.py",
+        spec="scripts/panel_spec.py",
+        charts="scripts/panel_charts.py",
+        founder_reader="scripts/founders.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        # As the agreement rules: spelled out rather than shared through a
+        # dict, because `tests/test_rule_inputs.py` reads these blocks as
+        # source and cannot see an input expanded from a variable.
+        analysis_charts="dasm2/analysis/charts.py",
+        analysis_viral="dasm2/analysis/viral.py",
+        analysis_eval="dasm2/analysis/viral_fitness_eval.py",
+        io="dasm2/io.py",
+        conversion="dasm2/sequence/conversion.py",
+        scov2_rates="dasm2/neutral/scov2_rates.py",
+        dasm2_init="dasm2/__init__.py",
+        notebook="notebooks/within_clade_outliers.py",
+        table=SCORED_TABLE,
+        # The candidate list the panel labels. A rule input, not just a module
+        # constant, so moving a mutation off the figure redraws the panel.
+        candidates=str(CANDIDATE_CSV),
+        clade_founders=clade_founder_fastas,
+        masked_nt_sites=str(mat_pcp_path("masked_nt_sites_file")),
+        reference=str(mat_pcp_path("reference_sequence_file")),
+    output:
+        html=f"{NOTEBOOK_DIR}/within_clade_outliers_{{selection}}.html",
+        panels=panel_outputs(OUTLIER_PANELS, "{selection}"),
+    log:
+        f"{ARTIFACT_ROOT}/logs/within_clade_outliers_{{selection}}.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "marimo export html {input.notebook} -o {output.html} --force"
+        " -- --table {input.table}"
+        " --selection {wildcards.selection}"
+        " > {log} 2>&1"
+
+
 rule figures:
     """Every composed figure of the paper, and so every panel beneath them.
 
@@ -232,3 +283,8 @@ rule figures:
             for selection in SELECTIONS
             for path in composed_paths(selection)
         ],
+        # `fig:within_clade_shifts`' panel A, which has no composition rule
+        # yet. Declared here rather than waiting for one: a panel nothing
+        # builds is a tracked table that quietly stops matching the code
+        # beside it, which is what happened to the `fidelity` selection.
+        panel_outputs(OUTLIER_PANELS, DEFAULT_SELECTION),

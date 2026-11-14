@@ -112,6 +112,7 @@ ENTRY_POINTS = {
     "agreement_mutations": "notebooks/agreement_mutations.py",
     "agreement_ladders": "notebooks/agreement_ladders.py",
     "compose_agreement": "notebooks/agreement.py",
+    "within_clade_outliers": "notebooks/within_clade_outliers.py",
 }
 
 #: Rules that execute nothing. Asserted, not asserted-by-assertion: each must

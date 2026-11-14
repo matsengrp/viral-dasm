@@ -249,7 +249,18 @@ LADDER_PANELS = (
 )
 
 #: `fig:within_clade_shifts`'s stems, one tuple per producing notebook.
-OUTLIER_PANELS = ("panel_a_candidate_scatter",)
+#: One stem per clade, not one image of both. The composed figure puts each
+#: clade's panel A beside that clade's row of panel B, and a single two-panel
+#: image cannot be split across two rows of the page.
+OUTLIER_PANELS = tuple(f"panel_a_outliers_{clade}" for clade in CANDIDATE_CLADES)
+
+#: Which side of each clade's panel its labels are drawn on. The candidates
+#: are outliers below the diagonal, so they sit to the lower right of the
+#: cloud: in 22D that is the cloud's right-hand end, where the gutter past the
+#: right edge is the nearest empty space, but in 20B they sit high above the
+#: middle of the diagonal, where reaching the right edge means a leader drawn
+#: across the whole cloud and the space immediately to their left is empty.
+CANDIDATE_LABEL_SIDES = {"22D": "right", "20B": "left"}
 BACKGROUND_PANELS = ("panel_b_background_effects",)
 SCAN_PANELS = ("panel_c_clade_row",)
 
