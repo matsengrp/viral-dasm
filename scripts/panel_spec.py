@@ -1,11 +1,12 @@
-"""What `fig:agreement` is made of: its panels, its selections, its paths.
+"""What `fig:agreement` and `fig:within_clade_shifts` are made of: their
+panels, their selections, their paths.
 
 Separate from `scripts/panels.py`, and stdlib plus `lib` only. `workflow/
 figures.smk` needs these names to declare a rule's outputs, and a `.smk` is
 parsed on every snakemake invocation -- a dry run and a `--lint` included. With
 the panel code imported there instead, each of those would pull in `dasm2`,
-pandas and pyarrow, and pay the fork's import-time assertions, to learn five
-file names.
+pandas and pyarrow, and pay the fork's import-time assertions, to learn a
+handful of file names.
 
 So this is the one spelling of each of these facts. `scripts/panels.py` and
 `workflow/figures.smk` both read them from here, which is what makes a rule's
@@ -14,6 +15,7 @@ declared output the path the notebook actually writes.
 
 from __future__ import annotations
 
+import csv
 import sys
 from pathlib import Path
 
@@ -107,6 +109,133 @@ SCATTER_CLADE = "21J"
 #: The mutation panel A traces across the clades.
 LOOKUP_MUTATION = "F456L"
 
+# ---------------------------------------------------------------------------
+# `fig:within_clade_shifts`
+# ---------------------------------------------------------------------------
+
+#: The clades that figure's panels A and B cover: the two the candidate list
+#: names. Separate from :data:`SHIFT_CLADES`, which is `fig:agreement`'s
+#: cross-clade pairing and whose consumers would change meaning if these were
+#: added to it.
+#:
+#: In neither clade do the two heaviest haplotypes differ at a single residue,
+#: so a shift in either is attributable to the haplotype rather than to one
+#: substitution. That is why the scan's row excludes these two and the
+#: candidate panels cover them instead.
+CANDIDATE_CLADES: tuple[str, ...] = ("22D", "20B")
+
+#: The clades the scan's panel row draws, in the order the row reads. The scan
+#: axis is ten clades and the readout seven; these five are the seven minus
+#: :data:`CANDIDATE_CLADES`, which panels A and B already cover.
+SCAN_CLADES: tuple[str, ...] = ("21J", "22B", "21L", "21K", "20I")
+
+#: The rung the scan's panel is drawn at. One rung, not a sweep: the saved
+#: panel is written only at the lowest of the scan's three cutoffs, because
+#: letting another setting overwrite it is how a composed figure comes to
+#: disagree with its own caption.
+#:
+#: **Deliberately not tied to `PANEL_MIN_COUNT` or `COUNT_LADDER`, which hold
+#: the same number.** This counts a cell's pooled *events* across two
+#: backgrounds of one clade; those count a mutation's actual-or-expected
+#: occurrences in a clade. Different numerators over different denominators,
+#: equal at 10 today, with no reason to move together. It is also not the
+#: corroboration gate's own 20-event floor.
+SCAN_MIN_EVIDENCE = 10
+
+#: The candidate list panels A and B share, as tracked data rather than two
+#: hand-maintained lists. Moving a candidate off the figures is one edit that
+#: reaches both panels.
+CANDIDATE_CSV = REPO_ROOT / "data" / "shift_candidates.csv"
+
+#: What a candidate's `status` may be. `figure` reaches the panels; `null` is
+#: the designed null, measured and deliberately not drawn; `held_back` is
+#: measured and off the figure for some other reason the file records. The two
+#: non-figure reasons stay distinct rather than collapsing to "excluded".
+CANDIDATE_ON_FIGURE = "figure"
+CANDIDATE_STATUSES = (CANDIDATE_ON_FIGURE, "null", "held_back")
+
+#: The columns :func:`_candidate_rows` requires, found by name.
+CANDIDATE_COLUMNS = ("clade", "mutation", "status")
+
+#: Where the scored tables live. `workflow/score.smk` spells this too, for
+#: `rule score`'s own output; this module's job is to be the one spelling for
+#: everything the figures read, so a later haplotype rule takes it from here.
+SCORED_DIR = ARTIFACT_ROOT / "scored"
+
+#: Where the per-haplotype scores go: its own table, beside the founder one.
+#: **Not** rows in `selection_factors.parquet`. That table's `background` is
+#: empty for every row and a test pins it so, and `panels.base_frames` filters
+#: on `(model, clade)` alone -- a haplotype row sharing it would be pooled into
+#: every agreement panel with nothing saying so.
+HAPLOTYPE_TABLE = SCORED_DIR / "haplotype_selection_factors.parquet"
+
+
+def figure_candidates() -> tuple[tuple[str, str], ...]:
+    """The `(clade, mutation)` pairs the figures draw, in file order.
+
+    The off-figure rows are dropped here rather than by each caller, so panel A
+    and panel B cannot disagree about their subjects -- which is the whole
+    reason the list is one file.
+    """
+    return tuple(
+        (clade, mutation)
+        for clade, mutation, status in _candidate_rows()
+        if status == CANDIDATE_ON_FIGURE
+    )
+
+
+def off_figure_candidates() -> tuple[tuple[str, str, str], ...]:
+    """The `(clade, mutation, status)` rows measured but kept off the figures.
+
+    Reported rather than silently dropped: a designed null and a held-back
+    nomination are off the figure for different reasons, and a reader checking
+    the panel against the source needs to see both.
+    """
+    return tuple(
+        (clade, mutation, status)
+        for clade, mutation, status in _candidate_rows()
+        if status != CANDIDATE_ON_FIGURE
+    )
+
+
+def _candidate_rows() -> list[tuple[str, str, str]]:
+    """Every candidate row, validated.
+
+    Columns are found by name, not position, so adding one cannot silently
+    shift what is read. An unknown `status` raises here rather than quietly
+    landing a candidate on or off the figure.
+    """
+    with CANDIDATE_CSV.open(newline="") as handle:
+        reader = csv.DictReader(handle)
+        missing = [
+            name for name in CANDIDATE_COLUMNS if name not in (reader.fieldnames or ())
+        ]
+        if missing:
+            raise ValueError(
+                f"{CANDIDATE_CSV}: missing column(s) {missing}; it must carry "
+                f"{list(CANDIDATE_COLUMNS)}."
+            )
+        rows = list(reader)
+    out = []
+    seen = set()
+    for row in rows:
+        status = row["status"]
+        if status not in CANDIDATE_STATUSES:
+            raise ValueError(
+                f"{CANDIDATE_CSV}: {row['clade']}/{row['mutation']} has status "
+                f"{status!r}, which is not one of {list(CANDIDATE_STATUSES)}."
+            )
+        pair = (row["clade"], row["mutation"])
+        if pair in seen:
+            raise ValueError(
+                f"{CANDIDATE_CSV}: {pair[0]}/{pair[1]} appears twice, which "
+                f"would build a DAG whose two jobs write the same output."
+            )
+        seen.add(pair)
+        out.append((row["clade"], row["mutation"], status))
+    return out
+
+
 #: Panel stems, as the figure's composition reads them. Named here so a rule
 #: knows which notebook produces which panel.
 MUTATION_PANELS = (
@@ -118,6 +247,11 @@ LADDER_PANELS = (
     "panel_c_within_clade_ladder",
     "panel_e_shift_ladder",
 )
+
+#: `fig:within_clade_shifts`'s stems, one tuple per producing notebook.
+OUTLIER_PANELS = ("panel_a_candidate_scatter",)
+BACKGROUND_PANELS = ("panel_b_background_effects",)
+SCAN_PANELS = ("panel_c_clade_row",)
 
 #: The columns the panels read. Named rather than taken whole: the table is
 #: 1,425,760 rows per run over 24 columns, and the pooled `*_all` half,

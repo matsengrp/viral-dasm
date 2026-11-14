@@ -29,6 +29,7 @@ pd = pytest.importorskip("pandas")
 numpy = pytest.importorskip("numpy")
 
 import lib
+import panel_spec
 import panels
 from lib import GENE
 from runs import MODELS, RUNS
@@ -961,3 +962,22 @@ def test_each_cell_of_the_shift_grid_names_the_pair_it_draws():
         f"hold {expected}. A cell titled with another cell's pair attributes "
         f"its correlation to the wrong clades."
     )
+
+
+def test_the_candidate_clades_match_the_candidate_file():
+    """`CANDIDATE_CLADES` is a hand list beside a file it must agree with.
+
+    The file exists so panels A and B cannot disagree about their subjects; a
+    candidate added for a third clade would otherwise sit silently outside the
+    clade tuple and be dropped by every panel that reads it. The tuple keeps
+    its own order, because that order is the figure's row order and not a
+    property of the data.
+    """
+    from_file = {clade for clade, _ in panel_spec.figure_candidates()}
+    from_file |= {clade for clade, _, _ in panel_spec.off_figure_candidates()}
+    assert set(panel_spec.CANDIDATE_CLADES) == from_file
+
+
+def test_the_scan_row_does_not_overlap_the_candidate_clades():
+    """The scan excludes the two the candidate panels cover, by construction."""
+    assert not set(panel_spec.SCAN_CLADES) & set(panel_spec.CANDIDATE_CLADES)
