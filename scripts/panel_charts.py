@@ -36,7 +36,7 @@ from panels import figure_dir
 # imports its charts from one module and never names `dasm2` itself, which is
 # what keeps `tests/test_import_order.py`'s two orderings a property of this
 # layer rather than of every notebook that draws a panel.
-from dasm2.analysis.charts import mutation_lookup_line  # noqa: F401
+from dasm2.analysis.charts import mutation_lookup_line
 
 #: Everything is written at one resolution, spelled once. A matplotlib point
 #: and a Vega-Lite pixel both land at ``size * ppi / 72`` pixels, so equal font
@@ -764,3 +764,144 @@ def lookup_panel_sizing(n_clades: int) -> dict[str, int]:
         ),
         "height": round(LOOKUP_PANEL_SCALE * LOOKUP_PANEL_HEIGHT),
     }
+
+
+#: One sub-panel of a background row, in pixels. Narrow and tall on purpose:
+#: a row carries up to seven of them side by side, and the panel's subject is
+#: the *slope* between two x positions, which a wide short cell flattens --
+#: at a square aspect a 2-nat shift and a 5-nat one look alike.
+BACKGROUND_CELL_W = 125
+BACKGROUND_CELL_H = 320
+
+#: Headroom above the drawn range, as a fraction of it, for the p-value that
+#: sits at the top of each sub-panel.
+BACKGROUND_HEADROOM = 0.18
+
+
+def background_panel(
+    frame: pd.DataFrame,
+    clade: str,
+    *,
+    y_domain: tuple[float, float] | None = None,
+) -> alt.HConcatChart:
+    """One clade's row of `fig:within_clade_shifts`: panel B, D or F.
+
+    One sub-panel per candidate mutation, each plotting that mutation's
+    fitness effect on the clade's two backgrounds by both approaches. The x
+    axis is the two backgrounds named by their residues -- ``R346, K356,
+    F490`` against ``T346, T356, S490`` -- so the two ticks are a
+    like-for-like pair rather than "none" against a list of substitutions.
+
+    Assembled from :func:`dasm2.analysis.charts.mutation_lookup_line` rather
+    than drawn here. That builder already puts two series over a categorical
+    axis with the counts/DASM colours and shapes this figure uses elsewhere,
+    and reusing it is what makes the two approaches look the same in this
+    figure as in `fig:agreement`.
+
+    **One y domain across every sub-panel of every row.** Passed in rather
+    than computed per clade: the three rows are read against each other, so a
+    steep line has to mean a large shift and not a narrow axis.
+
+    Args:
+        frame: Columns ``candidate``, ``background``, ``counts_effect``,
+            ``dasm_effect``, ``p_label`` and ``background_order``.
+        clade: The clade this row draws, for the y-axis title.
+        y_domain: ``(low, high)`` shared by every sub-panel.
+
+    Returns:
+        The row, left to right in order of decreasing absolute counts shift.
+    """
+    required = {
+        "candidate",
+        "background",
+        "counts_effect",
+        "dasm_effect",
+        "p_label",
+        "background_order",
+    }
+    missing = sorted(required - set(frame.columns))
+    if missing:
+        raise KeyError(f"background_panel needs column(s) {missing}.")
+
+    order = (
+        frame.sort_values("background_order")["background"].drop_duplicates().tolist()
+    )
+    if len(order) != 2:
+        raise ValueError(
+            f"{clade} has {len(order)} backgrounds, not two: {order}. The panel "
+            f"draws a contrast, so a third would be plotted with nothing "
+            f"saying which pair the slope belongs to."
+        )
+
+    # Steepest first, measured on counts rather than on the DASM: counts is
+    # the observation the model is being checked against, so the order is set
+    # by the data and not by the thing under test.
+    def shift_of(candidate: str) -> float:
+        part = frame[frame["candidate"] == candidate].sort_values("background_order")
+        return abs(
+            float(part.iloc[-1]["counts_effect"]) - float(part.iloc[0]["counts_effect"])
+        )
+
+    candidates = sorted(frame["candidate"].unique(), key=shift_of, reverse=True)
+
+    cells = []
+    for index, candidate in enumerate(candidates):
+        part = frame[frame["candidate"] == candidate]
+        lookup = pd.DataFrame(
+            {
+                "clade": part["background"],
+                "delta_fitness": part["counts_effect"],
+                "log_sf": part["dasm_effect"],
+            }
+        )
+        cell = mutation_lookup_line(
+            lookup,
+            candidate,
+            clade_order=order,
+            width=BACKGROUND_CELL_W,
+            height=BACKGROUND_CELL_H,
+            # The sub-panel's axes are titled once for the row, below, so a
+            # seven-cell row does not repeat one label seven times.
+            x_title="",
+            y_title=(f"fitness effect in clade {clade} subset" if index == 0 else ""),
+            color_title="approach",
+            series_labels={"delta_fitness": "counts", "log_sf": "DASM"},
+            series_colors=(COUNTS_GREY, DASM_PURPLE),
+            series_shapes=("circle", "triangle"),
+            title=candidate,
+            y_domain=y_domain,
+            # One legend for the row, on the last cell, where it sits in the
+            # margin rather than between two sets of plots.
+            show_legend=index == len(candidates) - 1,
+        )
+        label = part["p_label"].iloc[0]
+        annotation = (
+            alt.Chart(pd.DataFrame({"text": [label]}))
+            .mark_text(
+                align="center",
+                baseline="top",
+                dy=4,
+                fontSize=PANEL_FONT_SIZE - 4,
+                color="#444444",
+            )
+            .encode(x=alt.value(BACKGROUND_CELL_W / 2), y=alt.value(0), text="text:N")
+        )
+        cells.append(
+            alt.layer(cell, annotation).properties(
+                width=BACKGROUND_CELL_W,
+                height=BACKGROUND_CELL_H,
+                title=alt.TitleParams(candidate, fontSize=PANEL_FONT_SIZE, offset=3),
+            )
+        )
+
+    return alt.hconcat(*cells).properties(
+        title=alt.TitleParams(
+            "amino-acid identities defining each subset",
+            subtitle="left: clade-founder identities; right: derived identities",
+            fontSize=PANEL_FONT_SIZE - 2,
+            subtitleFontSize=PANEL_FONT_SIZE - 5,
+            anchor="middle",
+            orient="bottom",
+            offset=6,
+        )
+    )

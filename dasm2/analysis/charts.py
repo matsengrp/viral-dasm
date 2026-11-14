@@ -45,6 +45,8 @@ def mutation_lookup_line(
     extra_tooltips: Optional[dict[str, str]] = None,
     series_colors: tuple[str, str] = ("steelblue", "coral"),
     series_shapes: tuple[str, str] = ("circle", "circle"),
+    y_domain: Optional[tuple[float, float]] = None,
+    show_legend: bool = True,
 ) -> alt.LayerChart:
     """Build a line chart tracking a mutation's metrics across clades.
 
@@ -96,6 +98,14 @@ def mutation_lookup_line(
             when the figure is printed in black and white, so a caller
             preparing a figure distinguishes the series twice. The default
             is a circle for both.
+        y_domain: Optional ``(low, high)`` to fix the value axis at. Without
+            it each chart scales to its own data, which is wrong for a small
+            multiple: a steep line would mean a narrow axis rather than a
+            large effect. A caller drawing several of these as one exhibit
+            computes the domain over all of them and passes it to each.
+        show_legend: Whether this chart carries its own legend. A small
+            multiple wants one legend for the row, not one per cell, so every
+            cell but one is drawn with ``False``.
 
     Returns:
         Layered chart: the optional grey interval band, a two-line overlay
@@ -142,6 +152,10 @@ def mutation_lookup_line(
     for column, tip_title in extra.items():
         tooltip_fields.append(alt.Tooltip(f"{column}:Q", title=tip_title, format=".4f"))
 
+    # One scale object, shared by the band and the series, so a fixed domain
+    # cannot be applied to one of them and not the other.
+    value_scale = alt.Scale() if y_domain is None else alt.Scale(domain=list(y_domain))
+
     # Drawn first so it sits behind both series. A band is a statement about
     # one of them, not about the pair, so it carries no colour from the series
     # scale: grey, unlabelled by hue, and named in its own tooltip.
@@ -161,7 +175,7 @@ def mutation_lookup_line(
                 .mark_area(color="#9e9e9e", opacity=0.25)
                 .encode(
                     x=alt.X("clade:N", title=x_title, sort=sort_order),
-                    y=alt.Y(f"{lower}:Q", title=y_title),
+                    y=alt.Y(f"{lower}:Q", title=y_title, scale=value_scale),
                     y2=alt.Y2(f"{upper}:Q"),
                     tooltip=[
                         alt.Tooltip("clade:N", title=x_title),
@@ -180,14 +194,14 @@ def mutation_lookup_line(
         .mark_line(point=alt.OverlayMarkDef(size=80))
         .encode(
             x=alt.X("clade:N", title=x_title, sort=sort_order),
-            y=alt.Y("value:Q", title=y_title),
+            y=alt.Y("value:Q", title=y_title, scale=value_scale),
             color=alt.Color(
                 "metric:N",
                 scale=alt.Scale(
                     domain=[labels["delta_fitness"], labels["log_sf"]],
                     range=list(series_colors),
                 ),
-                legend=alt.Legend(title=color_title),
+                legend=alt.Legend(title=color_title) if show_legend else None,
             ),
             # Both channels on one field, so Vega-Lite merges them into a
             # single legend whose swatches carry the colour and the shape
@@ -198,7 +212,7 @@ def mutation_lookup_line(
                     domain=[labels["delta_fitness"], labels["log_sf"]],
                     range=list(series_shapes),
                 ),
-                legend=alt.Legend(title=color_title),
+                legend=alt.Legend(title=color_title) if show_legend else None,
             ),
             tooltip=tooltip_fields,
         )

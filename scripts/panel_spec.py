@@ -16,6 +16,7 @@ declared output the path the notebook actually writes.
 from __future__ import annotations
 
 import csv
+import re
 import sys
 from pathlib import Path
 
@@ -199,6 +200,51 @@ POOL_DIR = ARTIFACT_ROOT / "pools"
 POOL_CELLS = POOL_DIR / "pool_cells.parquet"
 POOL_SHIFTS = POOL_DIR / "pool_shifts.parquet"
 POOL_SUMMARY = POOL_DIR / "pool_summary.json"
+
+
+#: ``<founder><site><mutant>``, e.g. ``D574V``. A candidate is named against
+#: the clade founder, which is why a consumer wants the pieces: on a haplotype
+#: that already differs from the founder at that site, the mutation's own
+#: string is spelled differently and a string match would miss it.
+MUTATION_RE = re.compile(r"^([A-Z])(\d+)([A-Z])$")
+
+
+def parse_mutation(text: str) -> tuple[str, int, str]:
+    """``"D574V"`` -> ``("D", 574, "V")``, the founder residue, 1-based site
+    and mutant residue.
+
+    One spelling, because two consumers need it -- the scorer, to pick the
+    cells of a haplotype's grid, and the counts side, to build the at-risk
+    requirement -- and a site read one-based in one place and zero-based in
+    the other is the error this exists to make impossible.
+    """
+    match = MUTATION_RE.match(text)
+    if match is None:
+        raise ValueError(
+            f"{text!r} is not a mutation of the form D574V (founder residue, "
+            f"1-based amino acid site, mutant residue)."
+        )
+    return match.group(1), int(match.group(2)), match.group(3)
+
+
+def candidate_cells() -> dict[str, tuple[tuple[int, str], ...]]:
+    """``{clade: ((aa_site, mutant_aa), ...)}`` for every candidate.
+
+    Every candidate, not only the ones drawn: the designed null and the
+    held-back nomination are measured through the same pipeline, which is
+    what makes them a null and a comparison rather than two rows nobody ran.
+
+    Keyed on ``(site, residue)`` rather than on the mutation string, which is
+    what a haplotype's grid can actually be indexed by.
+    """
+    cells: dict[str, list[tuple[int, str]]] = {}
+    for clade, mutation in [
+        *figure_candidates(),
+        *((clade, mutation) for clade, mutation, _ in off_figure_candidates()),
+    ]:
+        _, site, mutant = parse_mutation(mutation)
+        cells.setdefault(clade, []).append((site, mutant))
+    return {clade: tuple(sorted(set(v))) for clade, v in cells.items()}
 
 
 def figure_candidates() -> tuple[tuple[str, str], ...]:

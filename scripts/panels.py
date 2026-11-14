@@ -90,6 +90,7 @@ from founders import founder_aa_sequences
 # pyarrow to learn five file names.
 from panel_spec import (  # noqa: F401  (re-exported for the notebooks)
     ARM,
+    BACKGROUND_PANELS,
     CANDIDATE_CLADES,
     CANDIDATE_CSV,
     CANDIDATE_LABEL_SIDES,
@@ -116,6 +117,7 @@ from panel_spec import (  # noqa: F401  (re-exported for the notebooks)
     figure_dir,
     labelled_candidates,
     panel_csv_path,
+    parse_mutation,
     selection_models,
 )
 

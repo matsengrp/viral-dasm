@@ -241,6 +241,37 @@ def fitness_clades(fitness_dir: Path) -> set[str]:
     }
 
 
+#: The committed era partition: which clades each era's GLM was fitted over.
+#: `workflow/corpus.smk` spells this too, for the rule that renders the map;
+#: this is the one spelling for a *script* that needs to know a clade's era,
+#: so a third copy of the filename cannot drift from the first two.
+#:
+#: The partition is viral-dasm's own choice -- see the file's header and
+#: `config.yaml` -- and reading it here rather than importing mat-pcp's
+#: `era.py` is the seam `dasm2/PROVENANCE.md` records.
+ERA_TEMPLATE = REPO_ROOT / "data" / "eras-pre-omicron-omicron.yaml"
+
+
+def era_of_clade(clade: str) -> str:
+    """Which era's fitted rate table a clade's expected counts are built from.
+
+    Raises:
+        KeyError: If the clade is in no era. Defaulting would silently price
+            a clade's opportunity off the wrong fit, which reads downstream
+            as the model getting that clade wrong.
+    """
+    import yaml
+
+    spec = yaml.safe_load(ERA_TEMPLATE.read_text())
+    for era, body in spec["eras"].items():
+        if clade in body["clades"]:
+            return era
+    raise KeyError(
+        f"{clade} is in no era of {ERA_TEMPLATE}, so there is no fitted rate "
+        f"table for its expected counts."
+    )
+
+
 def master_table_path(era: str | None) -> Path:
     """The fitted rate table for one era, or the pooled fit when ``era`` is None.
 

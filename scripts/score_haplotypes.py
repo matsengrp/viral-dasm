@@ -67,13 +67,17 @@ import dasm2  # noqa: F401  (imported first for its side effects)
 assert_dasm2_is_this_repo()
 
 import argparse
+from collections.abc import Mapping, Sequence
 
+import numpy as np
 import pandas as pd
 from gpu_slot import claim_card
+from panel_spec import candidate_cells
 from score_run import codon_sites_of, globally_masked_sites
 
 from dasm2.analysis.viral_fitness_eval import SelectionFactorSource
 from dasm2.neutral.scov2_rates import GENE_NT_LENGTH
+from dasm2.sequence.constants import AA_STR_SORTED
 from dasm2.sequence.masking import censored_codon_sites, load_censor_table
 
 #: Columns the backgrounds table must carry. ``aa_sequence`` is the haplotype
@@ -190,34 +194,65 @@ def score_haplotype(
     aa_sequence: str,
     model: str,
     corpus: str,
+    cells: Sequence[tuple[int, str]],
     masked: set[int],
     censored: set[int],
     censored_directional: set[int],
-) -> pd.DataFrame:
-    """One haplotype's full ``[L, 20]`` grid.
+) -> list[dict]:
+    """One haplotype's rows, for the cells asked for and no others.
 
-    ``aa_mutation`` and ``is_synonymous`` come out of the builder keyed on this
-    sequence, so they describe a substitution *from the haplotype* rather than
-    from the clade founder.
+    ``cells`` is ``(aa_site, mutant_aa)``, matched **on the site and the
+    mutant residue** rather than on a mutation string. A candidate is named
+    against the clade founder, ``D574V``, while ``aa_mutation`` on a haplotype
+    spells that haplotype's own parent residue -- so a string match would drop
+    exactly the rows where the haplotype differs from the founder, which is
+    the comparison the panel exists to draw.
+
+    **The ``[L, 20]`` tensor, not the frame.** ``log_sf_frame`` builds 25,460
+    rows through a Python append loop, caches them under the composite label,
+    and never evicts: at 8,693 haplotypes that is 8.7 GB resident and about
+    three minutes of pandas, for the handful of cells a panel reads. The
+    tensor behind it is 100 KB and is what gets indexed here. It is cached
+    too, so the cache is cleared by the caller between haplotypes.
+
+    ``parent_aa`` is the *haplotype's* residue, which is what the counts side
+    joins on and the one column whose meaning differs from the founder
+    table's column of the same name.
     """
-    grid = source.log_sf_frame(
-        gene, run_id, cache_label(clade, background), aa_sequence
-    ).copy()
-    grid["parent_aa"] = [aa_sequence[site - 1] for site in grid["aa_site"]]
-
-    grid.insert(0, "gene", gene)
-    grid.insert(1, "clade", clade)
-    grid.insert(2, "background", background)
-    grid.insert(3, "arm", corpus)
-    grid.insert(4, "model", model)
-    grid["globally_masked"] = grid["aa_site"].isin(masked)
-    grid["censored"] = grid["aa_site"].isin(censored)
-    grid["censored_directional"] = grid["aa_site"].isin(censored_directional)
-    return grid[list(OUTPUT_COLUMNS)]
+    log_sf = np.log(
+        source.selection_factors(
+            gene, run_id, cache_label(clade, background), aa_sequence
+        ).numpy()
+    )
+    rows = []
+    for aa_site, mutant_aa in cells:
+        parent_aa = aa_sequence[aa_site - 1]
+        rows.append(
+            {
+                "gene": gene,
+                "clade": clade,
+                "background": background,
+                "arm": corpus,
+                "model": model,
+                "aa_site": aa_site,
+                "parent_aa": parent_aa,
+                "mutant_aa": mutant_aa,
+                "aa_mutation": f"{parent_aa}{aa_site}{mutant_aa}",
+                "is_synonymous": mutant_aa == parent_aa,
+                "log_selection_factor": float(
+                    log_sf[aa_site - 1, AA_STR_SORTED.index(mutant_aa)]
+                ),
+                "globally_masked": aa_site in masked,
+                "censored": aa_site in censored,
+                "censored_directional": aa_site in censored_directional,
+            }
+        )
+    return rows
 
 
 def score_backgrounds(
     backgrounds: pd.DataFrame,
+    cells_by_clade: Mapping[str, Sequence[tuple[int, str]]],
     *,
     checkpoint: Path,
     gene: str,
@@ -227,14 +262,22 @@ def score_backgrounds(
     masked: set[int],
     censor_table,
     device: str,
+    progress_every: int = 500,
 ) -> pd.DataFrame:
-    """Every haplotype's grid, concatenated, on one resident checkpoint."""
+    """Every haplotype's cells, on one resident checkpoint.
+
+    The source's per-haplotype caches are cleared as the loop goes. They are
+    keyed on the composite label and never evicted, and this loop runs over
+    thousands of haplotypes rather than the 56 founders the class was written
+    for, so holding them would cost gigabytes to no purpose: nothing asks for
+    a haplotype twice.
+    """
     source = SelectionFactorSource({(gene, run_id): checkpoint}, device)
     try:
-        frames = []
-        for row in backgrounds.itertuples(index=False):
+        rows = []
+        for index, row in enumerate(backgrounds.itertuples(index=False), start=1):
             spec = censor_table[row.clade]
-            frames.append(
+            rows.extend(
                 score_haplotype(
                     source,
                     gene=gene,
@@ -244,12 +287,17 @@ def score_backgrounds(
                     aa_sequence=row.aa_sequence,
                     model=model,
                     corpus=corpus,
+                    cells=cells_by_clade[row.clade],
                     masked=masked,
                     censored=censored_codon_sites(spec),
                     censored_directional=codon_sites_of(spec.directional[:, 0]),
                 )
             )
-        return pd.concat(frames, ignore_index=True)
+            source._factors.clear()
+            source._frames.clear()
+            if index % progress_every == 0:
+                print(f"  {index:,}/{len(backgrounds):,} haplotypes", flush=True)
+        return pd.DataFrame(rows, columns=list(OUTPUT_COLUMNS))
     finally:
         source.release()
 
@@ -266,7 +314,13 @@ def main() -> None:
         help="Parquet of (clade, background, aa_sequence) rows to score",
     )
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--device", default="cuda", choices=("cuda", "cpu"))
+    # CPU by default, where `score_run.py` defaults to cuda. Measured on
+    # `dasm-1077k_full_depth`: one 1,273-residue haplotype is 28.5 ms on CPU
+    # against 4.7 ms on an idle A40, so the whole 8,693-haplotype pass is 4.1
+    # minutes rather than 0.7. A 3.4-minute saving does not justify holding a
+    # card that a training run could be using, and it is what keeps every
+    # rule of `fig:within_clade_shifts` off the GPU.
+    parser.add_argument("--device", default="cpu", choices=("cuda", "cpu"))
     args = parser.parse_args()
 
     gene = GENE
@@ -290,9 +344,24 @@ def main() -> None:
             f"it covers {len(censor_table)} clades."
         )
 
+    # The cells each clade's haplotypes are scored at: its candidate
+    # mutations, named against the clade founder. Every candidate, not only
+    # the ones on the figure, so the designed null is measured too -- it is a
+    # handful of extra cells per haplotype and the whole point of a null is
+    # that it goes through the same pipeline.
+    cells_by_clade = candidate_cells()
+    missing = sorted(set(backgrounds["clade"]) - set(cells_by_clade))
+    if missing:
+        raise KeyError(
+            f"{args.backgrounds}: no candidate mutations for clade(s) "
+            f"{missing}. Scoring their haplotypes would write no rows, so the "
+            f"pool average would have nothing to average."
+        )
+
     print(
-        f"{run_id}: scoring {checkpoint.name} on {len(backgrounds)} {gene} "
-        f"haplotypes across {backgrounds['clade'].nunique()} clades, "
+        f"{run_id}: scoring {checkpoint.name} on {len(backgrounds):,} {gene} "
+        f"haplotypes across {backgrounds['clade'].nunique()} clades at "
+        f"{sum(len(c) for c in cells_by_clade.values())} cells, "
         f"device {args.device}",
         flush=True,
     )
@@ -300,6 +369,7 @@ def main() -> None:
     def score_all(device: str) -> pd.DataFrame:
         return score_backgrounds(
             backgrounds,
+            cells_by_clade,
             checkpoint=checkpoint,
             gene=gene,
             run_id=run_id,

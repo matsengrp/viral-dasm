@@ -76,6 +76,11 @@ clean against it:
 3. :func:`permutation_shift_test` is **two-sided**. The source takes the tail on
    whichever side of zero the observed statistic fell, which is a tail chosen
    after the fact; see that function.
+4. :func:`tally_pcps` tallies every candidate of a clade in one pass. The
+   source took a single focal cell, so a clade with nine candidates paid nine
+   streaming reads of a 112 MB corpus to collect nine columns over the same
+   branches. The synonymous count does not depend on the candidate, so the
+   shared work is done once.
 
 GISAID restriction: reads GISAID-derived PCPs, founders and mat-pcp count
 tables. Aggregate statistics may leave the cluster; the per-cell tables built
@@ -1295,31 +1300,44 @@ def permutation_shift_test(
 
 def tally_pcps(
     pcp_path: str | Path,
-    specs: Sequence[PoolSpec],
+    pools_by_candidate: Mapping[str, Sequence[PoolSpec]],
     annotations: pd.DataFrame,
     *,
     clade: str,
-    focal_site: int,
-    focal_mutant: str,
+    focal_by_candidate: Mapping[str, tuple[int, str]],
     chunk_rows: int,
     max_chunks: int | None = None,
 ) -> pd.DataFrame:
-    """One row per branch: its pool, and its focal and synonymous event counts.
+    """One row per branch per candidate: its pool, and its event counts.
 
     :func:`tally_pools` sums these away, which is all a point estimate needs.
     The permutation test needs them kept apart, because what it resamples is
     the branch -- with its focal and synonymous counts bound together.
 
-    A branch matching several specs appears once per spec, so nested pools do
-    not silently merge. ``focal`` counts nucleotide routes that reach
-    ``focal_mutant`` at ``focal_site``, filtered exactly as
+    A branch matching several of a candidate's specs appears once per spec, so
+    nested pools do not silently merge. ``focal`` counts nucleotide routes
+    that reach the candidate's mutant residue at its site, filtered exactly as
     :func:`aggregate_to_aa_cells` filters them, so summing this frame by pool
     reproduces that function's ``actual``.
+
+    **Every candidate of the clade in one pass**, which is a divergence from
+    the source: there this took a single ``focal_site`` and ``focal_mutant``,
+    so a clade with nine candidates cost nine streaming reads of a 112 MB
+    corpus to collect nine columns of the same branches. The focal keys are
+    per candidate and the synonymous count is not, so the inner loop does the
+    shared work once.
+
+    Returns:
+        ``(candidate, pool, focal, synonymous)``.
     """
-    if not specs:
+    if not pools_by_candidate:
         raise ValueError("no pool specs given; there is nothing to tally.")
-    if len(focal_mutant) != 1:
-        raise ValueError(f"focal_mutant {focal_mutant!r} is not a single residue.")
+    if set(pools_by_candidate) != set(focal_by_candidate):
+        raise ValueError(
+            f"pools are given for {sorted(pools_by_candidate)} and focal cells "
+            f"for {sorted(focal_by_candidate)}. A candidate with pools and no "
+            f"focal cell would tally every branch and count no events."
+        )
     clade_rows = annotations[annotations["clade"] == clade]
     if clade_rows.empty:
         raise ValueError(f"no annotated rows for clade {clade!r}.")
@@ -1337,25 +1355,42 @@ def tally_pcps(
             )
         )
     )
-    focal_rows = clade_rows[
-        usable
-        & (clade_rows["mut_class"] == "nonsynonymous")
-        & (clade_rows["codon_site"] == focal_site)
-        & (clade_rows["mutant_aa"] == focal_mutant)
-    ]
-    if focal_rows.empty:
-        raise ValueError(
-            f"no usable nonsynonymous route reaches {focal_mutant} at site "
-            f"{focal_site} in clade {clade!r}, so the focal count would be zero "
-            "by construction rather than by observation."
-        )
-    focal_keys = {
-        (site, mutation[0], mutation[-1])
-        for site, mutation in zip(focal_rows["nt_site"], focal_rows["nt_mutation"])
+
+    focal_keys: dict[str, set[tuple[int, str, str]]] = {}
+    for candidate, (focal_site, focal_mutant) in focal_by_candidate.items():
+        if len(focal_mutant) != 1:
+            raise ValueError(
+                f"{candidate}: focal_mutant {focal_mutant!r} is not a single residue."
+            )
+        focal_rows = clade_rows[
+            usable
+            & (clade_rows["mut_class"] == "nonsynonymous")
+            & (clade_rows["codon_site"] == focal_site)
+            & (clade_rows["mutant_aa"] == focal_mutant)
+        ]
+        if focal_rows.empty:
+            raise ValueError(
+                f"no usable nonsynonymous route reaches {focal_mutant} at site "
+                f"{focal_site} in clade {clade!r}, so {candidate}'s focal count "
+                "would be zero by construction rather than by observation."
+            )
+        focal_keys[candidate] = {
+            (site, mutation[0], mutation[-1])
+            for site, mutation in zip(focal_rows["nt_site"], focal_rows["nt_mutation"])
+        }
+
+    specs = [spec for pools in pools_by_candidate.values() for spec in pools]
+    names = [spec.name for spec in specs]
+    if len(set(names)) != len(names):
+        raise ValueError(f"pool names must be unique across candidates, got {names}.")
+    candidate_of = {
+        spec.name: candidate
+        for candidate, pools in pools_by_candidate.items()
+        for spec in pools
     }
 
     membership: dict[str, tuple[str, ...]] = {}
-    rows: list[tuple[str, int, int]] = []
+    rows: list[tuple[str, str, int, int]] = []
     for chunk_index, chunk in enumerate(
         pd.read_csv(
             pcp_path, usecols=["clade", "parent", "child"], chunksize=chunk_rows
@@ -1373,7 +1408,9 @@ def tally_pcps(
                 membership[parent] = pools
             if not pools:
                 continue
-            focal = synonymous = 0
+            wanted = {candidate_of[name] for name in pools}
+            synonymous = 0
+            focal = dict.fromkeys(wanted, 0)
             for position, (source, target) in enumerate(zip(parent, child)):
                 if source == target:
                     continue
@@ -1384,8 +1421,10 @@ def tally_pcps(
                     continue
                 if (genome_site, f"{source}{genome_site}{target}") in synonymous_keys:
                     synonymous += 1
-                if (genome_site, source, target) in focal_keys:
-                    focal += 1
+                for candidate in wanted:
+                    if (genome_site, source, target) in focal_keys[candidate]:
+                        focal[candidate] += 1
             for name in pools:
-                rows.append((name, focal, synonymous))
-    return pd.DataFrame(rows, columns=["pool", "focal", "synonymous"])
+                candidate = candidate_of[name]
+                rows.append((candidate, name, focal[candidate], synonymous))
+    return pd.DataFrame(rows, columns=["candidate", "pool", "focal", "synonymous"])
