@@ -976,3 +976,15 @@ def test_the_candidate_clades_match_the_candidate_file():
     from_file = {clade for clade, _ in panel_spec.figure_candidates()}
     from_file |= {clade for clade, _, _ in panel_spec.off_figure_candidates()}
     assert set(panel_spec.CANDIDATE_CLADES) == from_file
+
+
+def test_every_clade_row_has_both_of_its_panels():
+    """A clade of the figure gets a scatter and a background panel, or neither.
+
+    The composed figure is three rows of two, so a clade present in one stem
+    tuple and absent from the other would leave a row half drawn -- and the
+    letters in the caption would stop matching the images.
+    """
+    scatter = {stem.rsplit("_", 1)[-1] for stem in panel_spec.OUTLIER_PANELS}
+    backgrounds = {stem.rsplit("_", 1)[-1] for stem in panel_spec.BACKGROUND_PANELS}
+    assert scatter == backgrounds == set(panel_spec.CANDIDATE_CLADES)

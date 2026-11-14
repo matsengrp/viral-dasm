@@ -113,29 +113,21 @@ LOOKUP_MUTATION = "F456L"
 # `fig:within_clade_shifts`
 # ---------------------------------------------------------------------------
 
+#: Rows per chunk when streaming the PCP corpus. The file is 112 MB gzipped
+#: and every row carries a 3,819-nucleotide parent, so it is read in pieces
+#: and reduced as it goes rather than held.
+#:
+#: Here rather than in `scripts/panels.py`, which is where it used to live:
+#: four modules now stream the corpus, and this one is stdlib-only, so a
+#: `.smk` can read it without pulling pandas into a dry run. `panels`
+#: re-exports it, so `from panels import PCP_CHUNK_ROWS` still resolves.
+PCP_CHUNK_ROWS = 200_000
+
 #: The clades that figure's rows cover, in the order the figure reads: the
 #: three at the head of the outlier ranking. Separate from
 #: :data:`SHIFT_CLADES`, which is `fig:agreement`'s cross-clade pairing and
 #: whose consumers would change meaning if these were added to it.
 CANDIDATE_CLADES: tuple[str, ...] = ("22D", "20B", "21K")
-
-#: The clades the scan's panel row draws, in the order the row reads. The scan
-#: axis is ten clades and the readout seven; these five are the seven minus
-#: :data:`CANDIDATE_CLADES`, which panels A and B already cover.
-SCAN_CLADES: tuple[str, ...] = ("21J", "22B", "21L", "21K", "20I")
-
-#: The rung the scan's panel is drawn at. One rung, not a sweep: the saved
-#: panel is written only at the lowest of the scan's three cutoffs, because
-#: letting another setting overwrite it is how a composed figure comes to
-#: disagree with its own caption.
-#:
-#: **Deliberately not tied to `PANEL_MIN_COUNT` or `COUNT_LADDER`, which hold
-#: the same number.** This counts a cell's pooled *events* across two
-#: backgrounds of one clade; those count a mutation's actual-or-expected
-#: occurrences in a clade. Different numerators over different denominators,
-#: equal at 10 today, with no reason to move together. It is also not the
-#: corroboration gate's own 20-event floor.
-SCAN_MIN_EVIDENCE = 10
 
 #: The candidate list panels A and B share, as tracked data rather than two
 #: hand-maintained lists. Moving a candidate off the figures is one edit that
@@ -192,6 +184,21 @@ SCORED_DIR = ARTIFACT_ROOT / "scored"
 #: on `(model, clade)` alone -- a haplotype row sharing it would be pooled into
 #: every agreement panel with nothing saying so.
 HAPLOTYPE_TABLE = SCORED_DIR / "haplotype_selection_factors.parquet"
+
+#: Where the figure's clades get their distinct amino-acid parents enumerated.
+#: Under the artifact root: a row is a Spike haplotype, so it is
+#: GISAID-derived. `scripts/clade_haplotypes.py` writes it and
+#: `rule score_haplotypes` scores it.
+CLADE_HAPLOTYPE_TABLE = ARTIFACT_ROOT / "backgrounds" / "clade_haplotypes.parquet"
+
+#: Where the pooled counts land: one row per (clade, candidate, pool, cell)
+#: and one per (clade, candidate) shift, plus the randomization test. Under
+#: the artifact root for the same reason -- a pool is named by the parents it
+#: holds -- with the per-panel CSVs under `results/` carrying only labels.
+POOL_DIR = ARTIFACT_ROOT / "pools"
+POOL_CELLS = POOL_DIR / "pool_cells.parquet"
+POOL_SHIFTS = POOL_DIR / "pool_shifts.parquet"
+POOL_SUMMARY = POOL_DIR / "pool_summary.json"
 
 
 def figure_candidates() -> tuple[tuple[str, str], ...]:
@@ -339,8 +346,12 @@ OUTLIER_MIN_DIFFERENCE = 2.0
 #: but it is written through the same `write_panel_csv` choke point, so it
 #: carries the filter spec in its columns like every other tracked table here.
 OUTLIER_TABLE_STEM = "table_s1_outlier_ranking"
-BACKGROUND_PANELS = ("panel_b_background_effects",)
-SCAN_PANELS = ("panel_c_clade_row",)
+#: `fig:within_clade_shifts`' right-hand column: one stem per clade, paired
+#: with that clade's `OUTLIER_PANELS` stem. One image per clade rather than
+#: one of all three, for the reason `OUTLIER_PANELS` gives -- the composed
+#: figure puts each clade's pair on its own row, and a single image cannot be
+#: split across rows.
+BACKGROUND_PANELS = tuple(f"panel_b_backgrounds_{clade}" for clade in CANDIDATE_CLADES)
 
 #: The columns the panels read. Named rather than taken whole: the table is
 #: 1,425,760 rows per run over 24 columns, and the pooled `*_all` half,

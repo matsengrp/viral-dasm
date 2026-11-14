@@ -107,6 +107,7 @@ from panel_spec import (  # noqa: F401  (re-exported for the notebooks)
     OUTLIER_TABLE_STEM,
     PANEL_CSV_DIR,
     PANEL_MIN_COUNT,
+    PCP_CHUNK_ROWS,
     SCATTER_CLADE,
     SELECTIONS,
     SHIFT_CLADES,
@@ -339,12 +340,6 @@ def drop_unobservable_codons(frame: pd.DataFrame, clade: str) -> pd.DataFrame:
     if not codons:
         return frame
     return frame[~frame["aa_site"].isin(codons)]
-
-
-#: Rows per chunk when streaming the PCP corpus. The file is 112 MB gzipped
-#: and every row carries a 3,819-nucleotide parent, so it is read in pieces
-#: and reduced as it goes rather than held.
-PCP_CHUNK_ROWS = 200_000
 
 
 def founder_background_fraction(
