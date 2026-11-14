@@ -116,13 +116,15 @@ def _(CELLS_PATH, SELECTION, SHIFTS_PATH, mo, panels, pd):
     # producer's table for the shift statistics, and none of them is drawn.
     _site = CELLS["candidate"].map(lambda m: panels.parse_mutation(m)[1])
     _mutant = CELLS["candidate"].map(lambda m: panels.parse_mutation(m)[2])
-    FOCAL = CELLS[
-        (CELLS["aa_site"] == _site)
-        & (CELLS["mutant_aa"] == _mutant)
-        & [
+    _drawn = pd.Series(
+        [
             (clade, mutation) in DRAWN
             for clade, mutation in zip(CELLS["cluster"], CELLS["candidate"])
-        ]
+        ],
+        index=CELLS.index,
+    )
+    FOCAL = CELLS[
+        (CELLS["aa_site"] == _site) & (CELLS["mutant_aa"] == _mutant) & _drawn
     ].copy()
 
     # `pool` is 0 for the founder side and 1 for the derived side, which is

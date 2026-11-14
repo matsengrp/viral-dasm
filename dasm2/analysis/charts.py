@@ -47,6 +47,7 @@ def mutation_lookup_line(
     series_shapes: tuple[str, str] = ("circle", "circle"),
     y_domain: Optional[tuple[float, float]] = None,
     show_legend: bool = True,
+    show_y_axis: bool = True,
 ) -> alt.LayerChart:
     """Build a line chart tracking a mutation's metrics across clades.
 
@@ -106,6 +107,10 @@ def mutation_lookup_line(
         show_legend: Whether this chart carries its own legend. A small
             multiple wants one legend for the row, not one per cell, so every
             cell but one is drawn with ``False``.
+        show_y_axis: Whether this chart draws its value axis. With a shared
+            ``y_domain`` every cell of a small multiple would otherwise
+            repeat the same ticks, which is ink that says nothing and width
+            the panels could use; only the leftmost cell needs them.
 
     Returns:
         Layered chart: the optional grey interval band, a two-line overlay
@@ -194,7 +199,12 @@ def mutation_lookup_line(
         .mark_line(point=alt.OverlayMarkDef(size=80))
         .encode(
             x=alt.X("clade:N", title=x_title, sort=sort_order),
-            y=alt.Y("value:Q", title=y_title, scale=value_scale),
+            y=alt.Y(
+                "value:Q",
+                title=y_title,
+                scale=value_scale,
+                axis=alt.Axis() if show_y_axis else None,
+            ),
             color=alt.Color(
                 "metric:N",
                 scale=alt.Scale(

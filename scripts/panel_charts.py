@@ -777,6 +777,16 @@ BACKGROUND_CELL_H = 320
 #: sits at the top of each sub-panel.
 BACKGROUND_HEADROOM = 0.18
 
+#: The two approaches, their colours and their marks, in the order
+#: `mutation_lookup_line` takes them -- ``delta_fitness`` first, ``log_sf``
+#: second. One spelling, because both the sub-panels and the legend beside
+#: them are built from it: a legend drawn from its own copy of the mapping is
+#: a legend that can come to disagree with the marks it names.
+BACKGROUND_SERIES = (
+    ("counts", COUNTS_GREY, "circle"),
+    ("DASM", DASM_PURPLE, "triangle"),
+)
+
 
 def background_panel(
     frame: pd.DataFrame,
@@ -865,14 +875,21 @@ def background_panel(
             x_title="",
             y_title=(f"fitness effect in clade {clade} subset" if index == 0 else ""),
             color_title="approach",
-            series_labels={"delta_fitness": "counts", "log_sf": "DASM"},
-            series_colors=(COUNTS_GREY, DASM_PURPLE),
-            series_shapes=("circle", "triangle"),
+            series_labels=dict(
+                zip(("delta_fitness", "log_sf"), [s[0] for s in BACKGROUND_SERIES])
+            ),
+            series_colors=tuple(s[1] for s in BACKGROUND_SERIES),
+            series_shapes=tuple(s[2] for s in BACKGROUND_SERIES),
             title=candidate,
             y_domain=y_domain,
-            # One legend for the row, on the last cell, where it sits in the
-            # margin rather than between two sets of plots.
-            show_legend=index == len(candidates) - 1,
+            # No per-cell legend. Vega-Lite drops a legend declared on a
+            # layer nested inside an hconcat -- which is what every cell is,
+            # since the p-value is layered over the lines -- so the row's key
+            # is drawn as its own cell by `_background_legend` instead.
+            show_legend=False,
+            # One value axis, on the first cell. Every cell shares
+            # `y_domain`, so the rest would repeat the same ticks.
+            show_y_axis=index == 0,
         )
         label = part["p_label"].iloc[0]
         annotation = (
@@ -886,15 +903,12 @@ def background_panel(
             )
             .encode(x=alt.value(BACKGROUND_CELL_W / 2), y=alt.value(0), text="text:N")
         )
-        cells.append(
-            alt.layer(cell, annotation).properties(
-                width=BACKGROUND_CELL_W,
-                height=BACKGROUND_CELL_H,
-                title=alt.TitleParams(candidate, fontSize=PANEL_FONT_SIZE, offset=3),
-            )
-        )
+        # No `.properties` on the layer: `mutation_lookup_line` has already
+        # set the size and the title, and restating them on the wrapper is
+        # what drops the legend off the cell that is supposed to carry it.
+        cells.append(alt.layer(cell, annotation))
 
-    return alt.hconcat(*cells).properties(
+    return alt.hconcat(*cells, _background_legend()).properties(
         title=alt.TitleParams(
             "amino-acid identities defining each subset",
             subtitle="left: clade-founder identities; right: derived identities",
@@ -904,4 +918,75 @@ def background_panel(
             orient="bottom",
             offset=6,
         )
+    )
+
+
+def _background_legend() -> alt.LayerChart:
+    """The row's key, as its own cell.
+
+    Drawn by hand rather than declared on one of the sub-panels: each
+    sub-panel is a layer (the two lines, plus the p-value over them) nested
+    inside an hconcat, and Vega-Lite drops a legend declared there -- the
+    spec keeps it and the rendered SVG carries no `role-legend` group at all.
+    A hand-drawn key renders wherever it is put.
+
+    Built from :data:`BACKGROUND_SERIES`, the same tuple the marks are built
+    from, so the swatch and the mark it names cannot drift apart.
+
+    Positioned on a unit scale with the axis off, rather than on a band
+    scale: a band scale spreads two entries over the full height of a cell
+    320 pixels tall, which reads as two unrelated labels rather than as one
+    key. ``stroke=None`` drops the cell's frame, which a key has no use for
+    and which makes it look like a panel with nothing plotted in it.
+    """
+    names = [name for name, _, _ in BACKGROUND_SERIES]
+    frame = pd.DataFrame(
+        {
+            "approach": names,
+            # Just above and just below the middle of the cell, so the key
+            # reads as a block against the panels beside it.
+            "position": [0.54, 0.46][: len(names)],
+        }
+    )
+    shared = {
+        "y": alt.Y("position:Q", scale=alt.Scale(domain=[0, 1]), axis=None, title=None)
+    }
+    marks = (
+        alt.Chart(frame)
+        .mark_point(filled=True, size=110, opacity=1)
+        .encode(
+            x=alt.value(10),
+            color=alt.Color(
+                "approach:N",
+                scale=alt.Scale(
+                    domain=names, range=[colour for _, colour, _ in BACKGROUND_SERIES]
+                ),
+                legend=None,
+            ),
+            shape=alt.Shape(
+                "approach:N",
+                scale=alt.Scale(
+                    domain=names, range=[shape for _, _, shape in BACKGROUND_SERIES]
+                ),
+                legend=None,
+            ),
+            **shared,
+        )
+    )
+    labels = (
+        alt.Chart(frame)
+        .mark_text(align="left", fontSize=PANEL_FONT_SIZE - 4, color="#222222")
+        .encode(x=alt.value(24), text="approach:N", **shared)
+    )
+    return (
+        alt.layer(marks, labels)
+        .properties(
+            width=76,
+            height=BACKGROUND_CELL_H,
+            view=alt.ViewConfig(stroke=None),
+            title=alt.TitleParams(
+                "approach", fontSize=PANEL_FONT_SIZE - 3, anchor="start", dx=6
+            ),
+        )
+        .resolve_scale(color="independent", shape="independent")
     )

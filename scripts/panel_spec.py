@@ -24,6 +24,44 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from lib import ARTIFACT_ROOT, REPO_ROOT, TEX_FIGURE_DIR
 
+#: The committed era partition: which clades each era's GLM was fitted over.
+#: `workflow/corpus.smk` spells this too, for the rule that renders the map.
+#:
+#: **Here rather than in `scripts/lib.py`, deliberately.** Every training rule
+#: declares `lib.py` as an input, so a helper added there puts the seven runs
+#: out of date and `snakemake -n figures` schedules `train` -- which is the one
+#: thing this pipeline must never do for a figure. This module is declared by
+#: the figure rules and by nothing upstream of them.
+#:
+#: The partition is viral-dasm's own choice, and reading it here rather than
+#: importing mat-pcp's `era.py` is the seam `dasm2/PROVENANCE.md` records.
+ERA_TEMPLATE = REPO_ROOT / "data" / "eras-pre-omicron-omicron.yaml"
+
+
+def era_of_clade(clade: str) -> str:
+    """Which era's fitted rate table a clade's expected counts are built from.
+
+    ``yaml`` is imported in the body rather than at module scope: this module
+    is parsed on every snakemake invocation, a dry run included, and its job
+    is to stay cheap enough that a `.smk` can read a path out of it.
+
+    Raises:
+        KeyError: If the clade is in no era. Defaulting would silently price a
+            clade's opportunity off the wrong fit, which reads downstream as
+            the model getting that clade wrong.
+    """
+    import yaml
+
+    spec = yaml.safe_load(ERA_TEMPLATE.read_text())
+    for era, body in spec["eras"].items():
+        if clade in body["clades"]:
+            return era
+    raise KeyError(
+        f"{clade} is in no era of {ERA_TEMPLATE}, so there is no fitted rate "
+        f"table for its expected counts."
+    )
+
+
 #: Where the panel images go: under the artifact root, not in the tree. A panel
 #: is a rebuildable picture of the CSV committed beside it, and `README.md`'s
 #: layout gives tracked `results/` to the tables.
