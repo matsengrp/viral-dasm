@@ -55,6 +55,11 @@ def _(mo):
     where a mutation is never observed on a background, which is the one case
     the plain ratio cannot express.
 
+    **The p-value is computed but not drawn.** It stays in `pool_shifts` and
+    in this panel's CSV, and the panels are rendered without it while how to
+    correct it for multiple testing is undecided; `main.tex` carries the
+    sentences reporting it as comments rather than deleting them.
+
     **The p-value is two-sided.** It asks whether a counts shift this large is
     likely to arise by chance -- not whether the two approaches agree. Branches
     are reassigned between the two backgrounds at random with each side's size

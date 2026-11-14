@@ -818,7 +818,17 @@ def lookup_panel_sizing(n_clades: int) -> dict[str, int]:
 #: absolute size does not matter: ``figure_layout.compose`` solves one dpi
 #: from the pixels it is handed.
 BACKGROUND_CELL_W_EM = 1.76 / (13 / 72)
-BACKGROUND_ROW_H_EM = 4.5 / (13 / 72)
+
+#: The published row is 4.5 inches tall at 13 pt. Sixty per cent of that is
+#: plot area and the rest is the title, the three-line tick labels and the
+#: axis label, which do not scale with the value axis. Withholding the
+#: p-value takes the axis from 1.30 to 1.16 times the data span, so the plot
+#: area needs 1.16/1.30 of its height to draw the same slopes and the
+#: furniture is unchanged: 4.5 - 0.60 x 4.5 x (1 - 1.16/1.30) = 4.2 inches.
+#: That is the whole of the reduction; the panels are not otherwise made
+#: smaller. Restoring the p-value restores this and
+#: :data:`BACKGROUND_HEADROOM` together.
+BACKGROUND_ROW_H_EM = 4.2 / (13 / 72)
 
 #: Type size for the background rows, in points. 17 rather than
 #: :data:`PANEL_FONT_SIZE` because the two renderers do not put the same ink
@@ -829,9 +839,13 @@ BACKGROUND_ROW_H_EM = 4.5 / (13 / 72)
 #: 18 px scales to 16.7, and 17 is that to the nearest point.
 BACKGROUND_FONT_PT = 17
 
-#: Headroom above and below the drawn range, as fractions of it. The top is
-#: larger because the p-value sits inside the axes rather than above them.
-BACKGROUND_HEADROOM = 0.22
+#: Headroom above and below the drawn range, as fractions of it. Equal:
+#: the top used to carry 0.22 because the randomization test's p-value was
+#: drawn inside the axes, and that panel is withheld while the multiple-
+#: testing question is open -- see `main.tex`, where the sentences reporting
+#: it are commented rather than deleted. Restoring the p-value means
+#: restoring the headroom with it.
+BACKGROUND_HEADROOM = 0.08
 BACKGROUND_FOOTROOM = 0.08
 
 #: The two approaches, their colours and their matplotlib markers, in the
@@ -917,7 +931,8 @@ def background_panel(
 
     Args:
         frame: Columns ``candidate``, ``background``, ``background_order``,
-            ``p_label``, and one per entry of :data:`BACKGROUND_SERIES`.
+            and one per entry of :data:`BACKGROUND_SERIES`. A ``p_label``
+            column may ride along and is not drawn.
         clade: The clade this row draws, for the value-axis title.
         y_domain: ``(low, high)`` shared by every sub-panel of every row,
             from :func:`background_y_domain`.
@@ -936,7 +951,7 @@ def background_panel(
     """
     import matplotlib.pyplot as plt
 
-    required = {"candidate", "background", "background_order", "p_label"} | {
+    required = {"candidate", "background", "background_order"} | {
         column for _, column, _, _ in BACKGROUND_SERIES
     }
     missing = sorted(required - set(frame.columns))
@@ -998,16 +1013,10 @@ def background_panel(
                 zorder=3,
             )
         axis.axhline(0.0, color="#cccccc", linewidth=1, zorder=1)
-        axis.text(
-            0.5,
-            0.93,
-            part["p_label"].iloc[0],
-            transform=axis.transAxes,
-            ha="center",
-            va="top",
-            fontsize=BACKGROUND_FONT_PT,
-            color="#444444",
-        )
+        # No p-value above the mutation. `rule pool_counts` still computes the
+        # randomization test and still writes it to `pool_shifts.parquet` and
+        # to this panel's CSV; only the label is withheld, while how to
+        # correct it for multiple testing is undecided.
         axis.set_xticks(x)
         axis.set_xticklabels(
             [label.replace(", ", "\n") for label in part["background"]],
