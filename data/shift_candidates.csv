@@ -2,6 +2,7 @@ clade,mutation,status,note
 20B,E1258D,figure,
 20B,D1259H,figure,
 21K,M177V,figure,the largest difference in 21K that neither the pseudocount nor opportunity explains
+21K,P463T,figure,the other 21K difference that neither the pseudocount nor opportunity explains
 22D,D574V,figure,the worked candidate; among the largest counts-versus-DASM differences in the agreement figure
 22D,F486S,figure,
 22D,F486V,figure,
