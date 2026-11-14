@@ -113,16 +113,11 @@ LOOKUP_MUTATION = "F456L"
 # `fig:within_clade_shifts`
 # ---------------------------------------------------------------------------
 
-#: The clades that figure's panels A and B cover: the two the candidate list
-#: names. Separate from :data:`SHIFT_CLADES`, which is `fig:agreement`'s
-#: cross-clade pairing and whose consumers would change meaning if these were
-#: added to it.
-#:
-#: In neither clade do the two heaviest haplotypes differ at a single residue,
-#: so a shift in either is attributable to the haplotype rather than to one
-#: substitution. That is why the scan's row excludes these two and the
-#: candidate panels cover them instead.
-CANDIDATE_CLADES: tuple[str, ...] = ("22D", "20B")
+#: The clades that figure's rows cover, in the order the figure reads: the
+#: three at the head of the outlier ranking. Separate from
+#: :data:`SHIFT_CLADES`, which is `fig:agreement`'s cross-clade pairing and
+#: whose consumers would change meaning if these were added to it.
+CANDIDATE_CLADES: tuple[str, ...] = ("22D", "20B", "21K")
 
 #: The clades the scan's panel row draws, in the order the row reads. The scan
 #: axis is ten clades and the readout seven; these five are the seven minus
@@ -148,25 +143,32 @@ SCAN_MIN_EVIDENCE = 10
 CANDIDATE_CSV = REPO_ROOT / "data" / "shift_candidates.csv"
 
 #: What a candidate's `status` may be. `figure` reaches the panels as a
-#: *subject*: a mutation whose effect panels B and D measure on two backgrounds.
-#: `background` is a mutation that *defines* one of those backgrounds -- named
-#: on panel A, and a subject of nothing. `null` is the designed null, measured
-#: and deliberately not drawn; `held_back` is measured and off the figure for
-#: some other reason the file records. The two non-figure reasons stay distinct
-#: rather than collapsing to "excluded".
+#: *subject*: a mutation whose effect panels B, D and F measure on two
+#: backgrounds. `null` is the designed null, measured and deliberately not
+#: drawn; `held_back` is measured and off the figure for some other reason the
+#: file records. The two non-figure reasons stay distinct rather than
+#: collapsing to "excluded".
+#:
+#: **The mutations that define the backgrounds are not among these.** They are
+#: derived from branch frequencies by `scripts/backgrounds.py` and written to
+#: :data:`BACKGROUND_CSV`, so this file holds only what a person chose.
 CANDIDATE_ON_FIGURE = "figure"
-CANDIDATE_BACKGROUND = "background"
-
-#: The statuses panel A draws a name for, in the order it stacks them. Both are
-#: labelled and they are labelled differently, which is the distinction panel A
-#: exists to make legible: a subject sits off the diagonal because the two
-#: approaches disagree about selection, a background mutation sits off it
-#: because the counts approach mismeasured its opportunity.
-CANDIDATE_LABELLED = (CANDIDATE_ON_FIGURE, CANDIDATE_BACKGROUND)
-CANDIDATE_STATUSES = (*CANDIDATE_LABELLED, "null", "held_back")
+CANDIDATE_STATUSES = (CANDIDATE_ON_FIGURE, "null", "held_back")
 
 #: The columns :func:`_candidate_rows` requires, found by name.
 CANDIDATE_COLUMNS = ("clade", "mutation", "status")
+
+#: Where the derived background definition goes: one row per substitution that
+#: defines a clade's two backgrounds, with the branch-mass fractions it was
+#: chosen on. In `results/` rather than `data/`, because the pipeline writes
+#: it; model-free, so not under a selection.
+BACKGROUND_CSV = REPO_ROOT / "results" / "backgrounds" / "clade_backgrounds.csv"
+
+#: The role a background row may carry. `marker` is the clade's most abundant
+#: substitution, `cotraveller` one carried by most of the marker's branches,
+#: and `fixed` one carried by nearly the whole clade -- which belongs to both
+#: backgrounds and so defines neither.
+BACKGROUND_SPLIT_ROLES = ("marker", "cotraveller")
 
 #: Where the scored tables live. `workflow/score.smk` spells this too, for
 #: `rule score`'s own output; this module's job is to be the one spelling for
@@ -196,19 +198,31 @@ def figure_candidates() -> tuple[tuple[str, str], ...]:
 
 
 def labelled_candidates() -> tuple[tuple[str, str, str], ...]:
-    """The `(clade, mutation, status)` rows panel A names, in file order.
+    """The `(clade, mutation, group)` rows panel A names, in drawing order.
 
-    Panel A's row set is :func:`figure_candidates`' plus the mutations that
-    define the backgrounds panels B and D split on, which the panel draws in
-    their own ink. Returned with the status attached rather than as two tuples:
-    the label column is stacked over every labelled row at once, so a caller
-    that fetched the groups separately would stack each blind to the other's.
+    Two sources, one list: the subjects a person chose, from
+    :data:`CANDIDATE_CSV`, and the substitutions that define each clade's two
+    backgrounds, derived into :data:`BACKGROUND_CSV`. Returned together rather
+    than as two calls because the panel stacks its label column over every
+    labelled row at once, and a caller that fetched the groups separately would
+    stack each blind to the other's.
+
+    The `fixed` rows are left out: they belong to both backgrounds, so they
+    distinguish nothing and naming them on the panel would say they do.
     """
-    return tuple(
-        (clade, mutation, status)
-        for clade, mutation, status in _candidate_rows()
-        if status in CANDIDATE_LABELLED
-    )
+    rows = [
+        (clade, mutation, CANDIDATE_ON_FIGURE)
+        for clade, mutation in figure_candidates()
+    ]
+    # `csv`, not pandas: this module is imported by the Snakefile to build the
+    # DAG, and it stays free of the heavy imports for that reason.
+    with BACKGROUND_CSV.open(newline="") as handle:
+        rows.extend(
+            (row["clade"], row["mutation"], "background")
+            for row in csv.DictReader(handle)
+            if row["role"] in BACKGROUND_SPLIT_ROLES
+        )
+    return tuple(rows)
 
 
 def off_figure_candidates() -> tuple[tuple[str, str, str], ...]:
@@ -218,13 +232,11 @@ def off_figure_candidates() -> tuple[tuple[str, str, str], ...]:
     nomination are off the figure for different reasons, and a reader checking
     the panel against the source needs to see both.
 
-    Keyed on :data:`CANDIDATE_LABELLED` rather than on `figure` alone, so a
-    `background` row -- which panel A draws -- is not reported as off it.
     """
     return tuple(
         (clade, mutation, status)
         for clade, mutation, status in _candidate_rows()
-        if status not in CANDIDATE_LABELLED
+        if status != CANDIDATE_ON_FIGURE
     )
 
 
@@ -290,7 +302,12 @@ OUTLIER_PANELS = tuple(f"panel_a_outliers_{clade}" for clade in CANDIDATE_CLADES
 #: right edge is the nearest empty space, but in 20B they sit high above the
 #: middle of the diagonal, where reaching the right edge means a leader drawn
 #: across the whole cloud and the space immediately to their left is empty.
-CANDIDATE_LABEL_SIDES = {"22D": "right", "20B": "left"}
+#: 21K is labelled left for the same reason as 20B, and for one more: its
+#: subject M177V sits mid-cloud horizontally while its background mutation
+#: R346K sits at the cloud's right-hand end, so exactly one of the two gets a
+#: leader drawn across the panel whichever gutter is used. Left gives the short
+#: one to the mutation the row is about.
+CANDIDATE_LABEL_SIDES = {"22D": "right", "20B": "left", "21K": "left"}
 
 #: Table S1's cutoff and its cut. The ranking is the agreement comparison at a
 #: higher count floor: `main.tex` describes it as the mutations whose actual or

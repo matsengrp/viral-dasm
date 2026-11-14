@@ -14,33 +14,39 @@ def _():
 @app.cell
 def _(mo):
     mo.md(r"""
-    # `fig:within_clade_shifts` panel A
+    # `fig:within_clade_shifts` panels A, C and E
 
-    *For Nextstrain clades 22D and 20B, the estimated effects strongly differ
-    between the counts and DASM approaches for a few mutations.*
+    *For Nextstrain clades 22D, 20B and 21K, the estimated effects strongly
+    differ between the counts and DASM approaches for a few mutations.*
 
     One scatter per clade, the same mark and the same square domain as
-    `fig:agreement`'s panel B, with the figure's candidate mutations ringed and
-    named. The panel establishes the subjects the rest of the figure measures:
-    panel B asks what those mutations do on other genetic backgrounds in the
-    same clade, so they have to be mutations the two approaches visibly
-    disagree about.
+    `fig:agreement`'s panel B, with the figure's candidate mutations named.
+    Each panel establishes the subject of the panel beside it, which asks what
+    that mutation does on the clade's two genetic backgrounds -- so the subject
+    has to be a mutation the two approaches visibly disagree about.
 
-    **Two groups of labelled mutation, in two inks.** The ones in near-black
-    are panel B's subjects. The ones in orange are the three that rose to high
-    frequency in 22D and so define the background panel B splits on; they sit
-    well below the diagonal for a reason that is not a shift, which is the
-    whole point of marking them apart. The counts approach takes a mutation's
-    opportunity to be the clade's fitted rate scaled to the whole clade, but
-    counts it only on branches still carrying the founder residue, so once most
-    of the clade carries the mutation its counts-based estimate is understated.
+    **Two groups of labelled mutation, in two inks.** Near-black names the
+    subject: the mutation whose shift the row measures. Orange names the
+    substitutions that *define* the two backgrounds, which is a structural fact
+    about the clade rather than a claim about the mutation's effect.
 
-    **The candidates are a list, not a threshold.** They come from
-    `data/shift_candidates.csv`, which panels A and B both read, so a candidate
-    moved off the figure leaves both in one edit. Nothing here selects on the
-    size of the disagreement; `panels.candidate_rows` raises if a named
-    candidate is not in the clade's comparison frame, because a panel drawing
-    six of seven labelled mutations is worse than one that stops.
+    Reading the orange marks: where one sits far below the diagonal, as 22D's
+    three do, the counts approach has understated it, because it takes the
+    opportunity for a mutation to be the clade's fitted rate scaled to the
+    whole clade while counting it only on branches still carrying the founder
+    residue. Where a background mutation has not swept far, as in 20B, it sits
+    on the diagonal like anything else. Both are expected; neither is a shift.
+
+    **Two lists, one labelled set.** The subjects come from
+    `data/shift_candidates.csv`, which this panel and the next both read, so a
+    candidate moved off the figure leaves both in one edit. The background
+    mutations are not in that file at all: they are derived from branch
+    frequencies by `rule clade_backgrounds` into
+    `results/backgrounds/clade_backgrounds.csv`, so no model has a say in which
+    backgrounds the figure contrasts. Nothing here selects on the size of the
+    disagreement; `panels.candidate_rows` raises if a named candidate is not in
+    the clade's comparison frame, because a panel drawing six of seven labelled
+    mutations is worse than one that stops.
 
     **GISAID**: reads the cluster-only scored table; writes effects and counts,
     which are publishable, and no sequence.

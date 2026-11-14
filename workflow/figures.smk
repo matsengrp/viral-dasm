@@ -39,6 +39,7 @@ effects and selection factors are publishable; no panel carries a sequence.
 # pyarrow into a dry run to learn five file names.
 from panel_spec import (
     ARM,
+    BACKGROUND_CSV,
     CANDIDATE_CSV,
     DEFAULT_SELECTION,
     LADDER_PANELS,
@@ -252,6 +253,9 @@ rule within_clade_outliers:
         # The candidate list the panel labels. A rule input, not just a module
         # constant, so moving a mutation off the figure redraws the panel.
         candidates=str(CANDIDATE_CSV),
+        # ...and the derived half of that list: the substitutions that define
+        # each clade's two backgrounds, which the panel names in its own ink.
+        backgrounds=str(BACKGROUND_CSV),
         clade_founders=clade_founder_fastas,
         masked_nt_sites=str(mat_pcp_path("masked_nt_sites_file")),
         reference=str(mat_pcp_path("reference_sequence_file")),
@@ -313,6 +317,44 @@ rule outlier_ranking:
         "marimo export html {input.notebook} -o {output.html} --force"
         " -- --table {input.table}"
         " --selection {wildcards.selection}"
+        " > {log} 2>&1"
+
+
+rule clade_backgrounds:
+    """The two genetic backgrounds each clade of `fig:within_clade_shifts` splits into.
+
+    From branch frequencies alone: no model, no selection, no wildcard. That
+    is the point of the rule. The earlier pipeline chose the split by scoring
+    every parent haplotype under the DASM, which made the contrast move with
+    the checkpoint; defined this way it is a property of the tree, so every
+    model is measured against the same two backgrounds.
+
+    Two passes over a 112 MB corpus, so it is its own rule rather than a cell
+    of the panel notebook: the panels are redrawn often and this answer does
+    not change unless the corpus does.
+    """
+    input:
+        backgrounds="scripts/backgrounds.py",
+        panels="scripts/panels.py",
+        spec="scripts/panel_spec.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        conversion="dasm2/sequence/conversion.py",
+        dasm2_init="dasm2/__init__.py",
+        # The branches the frequencies are measured over, and the founders
+        # each parent is compared against. mat-pcp's PCPs rather than this
+        # pipeline's Parquet, which drops the branch length the mass is
+        # weighted by.
+        pcps=str(corpus(ARM).source_pcp),
+        clade_founders=clade_founder_fastas,
+    output:
+        table=str(BACKGROUND_CSV),
+    log:
+        f"{ARTIFACT_ROOT}/logs/clade_backgrounds.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "python {input.backgrounds} --pcp {input.pcps} --out {output.table}"
         " > {log} 2>&1"
 
 
