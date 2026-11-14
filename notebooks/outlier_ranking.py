@@ -153,7 +153,7 @@ def _(OVER_CUT, SELECTION, SPEC, mo, panels, pd):
         "delta_fitness_ratio": "Fitness effect (counts)",
         "log_selection_factor": "Fitness effect (DASM)",
         "founder_opportunity": "Opportunity (%)",
-        "difference": "Difference",
+        "difference": "Absolute difference",
         "adjusted": "Adjusted difference",
     }
     TABLE = OVER_CUT[list(COLUMNS)].rename(columns=COLUMNS).reset_index(drop=True)
