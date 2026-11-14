@@ -149,32 +149,60 @@ def _(CELLS_PATH, SELECTION, SHIFTS_PATH, mo, panels, pd):
 
 
 @app.cell
-def _(FOCAL):
+def _(CLADES, FOCAL, charts):
     # One y domain for every sub-panel of every row, so a steep line means a
     # large shift rather than a narrow axis. Computed over all three clades
     # for that reason, with headroom at the top for the p-value.
-    _low = float(min(FOCAL["counts_effect"].min(), FOCAL["dasm_effect"].min()))
-    _high = float(max(FOCAL["counts_effect"].max(), FOCAL["dasm_effect"].max()))
-    _span = (_high - _low) or 1.0
-    Y_DOMAIN = (_low - 0.08 * _span, _high + 0.22 * _span)
-    return (Y_DOMAIN,)
+    Y_DOMAIN = charts.background_y_domain(FOCAL)
+
+    # Every row is the same number of slots wide: the widest clade's
+    # candidate count, plus one slot for the legend. Rows are stacked
+    # left-justified in the composed figure, so a row that sized itself to
+    # its own two candidates would put its sub-panels at a different x and a
+    # different width from the row above it, and three rows that do not share
+    # a column grid do not read as one exhibit.
+    _width = {_c: FOCAL[FOCAL["cluster"] == _c]["candidate"].nunique() for _c in CLADES}
+    SLOTS = max(_width.values()) + 1
+
+    # The order the rows are *drawn* in, which is not the order they are
+    # stacked in: `h_params` is measured from the first row drawn, and only
+    # the widest clade's margins are measured from a full set of tick labels.
+    # Stacking order stays `CLADES`, since that is what pairs a row with the
+    # scatter beside it.
+    DRAW_ORDER = sorted(CLADES, key=lambda clade: -_width[clade])
+    return DRAW_ORDER, SLOTS, Y_DOMAIN
 
 
 @app.cell
-def _(CLADES, FOCAL, SELECTION, Y_DOMAIN, charts, mo, panels):
+def _(CLADES, DRAW_ORDER, FOCAL, SELECTION, SLOTS, Y_DOMAIN, charts, mo, panels):
     PANELS = {}
-    for _clade, _stem in zip(CLADES, panels.BACKGROUND_PANELS):
+    # `h_params` is taken from the first row drawn and imposed on the rest.
+    # `tight_layout` sizes a figure's margins from its own tick labels, so a
+    # row whose surplus slots carry none comes out with wider sub-panels than
+    # the first -- equal slot counts alone do not line the rows up. The first
+    # row is the widest clade's, so it is the only one whose margins are
+    # measured from a full set of labels.
+    _h_params = None
+    _stems = dict(zip(CLADES, panels.BACKGROUND_PANELS))
+    for _clade in DRAW_ORDER:
+        _stem = _stems[_clade]
         _row = FOCAL[FOCAL["cluster"] == _clade]
         if _row.empty:
             raise ValueError(
                 f"{_clade} has no drawn candidate, so its row of the figure "
                 f"would be blank while the scatter beside it names subjects."
             )
-        PANELS[_clade] = charts.save_panel(
-            charts.background_panel(_row, _clade, y_domain=Y_DOMAIN),
-            _stem,
-            selection=SELECTION,
+        _figure = charts.background_panel(
+            _row,
+            _clade,
+            y_domain=Y_DOMAIN,
+            columns=SLOTS,
+            h_params=_h_params,
         )
+        if _h_params is None:
+            _pars = _figure.subplotpars
+            _h_params = (_pars.left, _pars.right, _pars.wspace)
+        PANELS[_clade] = charts.save_mpl_panel(_figure, _stem, selection=SELECTION)
         panels.write_pool_csv(
             _row[
                 [

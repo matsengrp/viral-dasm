@@ -86,6 +86,19 @@ def _(PANEL_DIR, SELECTION, fl, mo, spec):
     )
 
     PANELS = fl.load_panels(PANEL_DIR, spec.SHIFT_PANEL_LETTERS)
+
+    # The rows are placed left justified, so each row's background panel
+    # starts wherever that row's scatter ends. The three scatters are not the
+    # same width -- 22D's callout labels are drawn outside its plot and the
+    # other two clades' inside theirs -- which started the three background
+    # panels at three different x. Padding the scatters out to a common width
+    # puts B, D and F in a column, which is what lets a reader read their
+    # slopes against each other.
+    # The first panel of every row, read from the layout rather than spelled
+    # "ACE" here: the padding is a fact about what sits in the left column,
+    # and a row order changed in `panel_spec` should move it.
+    fl.pad_to_common_width(PANELS, [_row[0] for _row in spec.SHIFT_FIGURE_ROWS])
+
     mo.md(
         f"Selection **{SELECTION}**, at the size each rule rendered it:\n\n"
         + "\n".join(

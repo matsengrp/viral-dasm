@@ -29,6 +29,8 @@ import dasm2  # noqa: F401  (imported first for its side effects)
 assert_dasm2_is_this_repo()
 
 import altair as alt
+import matplotlib.figure
+import numpy as np
 import pandas as pd
 from panels import figure_dir
 
@@ -36,7 +38,11 @@ from panels import figure_dir
 # imports its charts from one module and never names `dasm2` itself, which is
 # what keeps `tests/test_import_order.py`'s two orderings a property of this
 # layer rather than of every notebook that draws a panel.
-from dasm2.analysis.charts import mutation_lookup_line
+# `noqa`, not a removal: nothing in this module draws with it any more, but
+# `notebooks/agreement_mutations.py` and `tests/test_panels.py` reach it as
+# `charts.mutation_lookup_line`, and `--fix` would delete the re-export and
+# break both.
+from dasm2.analysis.charts import mutation_lookup_line  # noqa: F401
 
 #: Everything is written at one resolution, spelled once. A matplotlib point
 #: and a Vega-Lite pixel both land at ``size * ppi / 72`` pixels, so equal font
@@ -766,34 +772,117 @@ def lookup_panel_sizing(n_clades: int) -> dict[str, int]:
     }
 
 
-#: One sub-panel of a background row, in pixels. Narrow and tall on purpose:
-#: a row carries up to seven of them side by side, and the panel's subject is
+#: The background rows are matplotlib, not Vega-Lite, and that is deliberate.
+#: They are the one part of this figure that has to line up *across three
+#: separately written images*: B, D and F stack left-justified, and a reader
+#: can only compare their slopes if each clade's sub-panels sit at the same x
+#: and the same width in every row. A Vega-Lite ``hconcat`` sizes itself to
+#: its own content, so 20B's two cells and 22D's five come out at different
+#: left edges and different widths; matplotlib can be handed one slot count
+#: and one set of margins and asked to honour them. The published panels were
+#: drawn this way for the same reason, in
+#: ``2026-09-15-within-clade-shift-v12/notebooks/background_effects.py``, and
+#: this is a port of that renderer.
+#:
+#: The mixed-renderer figure costs nothing at composition time:
+#: ``figure_layout`` already solves one dpi for the whole page, and both
+#: renderers put a type size of *N* at ``N * 300/72`` pixels on disk.
+
+#: A sub-panel's width and a row's height, **in ems of the row's own type**
+#: rather than in inches. Narrow and tall on purpose: the panel's subject is
 #: the *slope* between two x positions, which a wide short cell flattens --
-#: at a square aspect a 2-nat shift and a 5-nat one look alike.
-BACKGROUND_CELL_W = 125
-BACKGROUND_CELL_H = 320
+#: at a square aspect a 2-nat shift and a 5-nat one look alike. The width
+#: leaves room for the three-line background labels and the legend slot and
+#: no more, because up to five of these plus a scatter share one row of the
+#: composed figure.
+#:
+#: Ems, because the published panels were tuned as a unit -- 1.76 x 4.5
+#: inches at 13 pt -- and this figure draws them at 17 pt. In inches the
+#: three numbers are independent and the type outgrows the slot: at 1.76 the
+#: legend ran off the right edge and the value axis thinned from five ticks
+#: to two, because matplotlib fits ticks to the space the labels leave. In
+#: ems they move together, so these panels have the same type-to-panel ratio
+#: as the published ones whatever :data:`BACKGROUND_FONT_PT` is set to. The
+#: absolute size does not matter: ``figure_layout.compose`` solves one dpi
+#: from the pixels it is handed.
+BACKGROUND_CELL_W_EM = 1.76 / (13 / 72)
+BACKGROUND_ROW_H_EM = 4.5 / (13 / 72)
 
-#: Headroom above the drawn range, as a fraction of it, for the p-value that
-#: sits at the top of each sub-panel.
-BACKGROUND_HEADROOM = 0.18
+#: Type size for the background rows, in points. 17 rather than
+#: :data:`PANEL_FONT_SIZE` because the two renderers do not put the same ink
+#: inside the same em: a matplotlib point and a Vega-Lite pixel both land at
+#: ``size * 300/72`` pixels on disk, but matplotlib's glyphs fill more of
+#: that box. The upstream notebook measured the ratio on a tick digit -- the
+#: one cap-height glyph both renderers draw -- and found 13 pt matching 14 px;
+#: 18 px scales to 16.7, and 17 is that to the nearest point.
+BACKGROUND_FONT_PT = 17
 
-#: The two approaches, their colours and their marks, in the order
-#: `mutation_lookup_line` takes them -- ``delta_fitness`` first, ``log_sf``
-#: second. One spelling, because both the sub-panels and the legend beside
-#: them are built from it: a legend drawn from its own copy of the mapping is
-#: a legend that can come to disagree with the marks it names.
+#: Headroom above and below the drawn range, as fractions of it. The top is
+#: larger because the p-value sits inside the axes rather than above them.
+BACKGROUND_HEADROOM = 0.22
+BACKGROUND_FOOTROOM = 0.08
+
+#: The two approaches, their colours and their matplotlib markers, in the
+#: order they are drawn. One spelling, because both the lines and the legend
+#: are built from it: a legend drawn from its own copy of the mapping is a
+#: legend that can come to disagree with the marks it names. The colours are
+#: the figure's own, so a reader who learned grey-circle/purple-triangle in
+#: `fig:agreement`'s lookup panels does not have to re-learn it here.
 BACKGROUND_SERIES = (
-    ("counts", COUNTS_GREY, "circle"),
-    ("DASM", DASM_PURPLE, "triangle"),
+    ("counts", "counts_effect", COUNTS_GREY, "o"),
+    ("DASM", "dasm_effect", DASM_PURPLE, "^"),
 )
+
+#: What the x axis of a row is called, and the gloss under it saying which
+#: side is which. Two strings rather than one, because they are drawn at two
+#: sizes and two weights; see :func:`background_panel`.
+BACKGROUND_X_TITLE = "amino-acid identities defining each subset"
+BACKGROUND_X_GLOSS = "(left: clade-founder identities; right: derived identities)"
+
+
+def _em_in() -> float:
+    """One em of the background rows' type, in inches."""
+    return BACKGROUND_FONT_PT / 72.0
+
+
+def background_y_domain(frame: pd.DataFrame) -> tuple[float, float]:
+    """The value axis every sub-panel of every background row shares.
+
+    One domain across all three clades, so a steep line means a large shift
+    and not a narrow axis -- which is the whole claim these panels make.
+
+    Computed here rather than in the notebook so that the padding and the
+    renderer stay together: :func:`background_panel` draws the p-value inside
+    the axes, and the headroom that leaves it room is a fact about the
+    drawing.
+
+    Args:
+        frame: Every row that will be drawn, by every clade.
+
+    Returns:
+        ``(low, high)``, the data range padded by :data:`BACKGROUND_FOOTROOM`
+        below and :data:`BACKGROUND_HEADROOM` above.
+    """
+    columns = [column for _, column, _, _ in BACKGROUND_SERIES]
+    drawn = frame[columns].to_numpy(dtype=float)
+    drawn = drawn[np.isfinite(drawn)]
+    if drawn.size == 0:
+        raise ValueError(
+            "background_y_domain was handed no finite value to scale against."
+        )
+    low, high = float(drawn.min()), float(drawn.max())
+    span = (high - low) or 1.0
+    return (low - BACKGROUND_FOOTROOM * span, high + BACKGROUND_HEADROOM * span)
 
 
 def background_panel(
     frame: pd.DataFrame,
     clade: str,
     *,
-    y_domain: tuple[float, float] | None = None,
-) -> alt.HConcatChart:
+    y_domain: tuple[float, float],
+    columns: int,
+    h_params: tuple[float, float, float] | None = None,
+) -> matplotlib.figure.Figure:
     """One clade's row of `fig:within_clade_shifts`: panel B, D or F.
 
     One sub-panel per candidate mutation, each plotting that mutation's
@@ -801,33 +890,42 @@ def background_panel(
     axis is the two backgrounds named by their residues -- ``R346, K356,
     F490`` against ``T346, T356, S490`` -- so the two ticks are a
     like-for-like pair rather than "none" against a list of substitutions.
+    Each is set one residue per line and horizontal, because a sub-panel is
+    1.76 inches wide and a one-line ``R346, K356, F490`` fits there only
+    rotated, which is three labels a reader has to turn the page to read.
 
-    Assembled from :func:`dasm2.analysis.charts.mutation_lookup_line` rather
-    than drawn here. That builder already puts two series over a categorical
-    axis with the counts/DASM colours and shapes this figure uses elsewhere,
-    and reusing it is what makes the two approaches look the same in this
-    figure as in `fig:agreement`.
+    Every row carries its own legend and its own x label: each is a
+    separately lettered panel of the figure, and a panel that borrows its key
+    from the one above it cannot be read on its own.
 
-    **One y domain across every sub-panel of every row.** Passed in rather
-    than computed per clade: the three rows are read against each other, so a
-    steep line has to mean a large shift and not a narrow axis.
+    **Every row is the same number of slots wide**, whatever its candidate
+    count, and the surplus slots are left blank with the first of them
+    holding the legend. That, plus ``h_params``, is what makes the three rows
+    line up when they are stacked left-justified.
 
     Args:
-        frame: Columns ``candidate``, ``background``, ``counts_effect``,
-            ``dasm_effect``, ``p_label`` and ``background_order``.
-        clade: The clade this row draws, for the y-axis title.
-        y_domain: ``(low, high)`` shared by every sub-panel.
+        frame: Columns ``candidate``, ``background``, ``background_order``,
+            ``p_label``, and one per entry of :data:`BACKGROUND_SERIES`.
+        clade: The clade this row draws, for the value-axis title.
+        y_domain: ``(low, high)`` shared by every sub-panel of every row,
+            from :func:`background_y_domain`.
+        columns: How many slots wide every row is -- the widest clade's
+            candidate count plus one for the legend.
+        h_params: ``(left, right, wspace)`` taken from the first row drawn
+            and imposed on the rest, after ``tight_layout`` has run. Without
+            it the slots do not line up even at equal width, because
+            ``tight_layout`` sizes each figure's margins from its own tick
+            labels, and a row whose empty right-hand slots carry none comes
+            out with wider panels than the first.
 
     Returns:
-        The row, left to right in order of decreasing absolute counts shift.
+        The row, as a matplotlib figure, ordered left to right by decreasing
+        absolute counts shift.
     """
-    required = {
-        "candidate",
-        "background",
-        "counts_effect",
-        "dasm_effect",
-        "p_label",
-        "background_order",
+    import matplotlib.pyplot as plt
+
+    required = {"candidate", "background", "background_order", "p_label"} | {
+        column for _, column, _, _ in BACKGROUND_SERIES
     }
     missing = sorted(required - set(frame.columns))
     if missing:
@@ -852,141 +950,214 @@ def background_panel(
             float(part.iloc[-1]["counts_effect"]) - float(part.iloc[0]["counts_effect"])
         )
 
-    candidates = sorted(frame["candidate"].unique(), key=shift_of, reverse=True)
+    members = sorted(frame["candidate"].unique(), key=shift_of, reverse=True)
+    if len(members) > columns - 1:
+        raise ValueError(
+            f"{clade} has {len(members)} candidates and the row is {columns} "
+            f"slots wide, which leaves no slot for the legend."
+        )
 
-    cells = []
-    for index, candidate in enumerate(candidates):
-        part = frame[frame["candidate"] == candidate]
-        lookup = pd.DataFrame(
-            {
-                "clade": part["background"],
-                "delta_fitness": part["counts_effect"],
-                "log_sf": part["dasm_effect"],
-            }
-        )
-        cell = mutation_lookup_line(
-            lookup,
-            candidate,
-            clade_order=order,
-            width=BACKGROUND_CELL_W,
-            height=BACKGROUND_CELL_H,
-            # The sub-panel's axes are titled once for the row, below, so a
-            # seven-cell row does not repeat one label seven times.
-            x_title="",
-            y_title=(f"fitness effect in clade {clade} subset" if index == 0 else ""),
-            color_title="approach",
-            series_labels=dict(
-                zip(("delta_fitness", "log_sf"), [s[0] for s in BACKGROUND_SERIES])
-            ),
-            series_colors=tuple(s[1] for s in BACKGROUND_SERIES),
-            series_shapes=tuple(s[2] for s in BACKGROUND_SERIES),
-            title=candidate,
-            y_domain=y_domain,
-            # No per-cell legend. Vega-Lite drops a legend declared on a
-            # layer nested inside an hconcat -- which is what every cell is,
-            # since the p-value is layered over the lines -- so the row's key
-            # is drawn as its own cell by `_background_legend` instead.
-            show_legend=False,
-            # One value axis, on the first cell. Every cell shares
-            # `y_domain`, so the rest would repeat the same ticks.
-            show_y_axis=index == 0,
-        )
-        label = part["p_label"].iloc[0]
-        annotation = (
-            alt.Chart(pd.DataFrame({"text": [label]}))
-            .mark_text(
-                align="center",
-                baseline="top",
-                dy=4,
-                fontSize=PANEL_FONT_SIZE - 4,
-                color="#444444",
+    figure, axes = plt.subplots(
+        1,
+        columns,
+        figsize=(
+            BACKGROUND_CELL_W_EM * _em_in() * columns,
+            BACKGROUND_ROW_H_EM * _em_in(),
+        ),
+        squeeze=False,
+        sharey=True,
+    )
+    for empty in axes[0][len(members) :]:
+        empty.set_axis_off()
+
+    for slot, candidate in enumerate(members):
+        axis = axes[0][slot]
+        part = frame[frame["candidate"] == candidate].sort_values("background_order")
+        x = list(range(len(part)))
+        for label, column, colour, marker in BACKGROUND_SERIES:
+            axis.plot(
+                x,
+                part[column],
+                marker=marker,
+                color=colour,
+                markersize=7,
+                linewidth=1.4,
+                label=label,
+                zorder=3,
             )
-            .encode(x=alt.value(BACKGROUND_CELL_W / 2), y=alt.value(0), text="text:N")
+        axis.axhline(0.0, color="#cccccc", linewidth=1, zorder=1)
+        axis.text(
+            0.5,
+            0.93,
+            part["p_label"].iloc[0],
+            transform=axis.transAxes,
+            ha="center",
+            va="top",
+            fontsize=BACKGROUND_FONT_PT,
+            color="#444444",
         )
-        # No `.properties` on the layer: `mutation_lookup_line` has already
-        # set the size and the title, and restating them on the wrapper is
-        # what drops the legend off the cell that is supposed to carry it.
-        cells.append(alt.layer(cell, annotation))
+        axis.set_xticks(x)
+        axis.set_xticklabels(
+            [label.replace(", ", "\n") for label in part["background"]],
+            fontsize=BACKGROUND_FONT_PT,
+        )
+        axis.set_xlim(-0.45, len(part) - 0.55)
+        axis.set_ylim(*y_domain)
+        # The mutation alone. Every sub-panel of a row is one clade's, so
+        # "in clade 20B" would be the same five words on every one of them --
+        # and on a two-candidate row they are wide enough to collide. The
+        # clade is on the value-axis label instead, once.
+        axis.set_title(candidate, fontsize=BACKGROUND_FONT_PT, fontweight="bold")
+        axis.tick_params(axis="y", labelsize=BACKGROUND_FONT_PT)
+        # On every sub-panel, not only the one carrying the ticks: the grid is
+        # how a reader carries a level across a row, and `sharey` hides the
+        # labels, not the lines.
+        axis.grid(axis="y", color="#eeeeee", zorder=0)
+        axis.set_axisbelow(True)
 
-    return alt.hconcat(*cells, _background_legend()).properties(
-        title=alt.TitleParams(
-            "amino-acid identities defining each subset",
-            subtitle="left: clade-founder identities; right: derived identities",
-            fontSize=PANEL_FONT_SIZE - 2,
-            subtitleFontSize=PANEL_FONT_SIZE - 5,
-            anchor="middle",
-            orient="bottom",
-            offset=6,
-        )
+    # Both lines go in one label so that `tight_layout` reserves the height of
+    # both; the gloss is then lifted out of it below, because a label carries
+    # one size and one weight, and the gloss should not read as heavy as the
+    # thing it glosses.
+    #
+    # "defining", not "describing": a parent in the R346, K356, F490 subset
+    # carries those three and whatever else it happens to have, so the label
+    # names what membership requires rather than the parent's whole
+    # background.
+    placed_xlabel = figure.supxlabel(
+        f"{BACKGROUND_X_TITLE}\n{BACKGROUND_X_GLOSS}",
+        fontsize=BACKGROUND_FONT_PT,
+        fontweight="bold",
+        ma="center",
+    )
+    # "fitness effect", the paper's name for this quantity everywhere else,
+    # over two lines: one line of it is taller than the panels and would set
+    # the figure's height rather than read as its label. Bold to match the
+    # sub-panel titles and the x label, which is what the Vega-Lite panel
+    # beside this one in the composed figure does by default. `ma="center"`
+    # centres the two lines on each other -- rotated text left-justifies by
+    # default, which for a vertical label means the lines align along their
+    # lower edge and the shorter one hangs off the top.
+    placed_ylabel = figure.supylabel(
+        f"fitness effect in\nclade {clade} subset",
+        fontsize=BACKGROUND_FONT_PT,
+        fontweight="bold",
+        ma="center",
+    )
+    figure.tight_layout(rect=(0.02, 0.02, 1.0, 1.0))
+    if h_params is not None:
+        left, right, wspace = h_params
+        figure.subplots_adjust(left=left, right=right, wspace=wspace)
+
+    # The labels and the legend are placed against the panels, not against the
+    # figure, and only after `tight_layout` has given the panels their final
+    # geometry. The value label and its ticks take up the left margin, so
+    # anything centred at 0.5 sits visibly left of the block of plots it
+    # belongs to. Nothing placed here claims any space of its own -- the
+    # legend goes in a slot the padding already left empty, and the labels
+    # only slide along the layout they were measured into.
+    renderer = _measuring_renderer(figure)
+    panel_middle = (
+        min(axis.get_position().y0 for axis in axes.ravel())
+        + max(axis.get_position().y1 for axis in axes.ravel())
+    ) / 2
+    placed_ylabel.set_y(panel_middle)
+
+    # On this clade's own sub-panels rather than on the row's slots: the label
+    # belongs under the plots it describes, not under the middle of a padding
+    # that exists only to make the rows line up.
+    occupied = [axes[0][slot].get_position() for slot in range(len(members))]
+    label_x = (
+        min(span.x0 for span in occupied) + max(span.x1 for span in occupied)
+    ) / 2
+    placed_xlabel.set_x(label_x)
+
+    # Split the reserved block in two: the label keeps its top, the gloss
+    # takes its bottom at one point smaller and regular weight. Measured
+    # rather than offset by a guessed line height, so the pair occupies
+    # exactly the space the two-line label was measured into.
+    block = placed_xlabel.get_window_extent(renderer).transformed(
+        figure.transFigure.inverted()
+    )
+    # `tight_layout` leaves the label a full line of air under the tick
+    # labels, which on a row this short reads as a gap rather than as spacing.
+    # Half of it is taken back by sliding the whole two-line block up,
+    # measured against the lowest tick label rather than offset by a guessed
+    # amount, so the label keeps the same clearance whatever the tick labels
+    # turn out to be.
+    ticks_bottom = min(
+        axis.get_tightbbox(renderer).transformed(figure.transFigure.inverted()).y0
+        for axis in axes.ravel()
+    )
+    lift = max(ticks_bottom - block.y1, 0.0) / 2
+    placed_xlabel.set_text(BACKGROUND_X_TITLE)
+    placed_xlabel.set_va("top")
+    placed_xlabel.set_y(block.y1 + lift)
+    figure.text(
+        label_x,
+        block.y0 + lift,
+        BACKGROUND_X_GLOSS,
+        fontsize=BACKGROUND_FONT_PT - 1,
+        ha="center",
+        va="bottom",
     )
 
+    # In the first slot past this clade's sub-panels, level with them: a key
+    # beside the plots rather than a band above them. Every row reserves that
+    # slot, which is what the surplus column is for.
+    handles, labels = axes[0][0].get_legend_handles_labels()
+    spare = axes[0][len(members)] if columns > len(members) else axes[0][-1]
+    drawn = figure.legend(
+        handles,
+        labels,
+        loc="center left",
+        bbox_to_anchor=(spare.get_position().x0, panel_middle),
+        ncol=1,
+        frameon=False,
+        fontsize=BACKGROUND_FONT_PT,
+        title="approach",
+    )
+    drawn.get_title().set_fontsize(BACKGROUND_FONT_PT)
+    drawn.get_title().set_fontweight("bold")
+    return figure
 
-def _background_legend() -> alt.LayerChart:
-    """The row's key, as its own cell.
 
-    Drawn by hand rather than declared on one of the sub-panels: each
-    sub-panel is a layer (the two lines, plus the p-value over them) nested
-    inside an hconcat, and Vega-Lite drops a legend declared there -- the
-    spec keeps it and the rendered SVG carries no `role-legend` group at all.
-    A hand-drawn key renders wherever it is put.
+def _measuring_renderer(figure: matplotlib.figure.Figure):
+    """A renderer to measure this figure's text with, whatever canvas it has.
 
-    Built from :data:`BACKGROUND_SERIES`, the same tuple the marks are built
-    from, so the swatch and the mark it names cannot drift apart.
-
-    Positioned on a unit scale with the axis off, rather than on a band
-    scale: a band scale spreads two entries over the full height of a cell
-    320 pixels tall, which reads as two unrelated labels rather than as one
-    key. ``stroke=None`` drops the cell's frame, which a key has no use for
-    and which makes it look like a panel with nothing plotted in it.
+    Under ``marimo export`` the figure already has an Agg canvas and carries
+    its own renderer; in the running app it has the base canvas, which has
+    none, and asking it for one is an ``AttributeError``. Attaching Agg is
+    what ``savefig`` does anyway.
     """
-    names = [name for name, _, _ in BACKGROUND_SERIES]
-    frame = pd.DataFrame(
-        {
-            "approach": names,
-            # Just above and just below the middle of the cell, so the key
-            # reads as a block against the panels beside it.
-            "position": [0.54, 0.46][: len(names)],
-        }
-    )
-    shared = {
-        "y": alt.Y("position:Q", scale=alt.Scale(domain=[0, 1]), axis=None, title=None)
-    }
-    marks = (
-        alt.Chart(frame)
-        .mark_point(filled=True, size=110, opacity=1)
-        .encode(
-            x=alt.value(10),
-            color=alt.Color(
-                "approach:N",
-                scale=alt.Scale(
-                    domain=names, range=[colour for _, colour, _ in BACKGROUND_SERIES]
-                ),
-                legend=None,
-            ),
-            shape=alt.Shape(
-                "approach:N",
-                scale=alt.Scale(
-                    domain=names, range=[shape for _, _, shape in BACKGROUND_SERIES]
-                ),
-                legend=None,
-            ),
-            **shared,
-        )
-    )
-    labels = (
-        alt.Chart(frame)
-        .mark_text(align="left", fontSize=PANEL_FONT_SIZE - 4, color="#222222")
-        .encode(x=alt.value(24), text="approach:N", **shared)
-    )
-    return (
-        alt.layer(marks, labels)
-        .properties(
-            width=76,
-            height=BACKGROUND_CELL_H,
-            view=alt.ViewConfig(stroke=None),
-            title=alt.TitleParams(
-                "approach", fontSize=PANEL_FONT_SIZE - 3, anchor="start", dx=6
-            ),
-        )
-        .resolve_scale(color="independent", shape="independent")
-    )
+    try:
+        return figure.canvas.get_renderer()
+    except AttributeError:
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+
+        return FigureCanvasAgg(figure).get_renderer()
+
+
+def save_mpl_panel(
+    figure: matplotlib.figure.Figure, stem: str, *, selection: str
+) -> matplotlib.figure.Figure:
+    """Write one matplotlib panel to this selection's figure directory.
+
+    The matplotlib counterpart of :func:`save_panel`, writing the same two
+    formats to the same place at the same resolution, so the composition can
+    read a row without knowing which renderer drew it.
+
+    ``bbox_inches="tight"`` is deliberately *not* passed. The composition
+    places panels by their pixel size, and a tight box crops each one by
+    however much white space it happens to carry -- so three rows drawn at
+    one slot geometry would arrive at three different ones, which is the
+    alignment this renderer exists to get right.
+
+    Returns the figure, so a call can wrap an expression without
+    restructuring it.
+    """
+    directory = figure_dir(selection)
+    directory.mkdir(parents=True, exist_ok=True)
+    for extension in ("png", "svg"):
+        figure.savefig(directory / f"{stem}.{extension}", dpi=VEGA_WRITE_PPI)
+    return figure
