@@ -1,3 +1,2 @@
 model,clade,min_count,candidate_group,aa_mutation,aa_site,parent_aa,mutant_aa,log_selection_factor,log_selection_factor_raw,delta_fitness_ratio,delta_fitness_ratio_raw,actual_count,predicted_count,spec_fitness_metric,spec_min_count,spec_clip_lower,spec_min_clade_mutations,spec_exclude_synonymous,spec_count_filter_mode
 dasm-1077k,21K,10,figure,M177V,177,M,V,0.09142380207777023,0.09142380207777023,2.808138754223485,2.808138754223485,463,27.457000428043926,delta_fitness_ratio,0.0,-4.0,20,True,or
-dasm-1077k,21K,10,background,R346K,346,R,K,4.2425384521484375,4.2425384521484375,3.500673761167885,3.500673761167885,753,22.23840299350517,delta_fitness_ratio,0.0,-4.0,20,True,or

@@ -170,6 +170,17 @@ BACKGROUND_CSV = REPO_ROOT / "results" / "backgrounds" / "clade_backgrounds.csv"
 #: backgrounds and so defines neither.
 BACKGROUND_SPLIT_ROLES = ("marker", "cotraveller")
 
+#: Which clades name their background mutations on panel A. Not all of them:
+#: the panel's subject is where the two approaches disagree, and a label on a
+#: mark sitting on the diagonal points at nothing for the reader to see. Only
+#: 22D's background mutations have swept far enough for the counts approach to
+#: understate them, which is what puts them off the diagonal and what the
+#: labels are there to explain. 20B's and 21K's are on it.
+#:
+#: The split is still derived for every clade -- it is what panels B, D and F
+#: contrast -- and this governs only which of them panel A draws.
+BACKGROUND_LABEL_CLADES: tuple[str, ...] = ("22D",)
+
 #: Where the scored tables live. `workflow/score.smk` spells this too, for
 #: `rule score`'s own output; this module's job is to be the one spelling for
 #: everything the figures read, so a later haplotype rule takes it from here.
@@ -208,7 +219,9 @@ def labelled_candidates() -> tuple[tuple[str, str, str], ...]:
     stack each blind to the other's.
 
     The `fixed` rows are left out: they belong to both backgrounds, so they
-    distinguish nothing and naming them on the panel would say they do.
+    distinguish nothing and naming them on the panel would say they do. So are
+    the clades outside :data:`BACKGROUND_LABEL_CLADES`, whose background
+    mutations sit on the diagonal.
     """
     rows = [
         (clade, mutation, CANDIDATE_ON_FIGURE)
@@ -221,6 +234,7 @@ def labelled_candidates() -> tuple[tuple[str, str, str], ...]:
             (row["clade"], row["mutation"], "background")
             for row in csv.DictReader(handle)
             if row["role"] in BACKGROUND_SPLIT_ROLES
+            and row["clade"] in BACKGROUND_LABEL_CLADES
         )
     return tuple(rows)
 

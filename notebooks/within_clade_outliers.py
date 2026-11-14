@@ -27,15 +27,18 @@ def _(mo):
 
     **Two groups of labelled mutation, in two inks.** Near-black names the
     subject: the mutation whose shift the row measures. Orange names the
-    substitutions that *define* the two backgrounds, which is a structural fact
-    about the clade rather than a claim about the mutation's effect.
+    substitutions that *define* the two backgrounds, and only in 22D, where
+    they sit well below the diagonal and a reader is owed the reason. The
+    counts approach takes the opportunity for a mutation to be the clade's
+    fitted rate scaled to the whole clade while counting it only on branches
+    still carrying the founder residue, so once most of the clade carries a
+    mutation its counts-based estimate is understated. That is not a shift.
 
-    Reading the orange marks: where one sits far below the diagonal, as 22D's
-    three do, the counts approach has understated it, because it takes the
-    opportunity for a mutation to be the clade's fitted rate scaled to the
-    whole clade while counting it only on branches still carrying the founder
-    residue. Where a background mutation has not swept far, as in 20B, it sits
-    on the diagonal like anything else. Both are expected; neither is a shift.
+    20B's and 21K's background mutations did not sweep as far, so the two
+    approaches agree about them and they sit on the diagonal with everything
+    else. `BACKGROUND_LABEL_CLADES` keeps them unlabelled: the panel is about
+    where the approaches *disagree*, and a label on a mark that is where it
+    should be points at nothing to see.
 
     **Two lists, one labelled set.** The subjects come from
     `data/shift_candidates.csv`, which this panel and the next both read, so a
