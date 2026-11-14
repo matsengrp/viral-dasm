@@ -198,6 +198,20 @@ def test_the_published_table_still_compares_21k_r346k():
     the tracked table rather than a fixture, because the fixture cannot express
     "the audit flags a site the table does not".
     """
+    model = "dasm-1077k"
+    read = panels.read_scored_table(
+        published_table_or_skip(), models=[model], clades=["21K"]
+    )
+    frames = panels.base_frames(read, models=[model], clades=["21K"])
+    frame = frames[(model, "21K")]
+    row = frame[frame["aa_mutation"] == "R346K"]
+    assert len(row) == 1, "R346K is absent from 21K's comparison frame"
+    assert float(row["actual_count"].iloc[0]) == 753.0
+    assert float(row["predicted_count"].iloc[0]) == pytest.approx(22.238403, abs=1e-5)
+
+
+def published_table_or_skip():
+    """The tracked scored table, or a skip, honouring ``VIRAL_DASM_REQUIRE_DATA``."""
     table_path = (
         REPO_ROOT / "results" / "selection_factors" / "dasm-1077k_full_depth.parquet"
     )
@@ -205,14 +219,95 @@ def test_the_published_table_still_compares_21k_r346k():
         if os.environ.get("VIRAL_DASM_REQUIRE_DATA") == "1":
             pytest.fail(f"{table_path} is missing")
         pytest.skip(f"{table_path} is not present")
+    return table_path
+
+
+def test_a_codon_the_tree_cannot_represent_is_dropped_and_its_neighbours_are_not():
+    """#39, in both directions, against the table the manuscript cites.
+
+    21J's codon 142 carries six routes with an actual count of zero against
+    259 expected in total, because Delta's founder codon ``GAT`` differs from
+    the reference ``GGT`` at the tree-masked nt 21987 and so matches no
+    observation mat-pcp counted. Those rows are not measurements and leave.
+
+    The other direction is the one that makes this different from the rule #36
+    removed: the ``globally_masked`` mutations mat-pcp *did* estimate must stay.
+    Both sit on the same flag, and a predicate that read the flag rather than
+    the mask file would take the second with the first.
+    """
     model = "dasm-1077k"
-    read = panels.read_scored_table(table_path, models=[model], clades=["21K"])
-    frames = panels.base_frames(read, models=[model], clades=["21K"])
-    frame = frames[(model, "21K")]
-    row = frame[frame["aa_mutation"] == "R346K"]
-    assert len(row) == 1, "R346K is absent from 21K's comparison frame"
-    assert float(row["actual_count"].iloc[0]) == 753.0
-    assert float(row["predicted_count"].iloc[0]) == pytest.approx(22.238403, abs=1e-5)
+    clades = ["21J", "21L", "22B", "24A"]
+    read = panels.read_scored_table(
+        published_table_or_skip(), models=[model], clades=clades
+    )
+    frames = panels.base_frames(read, models=[model], clades=clades)
+
+    for clade in clades:
+        frame = frames[(model, clade)]
+        gone = panels.unobservable_founder_codons(clade)
+        assert not frame["aa_site"].isin(gone).any(), (
+            f"{clade} still compares a codon whose founder background the tree "
+            f"cannot represent: {sorted(gone)}"
+        )
+        kept = frame[frame["globally_masked"].fillna(False)]
+        assert not kept.empty, (
+            f"{clade} dropped every globally masked mutation, which is the "
+            f"codon widening #36 removed rather than #39's predicate"
+        )
+
+    assert panels.unobservable_founder_codons("21J") == frozenset({142, 950})
+    assert panels.unobservable_founder_codons("21L") == frozenset({142})
+
+
+def test_a_config_excluded_nucleotide_does_not_drop_its_codon():
+    """24A's F939L: the case the reason column decides.
+
+    24A's founder differs from the reference at nt 24378, which is masked --
+    but with reason ``sites_to_exclude``, mat-pcp's own exclusion, not the
+    tree's. The base is still observable, so the founder codon still matches
+    what matUtils read, and F939L carries 14 actual counts against 5.70
+    expected: an ordinary comparison. A predicate that read
+    ``masked_nt_sites.csv`` without filtering on ``reason`` would discard it,
+    which is why this is pinned rather than left to the measurement above.
+    """
+    model = "dasm-1077k"
+    read = panels.read_scored_table(
+        published_table_or_skip(), models=[model], clades=["24A"]
+    )
+    frame = panels.base_frames(read, models=[model], clades=["24A"])[(model, "24A")]
+    row = frame[frame["aa_mutation"] == "F939L"]
+    assert len(row) == 1, "F939L left 24A's comparison frame"
+    assert float(row["actual_count"].iloc[0]) == 14.0
+    assert float(row["predicted_count"].iloc[0]) == pytest.approx(5.698881, abs=1e-5)
+    assert 939 not in panels.unobservable_founder_codons("24A")
+
+
+def test_the_unobservable_codons_are_derived_rather_than_listed():
+    """The predicate is rebuilt from mat-pcp's files, so a mask change moves it.
+
+    Asserted by deriving the same answer a second way, from the founder and
+    reference FASTAs against the mask file's own rows, rather than by comparing
+    to a literal: a literal would pass if the function returned a hardcoded
+    {142, 950} and stopped reading its inputs.
+    """
+    masked = pd.read_csv(lib.mat_pcp_path("masked_nt_sites_file"))
+    tree_masked = sorted(
+        {
+            int(index)
+            for index, reason in zip(masked["nt_index"], masked["reason"])
+            if reason == panels.TREE_MASK_REASON
+        }
+    )
+    assert tree_masked, "no nucleotide carries the tree-mask reason"
+    reference = read_founder_nt("19A")
+    for clade in ("21J", "21L", "22B", "24A", "19A", "20A"):
+        founder = read_founder_nt(clade)
+        expected = frozenset(
+            index // 3 + 1
+            for index in tree_masked
+            if founder[index] != reference[index]
+        )
+        assert panels.unobservable_founder_codons(clade) == expected
 
 
 def test_training_censors_exactly_what_mat_pcp_excludes():

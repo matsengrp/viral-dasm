@@ -378,8 +378,6 @@ pair,mutation_label,aa_site,mutant_aa,sf_shift,fitness_shift,model,min_count,spe
 21J→21L,F140S,140,S,-2.5987263917922974,-2.4534725671282267,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
 21J→21L,L141F,141,F,-2.316633105278015,-2.3076132997366443,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
 21J→21L,L141S,141,S,-2.414397120475769,-1.7948173538458467,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
-21J→21L,D142N,142,N,-0.15334874391555786,0.0,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
-21J→21L,D142Y,142,Y,-1.1935919523239136,0.0,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
 21J→21L,V143A,143,A,-2.6832486391067505,-2.7355976380367735,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
 21J→21L,V143F,143,F,-3.5413918793201447,-4.455031111184135,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
 21J→21L,V143I,143,I,-0.08609861135482788,-0.3597045084485137,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
@@ -3686,7 +3684,6 @@ pair,mutation_label,aa_site,mutant_aa,sf_shift,fitness_shift,model,min_count,spe
 21J→23A,P139S,139,S,2.583652049303055,2.2302495156009936,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
 21J→23A,F140L,140,L,0.0971153974533081,0.37949043609597866,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
 21J→23A,L141F,141,F,-0.6511345207691193,-0.775647185570998,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
-21J→23A,D142Y,142,Y,0.006841421127319336,0.6930033001933862,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
 21J→23A,V143F,143,F,-2.5672891438007355,-3.557050073928486,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
 21J→23A,K147E,147,E,1.6066924035549164,1.1436599456977845,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
 21J→23A,K147I,147,I,1.4343617744743824,1.6677946817381315,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
@@ -5321,7 +5318,6 @@ pair,mutation_label,aa_site,mutant_aa,sf_shift,fitness_shift,model,min_count,spe
 21J→24A,P139L,139,L,-0.03443574905395508,0.18614603901965499,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
 21J→24A,P139S,139,S,2.041277587413788,1.288491030428585,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
 21J→24A,L141F,141,F,-1.190372347831726,-0.9924110478261696,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
-21J→24A,D142Y,142,Y,0.7079272270202637,0.7274316846140314,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
 21J→24A,V143F,143,F,-3.011680632829666,-3.522924604024743,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
 21J→24A,Y144F,144,F,1.683176338672638,1.2916112655993288,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
 21J→24A,Y145H,145,H,-0.872416615486145,-0.26074993735150587,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
@@ -6856,7 +6852,6 @@ pair,mutation_label,aa_site,mutant_aa,sf_shift,fitness_shift,model,min_count,spe
 21L→23A,P139S,139,S,3.624836713075638,3.621296311386919,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
 21L→23A,F140L,140,L,2.6072556376457214,2.7941723806762977,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
 21L→23A,L141F,141,F,1.6654985845088959,1.531966114165646,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
-21L→23A,D142Y,142,Y,1.200433373451233,0.6930033001933862,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
 21L→23A,V143F,143,F,0.9741027355194092,0.8979810372556489,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
 21L→23A,K147E,147,E,-1.1873502731323242,-1.5104204571381548,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
 21L→23A,K147I,147,I,-0.1576838493347168,-0.43628092574030264,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
@@ -8490,7 +8485,6 @@ pair,mutation_label,aa_site,mutant_aa,sf_shift,fitness_shift,model,min_count,spe
 21L→24A,P139L,139,L,0.5793623924255371,0.6134878695207502,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
 21L→24A,P139S,139,S,3.082462251186371,2.6795378262145104,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
 21L→24A,L141F,141,F,1.126260757446289,1.3152022519104745,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
-21L→24A,D142Y,142,Y,1.9015191793441772,0.7274316846140314,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
 21L→24A,V143F,143,F,0.5297112464904785,0.9321065071593919,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
 21L→24A,Y145H,145,H,0.3490145206451416,0.7235290306594804,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
 21L→24A,H146Q,146,Q,0.712270975112915,0.39789017025242,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
@@ -9990,7 +9984,6 @@ pair,mutation_label,aa_site,mutant_aa,sf_shift,fitness_shift,model,min_count,spe
 23A→24A,P139L,139,L,-1.4817379713058472,-1.1882521392644687,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
 23A→24A,P139S,139,S,-0.542374461889267,-0.9417584851724083,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
 23A→24A,L141F,141,F,-0.5392378270626068,-0.2167638622551717,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
-23A→24A,D142Y,142,Y,0.7010858058929443,0.03442838442064522,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
 23A→24A,V143F,143,F,-0.44439148902893066,0.03412546990374299,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
 23A→24A,K147E,147,E,0.4243936538696289,0.49782804164863803,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or
 23A→24A,K147I,147,I,0.5837628841400146,0.6602918268917439,dasm-293k,10,delta_fitness_ratio,0.0,-4.0,20,True,or

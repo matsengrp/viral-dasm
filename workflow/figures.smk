@@ -53,10 +53,17 @@ from panel_spec import (
 NOTEBOOK_DIR = f"{ARTIFACT_ROOT}/notebooks"
 
 
-def shift_clade_fastas(*_):
-    """The founder FASTAs of the clades the shift panels pair."""
-    directory = mat_pcp_path("clade_founders_dir")
-    return [str(directory / f"{clade}.fa") for clade in SHIFT_CLADES]
+def clade_founder_fastas(*_):
+    """Every clade founder FASTA under `clade_founders_dir`.
+
+    The whole directory rather than `SHIFT_CLADES`, which is what these rules
+    declared until #39. The shift panels still read only the four they pair,
+    but `unobservable_founder_codons` asks every scored clade whether its
+    founder differs from the reference at a tree-masked nucleotide, so a
+    founder that changed would change a panel while the rule reported nothing
+    to do.
+    """
+    return sorted(str(path) for path in mat_pcp_path("clade_founders_dir").glob("*.fa"))
 
 
 def panel_outputs(stems, selection):
@@ -106,10 +113,12 @@ rule agreement_mutations:
         dasm2_init="dasm2/__init__.py",
         notebook="notebooks/agreement_mutations.py",
         table=SCORED_TABLE,
-        # The founders the shift panel drops identical pairs on -- those four
-        # clades', not the roster's 56. `rule score` declares the whole glob
-        # because it scores every clade; this reads `SHIFT_CLADES` alone.
-        clade_founders=shift_clade_fastas,
+        # Every clade's founder: the shift panel drops identical pairs on
+        # four of them, and `unobservable_founder_codons` reads one per clade
+        # scored. Plus the two files that predicate is built from.
+        clade_founders=clade_founder_fastas,
+        masked_nt_sites=str(mat_pcp_path("masked_nt_sites_file")),
+        reference=str(mat_pcp_path("reference_sequence_file")),
     output:
         html=f"{NOTEBOOK_DIR}/agreement_mutations_{{selection}}.html",
         panels=panel_outputs(MUTATION_PANELS, "{selection}"),
@@ -148,7 +157,11 @@ rule agreement_ladders:
         dasm2_init="dasm2/__init__.py",
         notebook="notebooks/agreement_ladders.py",
         table=SCORED_TABLE,
-        clade_founders=shift_clade_fastas,
+        # As above: every founder, and the two files the unobservable-codon
+        # predicate is rebuilt from.
+        clade_founders=clade_founder_fastas,
+        masked_nt_sites=str(mat_pcp_path("masked_nt_sites_file")),
+        reference=str(mat_pcp_path("reference_sequence_file")),
     output:
         html=f"{NOTEBOOK_DIR}/agreement_ladders_{{selection}}.html",
         panels=panel_outputs(LADDER_PANELS, "{selection}"),
