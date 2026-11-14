@@ -115,6 +115,7 @@ ENTRY_POINTS = {
     "within_clade_outliers": "notebooks/within_clade_outliers.py",
     "outlier_ranking": "notebooks/outlier_ranking.py",
     "background_effects": "notebooks/background_effects.py",
+    "compose_within_clade_shifts": "notebooks/within_clade_shifts.py",
     # `fig:within_clade_shifts`' producers. These run scripts rather than
     # notebooks, like the producers above the panel block.
     "clade_backgrounds": "scripts/backgrounds.py",

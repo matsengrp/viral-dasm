@@ -437,6 +437,39 @@ OUTLIER_TABLE_STEM = "table_s1_outlier_ranking"
 #: split across rows.
 BACKGROUND_PANELS = tuple(f"panel_b_backgrounds_{clade}" for clade in CANDIDATE_CLADES)
 
+#: `fig:within_clade_shifts`' stem, which is its LaTeX label: `main.tex`
+#: includes `figures/within_clade_shifts.pdf`. One spelling, so the file the
+#: manuscript includes and the file this pipeline writes cannot drift.
+SHIFT_FIGURE_STEM = "within_clade_shifts"
+
+#: Which panels sit on which row, left to right. Three rows of two: each
+#: clade's scatter beside that clade's background row. The keys are the
+#: letters drawn on the figure, which is also the order the caption reads.
+#:
+#: This is why both halves are written one image per clade rather than one
+#: image of all three -- a single stacked image cannot be split across rows.
+SHIFT_FIGURE_ROWS: tuple[tuple[str, ...], ...] = (("A", "B"), ("C", "D"), ("E", "F"))
+
+#: Which panel stem each letter is. Derived nowhere: a letter is a caption
+#: fact and a stem is a filename, and nothing in either implies the other.
+#: Built from :data:`CANDIDATE_CLADES` so the row order is the figure's one
+#: spelling of it, and a clade added there cannot be given a scatter and no
+#: background row.
+SHIFT_PANEL_LETTERS: dict[str, str] = {
+    letter: stem
+    for clade_index, _clade in enumerate(CANDIDATE_CLADES)
+    for letter, stem in (
+        ("ACE"[clade_index], OUTLIER_PANELS[clade_index]),
+        ("BDF"[clade_index], BACKGROUND_PANELS[clade_index]),
+    )
+}
+
+#: The box this figure has to fit inside, in inches. Taller than
+#: `fig:agreement`'s: three rows rather than two, and each row carries a
+#: scatter whose square aspect sets the row height.
+SHIFT_BOX_IN: tuple[float, float] = (7.5, 9.0)
+SHIFT_FIGURE_SCALE = 1.0
+
 #: The columns the panels read. Named rather than taken whole: the table is
 #: 1,425,760 rows per run over 24 columns, and the pooled `*_all` half,
 #: `uncertainty` and `censored_directional` are read by no panel here.
@@ -507,14 +540,18 @@ FIGURE_SCALE = 0.9
 PANEL_TITLE_PX = 18
 
 
-def composed_path(selection: str, extension: str) -> Path:
-    """Where one selection's composed figure goes, in one format."""
-    return figure_dir(selection) / f"{FIGURE_STEM}.{extension}"
+def composed_path(selection: str, extension: str, stem: str = FIGURE_STEM) -> Path:
+    """Where one selection's composed figure goes, in one format.
+
+    ``stem`` defaults to `fig:agreement`'s, which is what every existing
+    caller means; `fig:within_clade_shifts` passes its own.
+    """
+    return figure_dir(selection) / f"{stem}.{extension}"
 
 
-def composed_paths(selection: str) -> list[Path]:
+def composed_paths(selection: str, stem: str = FIGURE_STEM) -> list[Path]:
     """One selection's composed figure, in every format it is written in."""
-    return [composed_path(selection, ext) for ext in COMPOSED_FORMATS]
+    return [composed_path(selection, ext, stem) for ext in COMPOSED_FORMATS]
 
 
 def tex_figure_dir(selection: str) -> Path | None:

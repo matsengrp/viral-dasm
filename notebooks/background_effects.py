@@ -175,7 +175,7 @@ def _(CLADES, FOCAL, SELECTION, Y_DOMAIN, charts, mo, panels):
             _stem,
             selection=SELECTION,
         )
-        panels.write_panel_csv(
+        panels.write_pool_csv(
             _row[
                 [
                     "cluster",
@@ -197,7 +197,6 @@ def _(CLADES, FOCAL, SELECTION, Y_DOMAIN, charts, mo, panels):
             ].rename(columns={"cluster": "clade"}),
             _stem,
             selection=SELECTION,
-            spec=panels.BASE_SPEC,
         )
     mo.vstack([item for _c in CLADES for item in (mo.md(f"### {_c}"), PANELS[_c])])
     return

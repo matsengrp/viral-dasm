@@ -49,6 +49,9 @@ from panel_spec import (
     OUTLIER_TABLE_STEM,
     PANEL_LETTERS,
     PANEL_MEM_MB,
+    SHIFT_BOX_IN,
+    SHIFT_FIGURE_STEM,
+    SHIFT_PANEL_LETTERS,
     POOL_CELLS,
     POOL_SHIFTS,
     POOL_SUMMARY,
@@ -423,6 +426,50 @@ rule pool_counts:
         " > {log} 2>&1"
 
 
+rule compose_within_clade_shifts:
+    """`fig:within_clade_shifts` itself, laid out from the six panels.
+
+    No scoring, no tallying and no table: it reads PNGs, the same split that
+    makes `fig:agreement` cheap to re-lay-out. The panels cost two corpus
+    passes per clade and a scoring run; the layout costs a second, so the
+    spacing can be nudged without re-measuring anything.
+
+    The manuscript copy is not a declared output, for the reason
+    `rule compose_agreement` gives: `tex_figure_dir` points outside both this
+    repository and the artifact root, and snakemake deletes a job's declared
+    outputs when it fails -- so naming it would hand a failed layout the
+    power to delete the figure currently in the paper. The notebook copies it
+    and says whether it did.
+    """
+    wildcard_constraints:
+        selection="|".join(SELECTIONS),
+    input:
+        layout="scripts/figure_layout.py",
+        spec="scripts/panel_spec.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        notebook="notebooks/within_clade_shifts.py",
+        # The PNGs only: `compose` reads raster, and declaring the SVGs too
+        # would make this rule rerun on a vector copy it never opens.
+        panels=[
+            str(figure_dir("{selection}") / f"{stem}.png")
+            for stem in SHIFT_PANEL_LETTERS.values()
+        ],
+    output:
+        html=f"{NOTEBOOK_DIR}/within_clade_shifts_{{selection}}.html",
+        figure=[
+            str(path) for path in composed_paths("{selection}", SHIFT_FIGURE_STEM)
+        ],
+    log:
+        f"{ARTIFACT_ROOT}/logs/compose_within_clade_shifts_{{selection}}.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "marimo export html {input.notebook} -o {output.html} --force"
+        " -- --selection {wildcards.selection}"
+        " > {log} 2>&1"
+
+
 rule figures:
     """Every composed figure of the paper, and so every panel beneath them.
 
@@ -439,12 +486,15 @@ rule figures:
             for selection in SELECTIONS
             for path in composed_paths(selection)
         ],
-        # `fig:within_clade_shifts`' panel A, which has no composition rule
-        # yet. Declared here rather than waiting for one: a panel nothing
-        # builds is a tracked table that quietly stops matching the code
-        # beside it, which is what happened to the `fidelity` selection.
-        panel_outputs(OUTLIER_PANELS, DEFAULT_SELECTION),
-        panel_outputs(BACKGROUND_PANELS, DEFAULT_SELECTION),
+        # `fig:within_clade_shifts`, and so its six panels beneath it. The
+        # published selection only: its expensive half is the haplotype
+        # scoring, which `fidelity` would triple for a comparison no panel
+        # reads -- unlike `fig:agreement`, where a second selection is one
+        # more pass over a table already in hand.
+        [
+            str(path)
+            for path in composed_paths(DEFAULT_SELECTION, SHIFT_FIGURE_STEM)
+        ],
 
 
 rule background_effects:
