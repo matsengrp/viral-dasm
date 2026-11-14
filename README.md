@@ -264,6 +264,21 @@ comparable mutations across the figure's 22 clades — including 21K's R346K at
 own background and are untouched by the censoring that flagged its site
 ([#36](https://github.com/matsengrp/viral-dasm/issues/36)).
 
+**One class of row survives that drop and is still not a measurement.** Where a
+clade's founder codon contains a nucleotide masked in the tree, every sequence
+reads the reference base there, so no observation ever matches the founder
+codon mat-pcp counts on, and the codon arrives with an actual count of zero
+against a full expectation — a lethal-looking estimate with nothing behind it.
+21J's codon 142 is the case: Delta's G142D puts the founder codon one masked
+nucleotide away from the reference, mat-pcp holds 226 observed counts there and
+keeps none, and even the synonymous route reports 64.3 expected against zero
+observed. `unobservable_founder_codons` rebuilds that predicate from the mask
+file, the founder and the reference, because nothing in the scored table marks
+these rows. It is 14 mutations of 33,782, and they were the figure's largest
+outliers ([#39](https://github.com/matsengrp/viral-dasm/issues/39);
+[matsengrp/mat-pcp#161](https://github.com/matsengrp/mat-pcp/issues/161) is the
+upstream fix that will make it a no-op).
+
 **What makes that fair is that training censors the same routes.** The two
 sides are one set applied twice: mat-pcp's `censor_table.py` splits the five
 reasons behind `exclude` across the two files a training run reads, and its

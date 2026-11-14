@@ -39,6 +39,15 @@ holds no route one side saw and the other did not.
 :func:`tests.test_panels.test_training_censors_exactly_what_mat_pcp_excludes`
 re-derives that set equality from the two files and the counts table.
 
+**One class of row survives the null drop and is still not a measurement.**
+Where a clade's founder codon contains a nucleotide masked in the tree, mat-pcp
+can attribute no observation to that founder background and the codon arrives
+with an actual count of zero against a full expectation -- a lethal-looking
+estimate with nothing behind it. :func:`unobservable_founder_codons` rebuilds
+that predicate and :func:`drop_unobservable_codons` applies it. It is 14
+mutations of 33,782, and they were the figure's largest outliers. See #39 and
+matsengrp/mat-pcp#161.
+
 GISAID-derived: the table this reads descends from the cluster-only mat-pcp
 mount. The per-panel CSVs are counts, fitness effects and selection factors,
 which are publishable; no panel carries a sequence.
@@ -53,7 +62,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 # `lib` first, so this repository's root is on `sys.path` before anything
 # imports `dasm2` and the vendored fork wins over an editable install.
-from lib import GENE, assert_dasm2_is_this_repo
+from lib import GENE, assert_dasm2_is_this_repo, mat_pcp_path
 
 # Then `dasm2`, before pandas or pyarrow: `dasm2/arrow_pool.py` moves Arrow off
 # the bundled mimalloc, and can only do so if pyarrow has not been imported yet.
@@ -63,6 +72,7 @@ assert_dasm2_is_this_repo()
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from functools import cache
 
 import numpy as np
 import pandas as pd
@@ -119,6 +129,8 @@ from dasm2.analysis.viral_fitness_eval import (  # noqa: F401  (re-exported)
     within_clade_count_ladder,
     within_clade_metrics,
 )
+from dasm2.io import read_fasta_first_sequence
+from dasm2.neutral.scov2_rates import GENE_NT_LENGTH
 
 
 @dataclass(frozen=True)
@@ -226,6 +238,94 @@ def read_scored_table(
     return frame.assign(clade_founder_aa=frame["parent_aa"])
 
 
+#: The mask reason that makes a nucleotide unobservable rather than merely
+#: dropped. ``masked_nt_sites.csv`` carries two, and the difference decides
+#: whether a founder codon can be counted at all: a ``vcf_masked_sites``
+#: position is masked in the tree, so every sequence reads the reference base
+#: there, while a ``sites_to_exclude`` position is mat-pcp's own config
+#: exclusion and leaves the base observable.
+TREE_MASK_REASON = "vcf_masked_sites"
+
+
+def _founder_nt_sequence(clade: str) -> str:
+    """One clade's founder nucleotides, from the FASTA ``founders.py`` translates.
+
+    Read here rather than through that module, which exists so ``rule score``
+    and the panel rules do not invalidate each other: a reader added there for
+    the panels alone would mark seven GPU scoring jobs out of date every time
+    it was edited. The length check is the same one, against the same constant.
+    """
+    path = mat_pcp_path("clade_founders_dir") / f"{clade}.fa"
+    sequence = read_fasta_first_sequence(path)
+    if len(sequence) != GENE_NT_LENGTH[GENE]:
+        raise ValueError(
+            f"{GENE}/{clade}: founder is {len(sequence)} nucleotides but "
+            f"GENE_NT_LENGTH says {GENE_NT_LENGTH[GENE]}"
+        )
+    return sequence
+
+
+@cache
+def unobservable_founder_codons(clade: str) -> frozenset[int]:
+    """The codon sites where this clade's founder background cannot be counted.
+
+    mat-pcp counts an observation only on the clade founder's codon background,
+    comparing the codon matUtils read against the founder grid's
+    (``build_count_table.py:331``). Where one of that codon's nucleotides is
+    masked in the tree, every sequence reads the reference base there, the two
+    codons never match, and the codon's observations are all discarded as a
+    mutated background. **The expected counts are not discarded with them**:
+    they come from the fitted rates per branch, which know nothing about that
+    filter. So the codon arrives with ``actual_count`` zero against a full
+    expectation and reads as lethal.
+
+    21J's codon 142 is the case. Delta carries G142D, so the founder codon is
+    ``GAT`` where the reference is ``GGT``, differing at the masked nt 21987;
+    mat-pcp holds 226 observed counts there, every one recorded as ``GGT>...``,
+    and keeps none of them. The synonymous route is what proves this is not
+    selection: ``D142D`` has 64.3 expected and zero observed, while the
+    neighbouring nucleotides in the same clade carry hundreds of counts.
+
+    **Nothing in the scored table marks these rows.** ``exclude`` is ``False``
+    for the routes, correctly -- the routes are not masked, the codon's *other*
+    nucleotide is -- and ``globally_masked`` is ``True`` for 337 mutations at
+    rung 10 that are good comparisons, which is what #36 established. So the
+    predicate is rebuilt here from the mask file, the founder and the
+    reference. See #39, and matsengrp/mat-pcp#161 for the fix upstream that
+    will make this function return nothing.
+
+    Returns:
+        1-indexed codon sites. Empty for most clades.
+    """
+    masked = pd.read_csv(mat_pcp_path("masked_nt_sites_file"))
+    tree_masked = {
+        int(index)
+        for index, reason in zip(masked["nt_index"], masked["reason"])
+        if reason == TREE_MASK_REASON
+    }
+    reference = read_fasta_first_sequence(mat_pcp_path("reference_sequence_file"))
+    founder = _founder_nt_sequence(clade)
+    return frozenset(
+        index // 3 + 1 for index in tree_masked if founder[index] != reference[index]
+    )
+
+
+def drop_unobservable_codons(frame: pd.DataFrame, clade: str) -> pd.DataFrame:
+    """Rows at the codons :func:`unobservable_founder_codons` names, removed.
+
+    A codon-level drop, and deliberately so where #36's was wrong to be: the
+    unit mat-pcp cannot observe here *is* the codon, so no mutation at it
+    carries an interpretable count for this clade. #36 removed a codon-level
+    drop of a *route*-level exclusion, which discarded mutations mat-pcp had
+    estimated normally. The two rules disagree on 1,411 mutations at rung 10,
+    and agree on 14.
+    """
+    codons = unobservable_founder_codons(clade)
+    if not codons:
+        return frame
+    return frame[~frame["aa_site"].isin(codons)]
+
+
 def base_frames(
     table: pd.DataFrame,
     *,
@@ -240,13 +340,21 @@ def base_frames(
     count filter and the clip -- all of it here once, so a dot in panel C and
     the cloud behind it in panel B are literally the same rows.
 
-    **The null drop is the inner join, and it is the whole exclusion.**
+    **The null drop is the inner join, and it is all but one of the
+    exclusion.**
     ``rule score`` writes a left join from the model grid, so every cell mat-pcp
     never estimated carries a null fitness column -- whether it was never
     reachable, never observed with a usable denominator, or excluded by mat-pcp
     as masked or reverting. Those rows are not zero-effect mutations, and a
     correlation over them is undefined; dropping them recovers the row set
     upstream's inner join produced, at mat-pcp's own per-mutation granularity.
+
+    **The one exclusion it does not cover** is
+    :func:`drop_unobservable_codons`, where mat-pcp emits a row whose actual
+    count is structurally zero because the clade's founder codon is one the
+    tree cannot represent. Those rows are not nulls and cannot be recognised
+    from the table, so they are the one thing dropped here on a predicate
+    rebuilt from mat-pcp's inputs.
 
     Args:
         table: :func:`read_scored_table`'s output.
@@ -271,6 +379,7 @@ def base_frames(
             if frame.empty:
                 continue
             frame = frame.dropna(subset=[spec.fitness_metric])
+            frame = drop_unobservable_codons(frame, clade)
             frame = filter_merged_fitness(
                 frame,
                 exclude_synonymous=spec.exclude_synonymous,
@@ -330,6 +439,11 @@ def lookup_frame(
     plot. What refuses is the evidence: a mutation no clade carries an estimate
     of would draw an empty panel.
 
+    **A clade whose founder codon the tree cannot represent is dropped**, as it
+    is from the correlation panels, and for the same reason: its counts are
+    structurally zero rather than small. That is per clade, so a mutation can
+    be shown in one clade and dropped in another at the same codon.
+
     **The count cutoff does apply.** The panel is captioned as the clades that
     carry at least ``min_count`` actual or expected counts of this mutation, so
     a clade whose estimate rests on nothing is not drawn at all -- that is a
@@ -358,6 +472,15 @@ def lookup_frame(
             f"compare against the counts."
         )
     estimated = rows.dropna(subset=[spec.fitness_metric])
+    # Per clade, because the predicate is per clade: the same codon is
+    # countable in a clade whose founder matches the reference at the masked
+    # nucleotide and not in one whose founder does not.
+    estimated = estimated[
+        [
+            site not in unobservable_founder_codons(clade)
+            for clade, site in zip(estimated["clade"], estimated["aa_site"])
+        ]
+    ]
     if len(rows) and estimated.empty:
         raise ValueError(
             f"mat-pcp estimated {mutation} in no clade: every nucleotide route "
