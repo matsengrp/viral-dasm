@@ -26,6 +26,15 @@ def _(mo):
     same clade, so they have to be mutations the two approaches visibly
     disagree about.
 
+    **Two groups of labelled mutation, in two inks.** The ones in near-black
+    are panel B's subjects. The ones in orange are the three that rose to high
+    frequency in 22D and so define the background panel B splits on; they sit
+    well below the diagonal for a reason that is not a shift, which is the
+    whole point of marking them apart. The counts approach takes a mutation's
+    opportunity to be the clade's fitted rate scaled to the whole clade, but
+    counts it only on branches still carrying the founder residue, so once most
+    of the clade carries the mutation its counts-based estimate is understated.
+
     **The candidates are a list, not a threshold.** They come from
     `data/shift_candidates.csv`, which panels A and B both read, so a candidate
     moved off the figure leaves both in one edit. Nothing here selects on the
@@ -74,7 +83,7 @@ def _(mo):
 @app.cell
 def _(MODELS, SELECTION, TABLE_PATH, mo, panels):
     CLADES = list(panels.CANDIDATE_CLADES)
-    CANDIDATES = panels.figure_candidates()
+    CANDIDATES = panels.labelled_candidates()
     SPEC = panels.BASE_SPEC
 
     TABLE = panels.read_scored_table(TABLE_PATH, models=MODELS, clades=CLADES)
@@ -124,6 +133,7 @@ def _(BASE, CANDIDATES, CLADES, PANEL_MODEL, SELECTION, SPEC, charts, mo, panels
                     "model",
                     "clade",
                     "min_count",
+                    "candidate_group",
                     "aa_mutation",
                     "aa_site",
                     "parent_aa",

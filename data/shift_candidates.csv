@@ -6,5 +6,8 @@ clade,mutation,status,note
 22D,F486V,figure,
 22D,K444T,figure,
 22D,L452R,figure,
+22D,R346T,background,"rose to 84% of the clade's branch mass; with K356T and F490S it defines the background panel B splits on"
+22D,K356T,background,rose to 56% of the clade's branch mass
+22D,F490S,background,rose to 65% of the clade's branch mass
 22D,Q183E,null,the designed null: measured end to end and kept off the figures because no shift is predicted
 22D,G482R,held_back,"nominated after the rest, fails the 50-event screen gate at 27 events, and its contrast is the thinnest in the set at 4 against 7"

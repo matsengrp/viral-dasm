@@ -108,6 +108,7 @@ from panel_spec import (  # noqa: F401  (re-exported for the notebooks)
     TABLE_COLUMNS,
     figure_candidates,
     figure_dir,
+    labelled_candidates,
     panel_csv_path,
     selection_models,
 )
@@ -470,12 +471,15 @@ def by_clade(
 
 
 def candidate_rows(
-    frame: pd.DataFrame, clade: str, candidates: Iterable[tuple[str, str]]
+    frame: pd.DataFrame, clade: str, candidates: Iterable[tuple[str, str, str]]
 ) -> pd.DataFrame:
     """One clade's labelled candidates, as rows of its own comparison frame.
 
     Drawn from ``frame`` rather than joined from the candidate file, so a
     label sits on the mark it names and carries the values the panel plots.
+    The candidate's status rides along as ``candidate_group``: panel A draws
+    its two groups in different ink, and the group is a property of the
+    candidate list rather than of anything the comparison frame holds.
 
     **A missing candidate raises.** These are the mutations
     `fig:within_clade_shifts` is about, named in `data/shift_candidates.csv`
@@ -489,7 +493,11 @@ def candidate_rows(
     Raises:
         ValueError: If a candidate for ``clade`` is absent from ``frame``.
     """
-    wanted = [mutation for candidate, mutation in candidates if candidate == clade]
+    wanted = {
+        mutation: status
+        for candidate, mutation, status in candidates
+        if candidate == clade
+    }
     rows = frame[frame["aa_mutation"].isin(wanted)]
     missing = sorted(set(wanted) - set(rows["aa_mutation"]))
     if missing:
@@ -498,7 +506,7 @@ def candidate_rows(
             f"{CANDIDATE_CSV.name} names as a figure candidate. The panel "
             f"would draw {len(rows)} of {len(wanted)} labelled mutations."
         )
-    return rows
+    return rows.assign(candidate_group=rows["aa_mutation"].map(wanted))
 
 
 #: Panel A's columns, which are not the table's: the two approaches arrive as

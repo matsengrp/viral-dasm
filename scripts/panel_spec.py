@@ -147,12 +147,23 @@ SCAN_MIN_EVIDENCE = 10
 #: reaches both panels.
 CANDIDATE_CSV = REPO_ROOT / "data" / "shift_candidates.csv"
 
-#: What a candidate's `status` may be. `figure` reaches the panels; `null` is
-#: the designed null, measured and deliberately not drawn; `held_back` is
-#: measured and off the figure for some other reason the file records. The two
-#: non-figure reasons stay distinct rather than collapsing to "excluded".
+#: What a candidate's `status` may be. `figure` reaches the panels as a
+#: *subject*: a mutation whose effect panels B and D measure on two backgrounds.
+#: `background` is a mutation that *defines* one of those backgrounds -- named
+#: on panel A, and a subject of nothing. `null` is the designed null, measured
+#: and deliberately not drawn; `held_back` is measured and off the figure for
+#: some other reason the file records. The two non-figure reasons stay distinct
+#: rather than collapsing to "excluded".
 CANDIDATE_ON_FIGURE = "figure"
-CANDIDATE_STATUSES = (CANDIDATE_ON_FIGURE, "null", "held_back")
+CANDIDATE_BACKGROUND = "background"
+
+#: The statuses panel A draws a name for, in the order it stacks them. Both are
+#: labelled and they are labelled differently, which is the distinction panel A
+#: exists to make legible: a subject sits off the diagonal because the two
+#: approaches disagree about selection, a background mutation sits off it
+#: because the counts approach mismeasured its opportunity.
+CANDIDATE_LABELLED = (CANDIDATE_ON_FIGURE, CANDIDATE_BACKGROUND)
+CANDIDATE_STATUSES = (*CANDIDATE_LABELLED, "null", "held_back")
 
 #: The columns :func:`_candidate_rows` requires, found by name.
 CANDIDATE_COLUMNS = ("clade", "mutation", "status")
@@ -184,17 +195,36 @@ def figure_candidates() -> tuple[tuple[str, str], ...]:
     )
 
 
+def labelled_candidates() -> tuple[tuple[str, str, str], ...]:
+    """The `(clade, mutation, status)` rows panel A names, in file order.
+
+    Panel A's row set is :func:`figure_candidates`' plus the mutations that
+    define the backgrounds panels B and D split on, which the panel draws in
+    their own ink. Returned with the status attached rather than as two tuples:
+    the label column is stacked over every labelled row at once, so a caller
+    that fetched the groups separately would stack each blind to the other's.
+    """
+    return tuple(
+        (clade, mutation, status)
+        for clade, mutation, status in _candidate_rows()
+        if status in CANDIDATE_LABELLED
+    )
+
+
 def off_figure_candidates() -> tuple[tuple[str, str, str], ...]:
     """The `(clade, mutation, status)` rows measured but kept off the figures.
 
     Reported rather than silently dropped: a designed null and a held-back
     nomination are off the figure for different reasons, and a reader checking
     the panel against the source needs to see both.
+
+    Keyed on :data:`CANDIDATE_LABELLED` rather than on `figure` alone, so a
+    `background` row -- which panel A draws -- is not reported as off it.
     """
     return tuple(
         (clade, mutation, status)
         for clade, mutation, status in _candidate_rows()
-        if status != CANDIDATE_ON_FIGURE
+        if status not in CANDIDATE_LABELLED
     )
 
 

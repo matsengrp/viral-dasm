@@ -58,11 +58,27 @@ FIT_FIREBRICK = "#b22222"
 COUNTS_GREY = "#4d4d4d"
 DASM_PURPLE = "#8172b3"
 
-#: The ring and name on a mutation `fig:within_clade_shifts`' panel A calls
-#: out. Near-black rather than a fourth hue: the mark it rings is already
-#: `POINT_BLUE`, and a coloured ring would read as a second measurement of the
+#: The name on a mutation `fig:within_clade_shifts`' panel A calls out.
+#: Near-black rather than a fourth hue: the mark it names is already
+#: `POINT_BLUE`, and a coloured label would read as a second measurement of the
 #: same mutation instead of an annotation on the one beneath it.
 LABEL_INK = "#111111"
+
+#: ...except for the mutations that define the background panels B and D split
+#: on, which *are* a second thing being said about the clade and are named in
+#: the text as such. They are the clade's own sweep: their counts-based
+#: estimates are understated because most of the clade already carries them, so
+#: they sit in the same corner of the panel as the shifted mutations for an
+#: unrelated reason. Orange separates the two readings; near-black would merge
+#: them.
+BACKGROUND_INK = "#e07b00"
+
+#: The ink each labelled group is drawn in, keyed by the candidate status
+#: `data/shift_candidates.csv` records. A Vega colour *scale* rather than a
+#: mark constant, because one frame carries both groups: the label column is
+#: stacked over all of them at once, and splitting it into two frames would
+#: stack each group blind to the other's rows.
+CANDIDATE_INK = {"figure": LABEL_INK, "background": BACKGROUND_INK}
 
 #: Roughly how tall one line of label text is, as a multiple of its font size.
 #: It sets the minimum separation between two labels and nothing else, so an
@@ -203,8 +219,23 @@ def _candidate_labels(
     **No ring on the marks.** One drawn large enough to read at this panel's
     size on the page covers its own neighbours, and the leader already says
     which mark a label belongs to -- a ring marks points that are not in doubt
-    at the cost of hiding points that are.
+    at the cost of hiding points that are. The marks are instead redrawn
+    opaque, in their group's own ink: that reads at panel size without taking
+    up more room than the mark already does.
+
+    **Two groups, one ink scale.** ``candidate_group`` names which, and
+    :data:`CANDIDATE_INK` maps it to a colour. The scale's domain is the set
+    the frame carries rather than the constant's keys, so a panel with one
+    group does not reserve a slot for the other.
     """
+    groups = [
+        status for status in CANDIDATE_INK if status in set(labelled["candidate_group"])
+    ]
+    ink = alt.Color(
+        "candidate_group:N",
+        scale=alt.Scale(domain=groups, range=[CANDIDATE_INK[g] for g in groups]),
+        legend=None,
+    )
     low, high = float(scale.domain[0]), float(scale.domain[1])
     units_per_px = (high - low) / size
     ordered = labelled.sort_values(metric, ascending=False).copy()
@@ -222,14 +253,20 @@ def _candidate_labels(
         ceiling=high,
     )
 
+    marks = (
+        alt.Chart(ordered)
+        .mark_point(size=64, opacity=1.0, filled=True)
+        .encode(x=x_enc, y=y_enc, color=ink)
+    )
     leaders = (
         alt.Chart(ordered)
-        .mark_rule(color=LABEL_INK, strokeWidth=0.8, opacity=0.55)
+        .mark_rule(strokeWidth=0.8, opacity=0.55)
         .encode(
             x=x_enc,
             y=y_enc,
             x2=alt.X2("_label_x:Q"),
             y2=alt.Y2("_label_y:Q"),
+            color=ink,
         )
     )
     # Spelled from `scale` and `axis` rather than read off `x_enc`: an
@@ -242,15 +279,15 @@ def _candidate_labels(
             baseline="middle",
             fontSize=PANEL_FONT_SIZE,
             fontWeight="bold",
-            color=LABEL_INK,
         )
         .encode(
             x=alt.X("_label_x:Q", title=X_AXIS_TITLE, scale=scale, axis=axis),
             y=alt.Y("_label_y:Q", title=Y_AXIS_TITLE, scale=scale, axis=axis),
             text="aa_mutation:N",
+            color=ink,
         )
     )
-    return leaders + text
+    return marks + leaders + text
 
 
 def scatter_panel(
