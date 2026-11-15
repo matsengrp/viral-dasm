@@ -1,4 +1,4 @@
-"""antiGen as a predictor of the spike DMS: `fig:dms` panel C's published model.
+"""antiGen as a predictor of the spike DMS: the comparison's published model.
 
 The paper's Results say the DASM beats antiGen, and this is the arm that has to
 earn it. antiGen is a transformer trained on the UShER tree's own branches --
@@ -10,9 +10,9 @@ returns one softmax over the whole (position x amino-acid) map with the
 wild-type cell removed, renormalised over the sequence's candidate
 substitutions: a whole-sequence distribution over mutation events, not an
 independent per-position categorical. So this column is ``log p``, while the
-DASM's is ``log f``, and panel D on the same figure measures what that
-difference is worth. The caption carries it; nothing here converts between
-them, because no conversion exists that does not assume a mutation model.
+DASM's is ``log f``. Whatever reports the two together has to say which is
+which; nothing here converts between them, because no conversion exists that
+does not assume a mutation model.
 
 **The background is the construct, not the clade founder.** The other
 predictors score against the clade founder, which is the frame they were
@@ -51,7 +51,7 @@ import pandas as pd
 from dasm2.sequence.constants import AA_STR_SORTED, AA_STR_TO_IDX
 
 #: This predictor's id, as `results/panels/dms/` carries it and
-#: `scripts/panel_charts.py` maps to a label.
+#: `scripts/panel_spec.py` lists in :data:`panel_spec.DMS_PREDICTORS`.
 ANTIGEN = "antigen"
 
 #: The device the forward pass runs on. **Not a default and not an option.**
@@ -205,7 +205,8 @@ def antigen_scores(homolog: str) -> tuple[pd.DataFrame, dms_models.Manifest, str
             raise ValueError(
                 f"antigen.{label} at {path} has md5 {found}, but `config.yaml` "
                 f"pins {pinned}. The digest is a gate: a changed file moves "
-                f"panel C's antiGen bar and nothing else would notice."
+                f"the antiGen row of the predictor table and nothing else "
+                f"would notice."
             )
 
     parents = read_parents(spec.parents)

@@ -1,7 +1,7 @@
 """What a wrong antiGen column would report, and what catches it.
 
-Three failure modes here reach panel C as a correlation of the wrong magnitude
-and raise nothing. The ``(position, amino-acid)`` axes can be transposed, or
+Three failure modes here reach the predictor table as a correlation of the
+wrong magnitude and raise nothing. The ``(position, amino-acid)`` axes can be transposed, or
 the alphabet misordered, and every row count, key check and hash in
 `scripts/dms_models.py`'s contract still passes. The model can be fed the clade
 founder instead of the construct the assay expressed, and **nothing in that
@@ -60,15 +60,15 @@ EXPECTED_QUERIES = {
     ),
 }
 
-#: The homolog the slow checks run on -- the one `main.tex`'s panel-C caption
-#: names, and so the one whose number the paper quotes. One forward pass rather
+#: The homolog the slow checks run on, and the one `scripts/panel_spec.py`
+#: names as :data:`panel_spec.SCATTER_HOMOLOG`. One forward pass rather
 #: than three: the lookup, the alphabet and the normalisation are per-model
 #: facts, not per-homolog ones, and the per-homolog fact is the query, which
 #: every homolog is checked on above.
 SCORED_HOMOLOG = "KP.3.1.1"
 
-#: Panel C's antiGen bar at :data:`SCORED_HOMOLOG`, stratum ``all``, as issue
-#: #32's success criterion states it. Wide enough to survive a pandas or torch
+#: The antiGen row at :data:`SCORED_HOMOLOG`, stratum ``all``, as issue #32's
+#: success criterion states it. Wide enough to survive a pandas or torch
 #: version bump and narrow enough that a transposed axis or a founder
 #: background -- which score around zero -- fails it.
 EXPECTED_SPEARMAN = (0.34, 0.44)
@@ -269,7 +269,7 @@ def test_each_scored_parent_is_in_antigens_training_split(homolog: str):
     block = hits[0]
     assert "\nTRAINING\n" in block, (
         f"{homolog}'s scored parent is in the examples but not in the "
-        f"training split, so panel C would report a held-out sequence"
+        f"training split, so the table would report a held-out sequence"
     )
     children = block.split("MUTATIONS_TO_CHILDREN:\n")[1].strip()
     assert children, (

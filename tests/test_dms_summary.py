@@ -32,29 +32,43 @@ _PER_STRATUM = 6
 
 
 def _cells() -> pd.DataFrame:
-    """One homolog's joined frame: both strata, both predictors scored."""
+    """One homolog's joined frame: both strata, every predictor scored.
+
+    The score columns are built per predictor rather than spelled out, so an arm
+    added to :data:`DMS_PREDICTORS` extends this file's coverage instead of
+    breaking its fixture. No two of them are the same function of the
+    measurement, which is the property that makes them tell each other apart:
+    columns that were affine copies of one vector would share every rank and
+    every coefficient, and a summary that swapped or mislabelled two predictors
+    would still pass. :func:`test_each_predictor_is_scored_from_its_own_column`
+    is what holds that property in place.
+    """
     rows = []
     for index in range(_PER_STRATUM):
         for stratum in (dms.SINGLE_NT, dms.MULTI_NT):
             site = index + 1 + (0 if stratum == dms.SINGLE_NT else 100)
-            rows.append(
-                {
-                    "aa_site": site,
-                    "mutant_aa": "ACDEFG"[index],
-                    "parent_aa": "M",
-                    "dms_cell_entry": float(index) - 2.0,
-                    "stratum": stratum,
-                }
-            )
-    frame = pd.DataFrame(rows)
-    # One score column per predictor the spec declares, rather than two spelled
-    # out: an arm added to `DMS_PREDICTORS` should extend this file's coverage,
-    # not break its fixture. Each column is a different function of the index,
-    # and none equals the measurement -- a summary that correlated a column with
-    # itself would score 1.0 everywhere and pass a shape check.
-    for offset, predictor in enumerate(DMS_PREDICTORS):
-        frame[predictor] = (frame.index % _PER_STRATUM) * (0.5 + offset) - offset
-    return frame
+            row = {
+                "aa_site": site,
+                "mutant_aa": "ACDEFG"[index],
+                "parent_aa": "M",
+                "dms_cell_entry": float(index) - 2.0,
+                "stratum": stratum,
+            }
+            for offset, predictor in enumerate(DMS_PREDICTORS):
+                # Built from the loop's own `index`, not from the frame's row
+                # number: the rows interleave the two strata, so a positional
+                # expression would score a cell against another cell's index.
+                #
+                # Sign alternates and odd cells are nudged by an amount that
+                # grows with the predictor, which is what makes every column
+                # score differently. Sign alone stops being enough at three
+                # arms: the first and third would share it, and a swap between
+                # them would go unseen.
+                row[predictor] = (-1.0) ** offset * (
+                    float(index) + offset * (index % 2) * 0.9
+                )
+            rows.append(row)
+    return pd.DataFrame(rows)
 
 
 def _manifests(strata=(dms.ALL,)) -> dict:
@@ -78,6 +92,25 @@ def test_all_is_the_union_of_the_two_strata_and_not_a_third_label():
         counts = rows.set_index("stratum")["n_mutations"]
         assert counts[dms.ALL] == counts[dms.SINGLE_NT] + counts[dms.MULTI_NT]
         assert counts[dms.ALL] == 2 * _PER_STRATUM, predictor
+
+
+def test_each_predictor_is_scored_from_its_own_column():
+    """A summary that read one predictor's scores for another would still fit.
+
+    Every row is well formed under a column mixup -- the keys, the counts and
+    the column set are all unchanged -- so the only thing that can catch it is
+    the coefficients differing. This asserts they do, which is also what keeps
+    `_cells` honest: a fixture whose score columns were rescalings of one vector
+    would make the property untestable while every other test here still passed.
+    """
+    table = dms_summary.summarize({"BA.1": _cells()}, _manifests())
+    coefficients = table[table["stratum"] == dms.ALL].set_index("predictor")[
+        "pearson_r"
+    ]
+    assert len(coefficients) == len(DMS_PREDICTORS)
+    assert len(set(coefficients.round(6))) == len(DMS_PREDICTORS), (
+        f"predictors are not distinguishable in this fixture: {dict(coefficients)}"
+    )
 
 
 def test_a_predictor_that_scored_nothing_fails_rather_than_shortening_the_table():

@@ -1,6 +1,6 @@
 # Where these two files came from
 
-`fig:dms` panel C sets the DASM against antiGen, so this directory carries the antiGen checkpoint that bar is scored by and the sequences it is fed. `config.yaml`'s `antigen` block pins each one's md5 and declares how `scripts/dms_antigen.py` uses them; this file records where the bytes came from, under what terms, and the one fact about them that no digest can state — that each scored sequence is in the model's own training split.
+`fig:dms`'s predictor comparison sets the DASM against antiGen, so this directory carries the antiGen checkpoint that row is scored by and the sequences it is fed. `config.yaml`'s `antigen` block pins each one's md5 and declares how `scripts/dms_antigen.py` uses them; this file records where the bytes came from, under what terms, and the one fact about them that no digest can state — that each scored sequence is in the model's own training split.
 
 Separate from `data/dms/PROVENANCE.md`, which documents the three published DMS datasets. These are a model and its inputs, not measurements.
 
@@ -20,11 +20,11 @@ Separate from `data/dms/PROVENANCE.md`, which documents the three published DMS 
 | byte-identical to the source | yes |
 | recipe | the grid's own: 16 epochs, batch 64, lr 1e-4, capped at 10,000 batches; seed 42; trained on an L40S |
 
-**This is the grid's last cutoff, 5.93893, and that is the reason it is the one.** antiGen's paper sweeps a time cutoff and trains one model per rung on the branches whose parent node predates it. Only the last rung's training split contains all three DMS parent sequences, so only it scores every cell of panel C with a model that saw that cell's background. The in-sample property is verified rather than inferred from dates: each of the three sequences in `dms_parents.fasta` occurs exactly once in the authors' dumped examples for this cutoff, `examples/output_sc2_grid/cutoff_5.939/examples_cutoff_5.93893.txt`, as example `65080` / `91851` / `105443`, each labelled `TRAINING` and each carrying a non-empty `MUTATIONS_TO_CHILDREN` block, so none is dropped by antiGen's `ignore_dead_ends`. `tests/test_dms_antigen.py` re-runs that check wherever the examples file is readable.
+**This is the grid's last cutoff, 5.93893, and that is the reason it is the one.** antiGen's paper sweeps a time cutoff and trains one model per rung on the branches whose parent node predates it. Only the last rung's training split contains all three DMS parent sequences, so only it scores every cell of the comparison with a model that saw that cell's background. The in-sample property is verified rather than inferred from dates: each of the three sequences in `dms_parents.fasta` occurs exactly once in the authors' dumped examples for this cutoff, `examples/output_sc2_grid/cutoff_5.939/examples_cutoff_5.93893.txt`, as example `65080` / `91851` / `105443`, each labelled `TRAINING` and each carrying a non-empty `MUTATIONS_TO_CHILDREN` block, so none is dropped by antiGen's `ignore_dead_ends`. `tests/test_dms_antigen.py` re-runs that check wherever the examples file is readable.
 
-Two caveats a reader of panel C needs, neither of which this file can fix:
+Two caveats a reader of the antiGen row needs, neither of which this file can fix:
 
-- **One seed per cutoff**, seed 42, which the reproduction's own §5 calls "one draw, not a centre". Panel C's antiGen bar is a single-seed point estimate and carries no error bar.
+- **One seed per cutoff**, seed 42, which the reproduction's own §5 calls "one draw, not a centre". The antiGen row is a single-seed point estimate and carries no error bar.
 - **This is not the paper's headline run**, which is at `checkpoints/sc2_cutoff1_run2/` under different training settings. This is the grid, reproduced here, and the grid's PSSM baseline differs from the authors' published one by 0.02–0.07.
 
 The code is reached through `config.yaml`'s `antigen.checkout` rather than committed or taken as a dependency; that entry records why.

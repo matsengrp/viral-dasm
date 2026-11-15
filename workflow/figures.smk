@@ -494,8 +494,8 @@ rule dms_antigen_scores:
     Declares no leaf tally, for `dms_blosum_scores`' reason, and declares two
     files no import walk can see: the checkpoint and the query FASTA, which the
     script reaches through `config.yaml`'s `antigen` block. It does **not**
-    declare the antiGen source tree -- that lives outside the checkout, is not
-    content-tracked here, and is pinned by the commit
+    declare the antiGen source tree -- `antigen.checkout` names a tree outside
+    this repository, not content-tracked here and pinned instead by the commit
     `data/antigen/PROVENANCE.md` records.
     """
     wildcard_constraints:
