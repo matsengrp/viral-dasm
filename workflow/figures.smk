@@ -31,9 +31,11 @@ The images go under the artifact root and the tables into tracked
 effects and selection factors are publishable; no panel carries a sequence.
 """
 
-# `re` is imported here rather than taken from the Snakefile's namespace: this
-# file is included, so relying on an includer's import makes it depend on
-# include order for something it uses in a wildcard constraint.
+# Imported here, not taken from the Snakefile's namespace. This file is
+# included, so a name it reaches through the includer is one that binds at
+# include time; that is fine for the helpers below, which the Snakefile defines
+# before including this, but a module used while the wildcard constraints are
+# being evaluated is worth having outright.
 import re
 
 # Every path below comes from `scripts/panel_spec.py`, which is what the
@@ -394,7 +396,7 @@ rule dms_leaf_counts:
     1.9M leaves; the three together read about 2.6 GB.
     """
     wildcard_constraints:
-        clade="|".join(DMS_CLADES),
+        clade="|".join(re.escape(clade) for clade in DMS_CLADES),
     input:
         script="scripts/dms_leaf_freq.py",
         dms="scripts/dms.py",
@@ -451,7 +453,13 @@ rule dms_blosum_scores:
         founder_reader="scripts/founders.py",
         lib="scripts/lib.py",
         config="config.yaml",
+        # `scov2_rates` and `conversion` are reached through `dms_models` and
+        # `scripts/founders.py` rather than imported here, and are declared for
+        # the same reason `parquet_backend` is: the three score rules below each
+        # run code that reaches all four, so they declare the same four.
+        scov2_rates="dasm2/neutral/scov2_rates.py",
         constants="dasm2/sequence/constants.py",
+        conversion="dasm2/sequence/conversion.py",
         parquet_backend="dasm2/data/parquet_backend.py",
         dasm2_init="dasm2/__init__.py",
         # The assay itself, and the clade founder every score is taken away from.
