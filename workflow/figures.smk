@@ -213,7 +213,6 @@ rule subsampling_ladder:
         dasm2_init="dasm2/__init__.py",
         notebook="notebooks/subsampling_ladder.py",
         table=SCORED_TABLE,
-        audit=AUDIT_JSON,
         arm_fitness=ladder_arm_fitness_files,
         founder_reader="scripts/founders.py",
     output:
@@ -225,7 +224,7 @@ rule subsampling_ladder:
         mem_mb=PANEL_MEM_MB,
     shell:
         "marimo export html {input.notebook} -o {output.html} --force"
-        " -- --table {input.table} --audit {input.audit}"
+        " -- --table {input.table}"
         " > {log} 2>&1"
 
 

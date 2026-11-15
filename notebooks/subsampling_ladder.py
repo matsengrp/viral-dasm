@@ -67,21 +67,16 @@ def _(mo):
     ARMS = tuple(CORPUS_NAMES)
 
     # Required, not defaulted, as `agreement_ladders.py` has it: a fallback
-    # spelling of either path is a second spelling of a fact
+    # spelling of the path is a second spelling of a fact
     # `workflow/figures.smk` already states.
     _args = mo.cli_args()
     TABLE_PATH = Path(str(_args["table"]))
-    AUDIT_PATH = Path(str(_args["audit"]))
-    return AAMUT_DIR, ARMS, AUDIT_PATH, SELECTION, TABLE_PATH, charts, panels, pd
+    return AAMUT_DIR, ARMS, SELECTION, TABLE_PATH, charts, panels, pd
 
 
 @app.cell
-def _(AAMUT_DIR, AUDIT_PATH, TABLE_PATH, panels):
-    frames = panels.ladder_frames(
-        TABLE_PATH,
-        AAMUT_DIR,
-        reverting_by_clade=panels.reverting_sites_by_clade(AUDIT_PATH),
-    )
+def _(AAMUT_DIR, TABLE_PATH, panels):
+    frames = panels.ladder_frames(TABLE_PATH, AAMUT_DIR)
     metrics = panels.ladder_metrics(frames)
     return frames, metrics
 

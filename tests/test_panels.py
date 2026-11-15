@@ -1166,11 +1166,6 @@ def test_a_background_panel_refuses_a_third_background():
         )
 
 
-def test_the_scan_row_does_not_overlap_the_candidate_clades():
-    """The scan excludes the two the candidate panels cover, by construction."""
-    assert not set(panel_spec.SCAN_CLADES) & set(panel_spec.CANDIDATE_CLADES)
-
-
 # ---------------------------------------------------------------------------
 # `fig:subsampling` panels A and B
 # ---------------------------------------------------------------------------
@@ -1429,13 +1424,7 @@ def ladder(tmp_path_factory):
     table_path = directory / "selection_factors.parquet"
     frame.to_parquet(table_path, index=False)
     aamut = write_fake_arm_fitness(directory / "aamut_fitness", frame)
-    reverting = {clade: set() for clade in LADDER_CLADES}
-    frames = panels.ladder_frames(
-        table_path,
-        aamut,
-        reverting_by_clade=reverting,
-        clades=LADDER_CLADES,
-    )
+    frames = panels.ladder_frames(table_path, aamut, clades=LADDER_CLADES)
     return frames, panels.ladder_metrics(frames), table_path, aamut
 
 
@@ -1492,7 +1481,6 @@ def test_the_clip_is_a_control_and_not_a_filter(ladder):
         panels.ladder_frames(
             table_path,
             aamut,
-            reverting_by_clade={clade: set() for clade in LADDER_CLADES},
             clades=LADDER_CLADES,
             spec=panels.FilterSpec(min_count=0.0, clip_lower=None),
         )

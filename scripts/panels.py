@@ -1001,7 +1001,6 @@ def ladder_frames(
     table_path: str | Path,
     aamut_dir: Path,
     *,
-    reverting_by_clade: dict[str, set[int]],
     clades: Sequence[str] = SUBSAMPLING_LADDER_CLADES,
     model: str = SUBSAMPLING_MODEL,
     spec: FilterSpec = SUBSAMPLING_SPEC,
@@ -1039,13 +1038,7 @@ def ladder_frames(
         table_path, models=[model], arm=FULL_DEPTH.name, clades=clades
     )
     for clade, frame in by_clade(
-        base_frames(
-            full,
-            spec=spec,
-            reverting_by_clade=reverting_by_clade,
-            models=[model],
-            clades=clades,
-        ),
+        base_frames(full, spec=spec, models=[model], clades=clades),
         model,
     ).items():
         population[clade] = apply_count_threshold(frame, PANEL_MIN_COUNT)[
@@ -1062,13 +1055,7 @@ def ladder_frames(
                 f"comparison rather than a column to leave out."
             )
         dasm = by_clade(
-            base_frames(
-                table,
-                spec=spec,
-                reverting_by_clade=reverting_by_clade,
-                models=[model],
-                clades=clades,
-            ),
+            base_frames(table, spec=spec, models=[model], clades=clades),
             model,
         )
         for clade, kept in population.items():
