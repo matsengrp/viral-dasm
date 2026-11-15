@@ -81,6 +81,15 @@ The clade founders are the one derived sequence that *is* published, inside
 the scored table and the panel CSVs — see the layout note above for why they
 do not fall under this.
 
+One case this pipeline produces itself is decided the same way. `fig:dms`'s
+leaf-frequency predictor tallies, per site, which residues a clade's own tree
+leaves carry — a 20 x 1,273 table over as many as 1.9 million named GISAID
+samples. That table holds no sample name and no sequence, so the clause above
+does not forbid it outright; it is kept under `artifact_root` anyway, because it
+is a residue-level summary of per-sample material and committing it buys
+nothing. What is committed is the correlation table built from it, which carries
+a homolog, a predictor, a stratum and a coefficient.
+
 Reproducibility therefore runs through the code, not the data. Both pipelines
 are published: a reader with their own GISAID access runs `mat-pcp` on the
 UShER tree to produce PCPs and counts, then runs this pipeline on those
@@ -249,6 +258,41 @@ so the two now differ by exactly that -- 67,564 mutations at rung 10 against
 65,430, over the same 22 clades, at a pooled median r of 0.9662 against 0.9664.
 It is a second model pair through the same code and a diff to read when this
 filter changes again, not a live claim about upstream.
+
+`snakemake dms_predictors` builds the part of the DMS comparison that reads no
+scored table at all: the two reference predictors, and the join the published
+models will land through. BLOSUM62 asks how much of a deep mutational scan a
+general substitution matrix already explains. The leaf frequency reconstructs
+every one of a clade's tree leaves from its own root-to-tip mutation path,
+tallies residues per site, and scores a substitution by the log ratio of its
+residue's leaf count to the clade founder's at that site.
+
+| rule | what it produces |
+|---|---|
+| `dms_leaf_counts` | one clade's per-site residue tally over its own tree leaves |
+| `dms_blosum_scores` | BLOSUM62's score for every cell one assay measured |
+| `dms_leaf_scores` | the leaf frequency's score for every cell one assay measured |
+| `dms_predictor_summary` | the DMS predictor table: each predictor against the DMS, per homolog and stratum |
+
+**What the leaf predictor measures is closer to the site than to the
+substitution**, because a substitution's score is dominated by the parent
+residue's own leaf count. A correlation over every measured cell is therefore
+substantially a statement about which sites a clade varies at. The table reports
+the correlation; reading it as "this ranks which substitution is tolerated"
+would be reading more than it says.
+
+**These rules are in the default target.** `rule all` includes them, so a bare
+`snakemake` plans the three leaf tallies -- about 2.4 GB of path files read, and
+3.5 minutes of CPU at a peak of 0.8 GB (measured 2026-11-15: 24E 0:26, 23A 0:47,
+21K 2:16, so it is dominated by reading the files) -- the first time it is run in
+a checkout whose artifact root has none. That is deliberate: a tracked table that nothing in the
+DAG rebuilds is a table that quietly stops matching the code beside it. The work
+is CPU-only and never reaches a GPU, a training run or the scored table.
+
+**No panel is drawn from it here.** `fig:dms`'s four panels are the published
+figure's, which `rule dms` builds; this comparison has no drawn home until the
+DASM's own column lands, and that is a filter on `selection_factors.parquet`.
+What these rules produce is the table it will be drawn from.
 
 **Where the two kinds of output go.** The tables land in tracked
 `results/panels/<selection>/`, one CSV per panel holding exactly what that

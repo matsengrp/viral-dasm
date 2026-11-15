@@ -121,6 +121,13 @@ ENTRY_POINTS = {
     "compose_subsampling": "notebooks/subsampling.py",
     "dms_correlations": "notebooks/dms_correlations.py",
     "compose_dms": "notebooks/dms.py",
+    # `fig:dms`'s predictor arms run scripts rather than notebooks: the chart
+    # waits on the DASM's own column, so what these build is the table it will
+    # be drawn from.
+    "dms_leaf_counts": "scripts/dms_leaf_freq.py",
+    "dms_blosum_scores": "scripts/dms_blosum.py",
+    "dms_leaf_scores": "scripts/dms_leaf_scores.py",
+    "dms_predictor_summary": "scripts/dms_summary.py",
     # `fig:within_clade_shifts`' producers. These run scripts rather than
     # notebooks, like the producers above the panel block.
     "clade_backgrounds": "scripts/backgrounds.py",
@@ -142,6 +149,7 @@ AGGREGATORS = (
     "figures",
     "subsampling",
     "dms",
+    "dms_predictors",
 )
 
 #: Rules that do run code and are still not import-checked, with the reason.
