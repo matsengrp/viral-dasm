@@ -808,9 +808,33 @@ def test_the_subsampling_figure_places_every_panel_once():
     assert set(spec.SUBSAMPLING_PANEL_LETTERS.values()) == set(
         spec.DEPTH_PANELS + spec.LADDER_ARM_PANELS
     )
-    placed = [letter for row in spec.SUBSAMPLING_FIGURE_ROWS for letter in row]
+    # A cell is a letter or a column of them, which is how B sits over C.
+    placed = [
+        letter
+        for row in spec.SUBSAMPLING_FIGURE_ROWS
+        for cell in row
+        for letter in ((cell,) if isinstance(cell, str) else cell)
+    ]
     assert sorted(placed) == sorted(spec.SUBSAMPLING_PANEL_LETTERS)
     assert len(placed) == len(set(placed)), "a panel is placed twice"
+
+
+def test_the_subsampling_panels_are_set_in_the_published_type_size():
+    """`panel_spec` states this figure's type size and `panel_charts` draws it.
+
+    Two modules have to agree because the first is stdlib-only -- it is parsed
+    on every snakemake invocation -- and the second is what the panels are
+    rendered from. `SUBSAMPLING_TITLE_PX` is also what the composition sizes
+    the panel letters against, so a drift here moves the letters as well as
+    the titles.
+    """
+    import panel_charts as charts
+    import panel_spec as spec
+
+    assert spec.SUBSAMPLING_TITLE_PX == charts.SUBSAMPLING_TITLE_PX
+    assert spec.SUBSAMPLING_LABEL_PX == charts.SUBSAMPLING_LABEL_PX
+    # The one figure not drawn at the module's own size; see either docstring.
+    assert spec.SUBSAMPLING_TITLE_PX != charts.PANEL_FONT_SIZE
 
 
 # Three ways this port drifted from the figure in the manuscript. Each drew a

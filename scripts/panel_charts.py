@@ -1206,6 +1206,15 @@ CAP_BLUES = ("#6baed6", "#3182bd", "#08519c")
 #: scatter roles use.
 THRESHOLD_ACCENT = "#d95f02"
 
+#: The type every panel of `fig:subsampling` is set in, and the one place in
+#: this module that is not :data:`PANEL_FONT_SIZE`. `panel_spec`'s
+#: ``SUBSAMPLING_TITLE_PX`` gives the reason -- this figure puts two panels
+#: across a row, so the same spec size lands smaller on the page here than
+#: anywhere else -- and `tests/test_panels.py` pins the two files together.
+#: Both sources of the published figure drew it at these sizes.
+SUBSAMPLING_TITLE_PX = 24
+SUBSAMPLING_LABEL_PX = 22
+
 #: Panel A's geometry. A cap is drawn as a rule across the whole panel rather
 #: than as a per-clade mark, because what it does is set one height for every
 #: clade above it.
@@ -1254,8 +1263,14 @@ def depth_label(arm: str) -> str:
 
     Panel A labels its cap rules and panel B its curves, and a reader matches
     the two by that label, so they are built here rather than in each.
+
+    The published figure's spelling, carried across from `arm_label` in
+    `dasm2-experiments`, `experiments/2026-09-02-v12-sampling-depth-ladder`,
+    `notebooks/ladder.py`: `cap_50000_0` is the manifest's name, whose
+    trailing `_0` is the subsample seed that every arm here shares, so it
+    carries nothing in a tick or a column heading.
     """
-    return "full depth" if arm == FULL_DEPTH.name else f"cap {cap_of(arm):,}"
+    return "full depth" if arm == FULL_DEPTH.name else f"{cap_of(arm):,} per clade"
 
 
 def clade_size_panel(
@@ -1536,25 +1551,63 @@ def count_ecdf_panel(
 # `fig:subsampling` panels C and D
 # ---------------------------------------------------------------------------
 
-#: Panel C's axes. The **target is x**, which is what `within_clade_metrics`
-#: regresses on, so the drawn slope and the reported one are the same number
-#: read two ways. Both are wrapped by hand: Vega-Lite does not wrap an axis
-#: title, and at this panel width either runs past the plot.
-ARM_X_TITLE = ["full-depth counts", "estimate"]
-ARM_Y_TITLE = ["estimate from the", "thinned tree"]
+# Every constant below is the published figure's, carried across from the
+# producers `main.tex`'s provenance comment names: the `panel_c_arm_grid` and
+# `panel_d_clade_ladder` cells of `notebooks/ladder.py` in `dasm2-experiments`,
+# `experiments/2026-09-02-v12-sampling-depth-ladder`. The panels have to come
+# out the shapes `SUBSAMPLING_FIGURE_ROWS` places, so these are measurements of
+# that figure rather than choices to make again.
 
-#: Panel C's cell, square and small: eight of them sit in one grid, and the
-#: shape of a cloud against a 45-degree diagonal is what the panel is read for.
+#: Panel C's grid titles. The **target is x**, which is what
+#: `within_clade_metrics` regresses on, so the drawn slope and the reported one
+#: are the same number read two ways. Each is said once for the whole grid --
+#: the x title under it, the y title rotated down its left -- rather than once
+#: per cell, which is most of why eight cells fit a short, wide panel.
+ARM_GRID_X_TITLE = "counts-based fitness effect computed at full depth"
+ARM_GRID_Y_TITLE = ["fitness effect computed", "at a given sampling depth"]
+
+#: What labels panel C's rows, which is the approach rather than the bare
+#: method name the tables are keyed by.
+ARM_METHOD_ROW_LABELS = {"counts": "counts approach", "DASM": "DASM approach"}
+
+#: Panel C's cell. 190 rather than something smaller because the row label is
+#: rotated: a vertical label has to fit inside its row's height, and
+#: `ARM_GRID_Y_TITLE`'s longer line needs about this much at this type size.
 ARM_SCATTER_SIZE = 190
 
-#: Panel D's cell. Narrow, because the x axis is four arms and width buys only
-#: space between them.
-ARM_LADDER_WIDTH = 150
-ARM_LADDER_HEIGHT = 120
+#: Above this many points a cell of panel C is drawn as density rather than as
+#: dots, in `ARM_SCATTER_BINS` bins a side. 21J's cells hold about 4,900
+#: mutations each: a raw scatter there is an ink blob whose shape is set by
+#: draw order, and the spec it embeds is large enough that marimo drops the
+#: output entirely -- the chart disappears rather than rendering badly.
+ARM_SCATTER_MAX_N = 2000
+ARM_SCATTER_BINS = 60
+
+#: Panel D's cell. Narrow and short, because ten of them stack five rows deep
+#: in the tall, narrow panel that stands beside the B-over-C column.
+ARM_LADDER_WIDTH = 130
+ARM_LADDER_HEIGHT = 82
+
+#: Panel D's x axis, legend and slope ticks. Vertical labels, not slanted: a
+#: slanted label is harder to read and its bounding box is wider than the band
+#: it belongs to. The slope ticks are a quarter, no compression and four times
+#: -- the two ends the same distance from 1 on a log2 axis, so a line's
+#: distance from the middle tick reads the same whichever way it is off.
+ARM_X_TITLE = "sampling depth"
+ARM_LEGEND_TITLE = "approach"
+ARM_X_AXIS = alt.Axis(labelAngle=-90, labelAlign="right", labelBaseline="middle")
+ARM_SLOPE_TICKS = (0.25, 1.0, 4.0)
+#: Wide enough to hold both the data and the labelled ticks with room to spare
+#: on each side, which is what keeps every label interior -- see
+#: :func:`arm_ladder_grid` on why the two columns' rows align only then.
+ARM_TICK_MARGIN = 1.4
 
 #: The colour each approach is drawn in, shared with panel B of
 #: `fig:within_clade_shifts`: one approach is one colour across the paper.
+#: Shape carries the same split, so the DASM series is the triangle here that
+#: it is in `fig:agreement`, in print and in black and white alike.
 ARM_METHOD_COLOURS = {"counts": COUNTS_GREY, "DASM": DASM_PURPLE}
+ARM_METHOD_SHAPES = {"counts": "circle", "DASM": "triangle"}
 
 
 def arm_fit_line(
@@ -1581,77 +1634,6 @@ def arm_fit_line(
     return pd.DataFrame({x_field: x, y_field: [intercept + slope * v for v in x]})
 
 
-def arm_scatter_panel(
-    frame: pd.DataFrame,
-    *,
-    x_field: str,
-    y_field: str,
-    clip_lower: float,
-    slope: float,
-    stat: str,
-    title: list[str],
-    domain: Sequence[float] | None = None,
-    size: int = ARM_SCATTER_SIZE,
-    point_budget: int | None = None,
-) -> alt.LayerChart:
-    """One cell of panel C: one arm's estimate against the full-depth target.
-
-    **One domain for both axes**, as `scatter_panel` has it, so the diagonal is
-    a true 45 degrees and the distance from it is the size of the error. The
-    fit is :func:`arm_fit_line`'s, computed on the whole cloud before any
-    thinning for the point budget.
-    """
-    if domain is None:
-        high = float(max(frame[x_field].max(), frame[y_field].max()))
-        padding = 0.04 * ((high - clip_lower) or 1)
-        domain = [clip_lower - padding, high + padding]
-    scale = alt.Scale(domain=list(domain), nice=False)
-    axis = alt.Axis(labelFontSize=PANEL_FONT_SIZE, titleFontSize=PANEL_FONT_SIZE)
-    x_enc = alt.X(f"{x_field}:Q", title=ARM_X_TITLE, scale=scale, axis=axis)
-    y_enc = alt.Y(f"{y_field}:Q", title=ARM_Y_TITLE, scale=scale, axis=axis)
-    fit_frame = arm_fit_line(
-        frame, x_field=x_field, y_field=y_field, slope=slope, domain=scale.domain
-    )
-    drawn = frame
-    if point_budget is not None and len(frame) > point_budget:
-        # Sampled with a fixed seed so a rebuild redraws the same cloud, and
-        # after the fit, which is why thinning cannot move the line.
-        drawn = frame.sample(n=point_budget, random_state=0)
-    cloud = (
-        alt.Chart(drawn)
-        .mark_point(size=40, opacity=0.3, filled=True, color=POINT_BLUE)
-        .encode(
-            x=x_enc,
-            y=y_enc,
-            tooltip=[
-                alt.Tooltip("aa_mutation:N", title="mutation"),
-                alt.Tooltip(f"{x_field}:Q", title="full depth", format=".3f"),
-                alt.Tooltip(f"{y_field}:Q", title="this arm", format=".3f"),
-            ],
-        )
-    )
-    diagonal = (
-        alt.Chart(pd.DataFrame({"diagonal": [scale.domain[0], scale.domain[1]]}))
-        .mark_line(color=REFERENCE_GREY, strokeDash=[4, 3], strokeWidth=1.5)
-        .encode(
-            x=alt.X("diagonal:Q", title=ARM_X_TITLE, scale=scale, axis=axis),
-            y=alt.Y("diagonal:Q", title=ARM_Y_TITLE, scale=scale, axis=axis),
-        )
-    )
-    fit = (
-        alt.Chart(fit_frame)
-        .mark_line(strokeWidth=2, color=FIT_FIREBRICK)
-        .encode(x=x_enc, y=y_enc)
-    )
-    return (cloud + diagonal + fit + _corner_label(stat)).properties(
-        width=size,
-        height=size,
-        title=alt.TitleParams(
-            title, fontSize=PANEL_FONT_SIZE, offset=3, anchor="middle"
-        ),
-    )
-
-
 def arm_scatter_grid(
     frames: dict[tuple[str, str], pd.DataFrame],
     metrics: pd.DataFrame,
@@ -1663,24 +1645,61 @@ def arm_scatter_grid(
     clip_lower: float,
     clade: str,
     point_budget: int | None = None,
-) -> alt.VConcatChart:
+) -> alt.FacetChart:
     """Panel C: one row per approach, one column per sampling depth.
 
-    Full depth is the leftmost column, so reading right is reading the
-    thinning get harsher. The full-depth counts cell is the target against
-    itself and sits at r = 1 by construction, which the caption says.
+    **Ported from the published figure's own producer**, the `panel_c_arm_grid`
+    cell of `notebooks/ladder.py` in `dasm2-experiments`,
+    `experiments/2026-09-02-v12-sampling-depth-ladder`, which `main.tex`'s
+    provenance comment names. The shape is load bearing twice over: it is what
+    the caption describes, and `SUBSAMPLING_FIGURE_ROWS` places this panel as
+    the short, wide one in a column under B.
+
+    One frame for every mark, with a ``role`` column, then **one faceted grid**
+    rather than eight concatenated panels. A single grid is what makes the rows
+    align, the arm heading sit centred over its column, and the method name
+    appear once per row instead of in all eight titles. Altair will not facet a
+    layered chart whose layers carry their own frames, so the points, the fit
+    line and its label all live in that one frame and each layer filters to its
+    own role.
+
+    Full depth is the leftmost column, so reading right is reading the thinning
+    get harsher. The full-depth counts cell is the target against itself and
+    sits at r = 1 by construction, which the caption says.
     """
+    sizes = {key: len(frame) for key, frame in frames.items()}
+    if len(set(sizes.values())) != 1:
+        raise ValueError(
+            f"cells do not score the same mutations: {sizes}. Every cell of "
+            f"this grid must carry the same n, or one of them is answering a "
+            f"different question than the others."
+        )
+    n_per_cell = next(iter(sizes.values()))
+    # Above this many points a cell is drawn as density rather than as dots.
+    # A raw scatter of 5,000 mutations is an ink blob whose shape is set by
+    # draw order, and the spec it embeds is large enough that marimo drops the
+    # output entirely. Binning happens in pandas, not in Vega, because a
+    # Vega-side `bin` still ships every row to the browser.
+    dense = n_per_cell > ARM_SCATTER_MAX_N
+
+    low = clip_lower
     high = max(
         float(max(frame[x_field].max(), frame[y_field].max()))
         for frame in frames.values()
         if not frame.empty
     )
-    padding = 0.04 * ((high - clip_lower) or 1)
-    domain = [clip_lower - padding, high + padding]
-    rows = []
+    span = alt.Scale(domain=[low, high])
+    edges = np.linspace(low, high, ARM_SCATTER_BINS + 1)
+    centres = (edges[:-1] + edges[1:]) / 2
+
+    parts: list[pd.DataFrame] = []
     for method in methods:
-        cells = []
         for arm in arms:
+            cell = frames[(arm, method)]
+            keys = {
+                "method": ARM_METHOD_ROW_LABELS[method],
+                "arm_label": depth_label(arm),
+            }
             row = metrics[(metrics["arm"] == arm) & (metrics["method"] == method)]
             if row.empty:
                 raise ValueError(
@@ -1688,29 +1707,205 @@ def arm_scatter_grid(
                     f"corner label would disagree with the cloud beside it."
                 )
             stats_row = row.iloc[0]
-            cells.append(
-                arm_scatter_panel(
-                    frames[(arm, method)],
-                    x_field=x_field,
-                    y_field=y_field,
-                    clip_lower=clip_lower,
-                    slope=float(stats_row["regression_slope"]),
-                    stat=(
-                        f"r={stats_row['pearson_r']:.2g}\n"
-                        f"slope={stats_row['regression_slope']:.2g}"
-                    ),
-                    title=[f"{method}, {depth_label(arm)}"],
-                    domain=domain,
-                    point_budget=point_budget,
+            slope = float(stats_row["regression_slope"])
+            if dense:
+                binned = cell.assign(
+                    xb=centres[
+                        np.clip(
+                            np.digitize(cell[x_field], edges) - 1,
+                            0,
+                            ARM_SCATTER_BINS - 1,
+                        )
+                    ],
+                    yb=centres[
+                        np.clip(
+                            np.digitize(cell[y_field], edges) - 1,
+                            0,
+                            ARM_SCATTER_BINS - 1,
+                        )
+                    ],
+                )
+                cells = (
+                    binned.groupby(["xb", "yb"], observed=True)
+                    .size()
+                    .reset_index(name="n")
+                )
+                parts.append(
+                    pd.DataFrame(
+                        {
+                            **keys,
+                            "role": "bin",
+                            "x": cells["xb"].to_numpy(),
+                            "y": cells["yb"].to_numpy(),
+                            "n": cells["n"].to_numpy(),
+                        }
+                    )
+                )
+            else:
+                drawn = cell
+                if point_budget is not None and len(cell) > point_budget:
+                    # Sampled with a fixed seed so a rebuild redraws the same
+                    # cloud, and after the fit, which is why thinning cannot
+                    # move the line.
+                    drawn = cell.sample(n=point_budget, random_state=0)
+                parts.append(
+                    pd.DataFrame(
+                        {
+                            **keys,
+                            "role": "point",
+                            "x": drawn[x_field].to_numpy(),
+                            "y": drawn[y_field].to_numpy(),
+                        }
+                    )
+                )
+            # The fit line spans **this cell's observed x range**, not the
+            # shared axis. Extrapolated to the axis ends a steep slope leaves
+            # the cell entirely, and Vega then pads the view to contain it,
+            # which stretches every cell in the row. Its endpoints come from
+            # the slope that is printed, and the OLS line passes through the
+            # means, so the line and the number cannot disagree.
+            intercept = float(cell[y_field].mean()) - slope * float(
+                cell[x_field].mean()
+            )
+            x_lo, x_hi = float(cell[x_field].min()), float(cell[x_field].max())
+            parts.append(
+                pd.DataFrame(
+                    {
+                        **keys,
+                        "role": "fit",
+                        "x": [x_lo, x_hi],
+                        "y": [slope * x_lo + intercept, slope * x_hi + intercept],
+                    }
                 )
             )
-        rows.append(alt.hconcat(*cells))
-    return alt.vconcat(*rows).properties(
-        title=alt.TitleParams(
-            f"recovery of the full-depth estimate in {clade}",
-            fontSize=PANEL_FONT_SIZE,
-            anchor="middle",
+            # The y = x reference does span the whole axis -- it is a reference
+            # rather than a fit, and clipping it to the data would make it look
+            # like a second fitted line.
+            parts.append(pd.DataFrame({**keys, "role": "diagonal", "x": [low, high]}))
+            # Two lines of annotation, positioned in data space rather than by
+            # a mark offset: `dy` is a mark property and cannot vary per datum,
+            # and at this type size one line is wider than the cell.
+            parts.append(
+                pd.DataFrame(
+                    {
+                        **keys,
+                        "role": "label",
+                        "x": low,
+                        "y": [high, high - 0.09 * (high - low)],
+                        "text": [
+                            f"r = {stats_row['pearson_r']:.2g}",
+                            f"slope = {slope:.2f}",
+                        ],
+                    }
+                )
+            )
+    frame = pd.concat(parts, ignore_index=True)
+
+    base = alt.Chart()
+    x_enc = alt.X("x:Q", scale=span, title=None)
+    y_enc = alt.Y("y:Q", scale=span, title=None)
+    layers = [
+        base.mark_rect(
+            width=ARM_SCATTER_SIZE / ARM_SCATTER_BINS + 0.6,
+            height=ARM_SCATTER_SIZE / ARM_SCATTER_BINS + 0.6,
         )
+        .transform_filter(alt.datum.role == "bin")
+        .encode(
+            x=x_enc,
+            y=y_enc,
+            # `extent` lifts the pale end of the ramp off the page: at the
+            # scheme's own 0 a singleton bin is nearly white, and the cloud's
+            # outline -- which is most of what the eye reads here -- is the
+            # part made of singletons.
+            color=alt.Color(
+                "n:Q",
+                scale=alt.Scale(
+                    type="log", scheme=alt.SchemeParams("blues", extent=[0.2, 1.0])
+                ),
+                legend=None,
+            ),
+            tooltip=["x", "y", "n"],
+        )
+        if dense
+        else base.mark_circle(size=14, opacity=0.4, color=POINT_BLUE)
+        .transform_filter(alt.datum.role == "point")
+        .encode(x=x_enc, y=y_enc),
+        base.mark_line(
+            strokeDash=[4, 3], color=REFERENCE_GREY, strokeWidth=1.5, clip=True
+        )
+        .transform_filter(alt.datum.role == "diagonal")
+        .encode(x=x_enc, y=alt.Y("x:Q", scale=span, title=None)),
+        # `clip` so that a fit whose ends still fall outside the shared y span
+        # is cut at the cell edge rather than drawn past it.
+        base.mark_line(color=FIT_FIREBRICK, strokeWidth=2, clip=True)
+        .transform_filter(alt.datum.role == "fit")
+        .encode(x=x_enc, y=y_enc),
+        base.mark_text(
+            align="left", baseline="top", dx=4, fontSize=SUBSAMPLING_LABEL_PX
+        )
+        .transform_filter(alt.datum.role == "label")
+        .encode(x=x_enc, y=y_enc, text="text:N"),
+    ]
+
+    return (
+        alt.layer(*layers, data=frame)
+        .properties(width=ARM_SCATTER_SIZE, height=ARM_SCATTER_SIZE)
+        .facet(
+            # The method labels the row, on the left, once. The arm heads the
+            # column, centred: a column facet header is drawn over the plotting
+            # area only, excluding the row-label band and the y axis.
+            row=alt.Row(
+                "method:N",
+                sort=[ARM_METHOD_ROW_LABELS[m] for m in methods],
+                # The header labels name the approach, so the quantity the two
+                # share is said once here, down the left -- the mirror of the x
+                # title under the grid.
+                title=ARM_GRID_Y_TITLE,
+                # Rotated, like a y-axis title, and for the same reason: a
+                # horizontal label of this length reserves a header band as
+                # wide as the text and leaves the plots stranded to the right
+                # of it. Vertical costs one line height instead.
+                header=alt.Header(
+                    labelOrient="left",
+                    labelAngle=-90,
+                    labelAlign="center",
+                    labelBaseline="middle",
+                    labelPadding=2,
+                    labelFontSize=SUBSAMPLING_TITLE_PX,
+                    labelFontWeight="bold",
+                    titleFontSize=SUBSAMPLING_TITLE_PX,
+                    titleFontWeight="bold",
+                ),
+            ),
+            column=alt.Column(
+                "arm_label:N",
+                sort=[depth_label(arm) for arm in arms],
+                # The x label once, under the whole grid. A facet draws one x
+                # axis per column, so putting it on the encoding would print it
+                # four times.
+                #
+                # It rides on the column facet rather than on the chart, and
+                # that is the whole point: a chart title anchors to the middle
+                # of the *view*, which includes the rotated row-label band and
+                # the y axis down the left, so it came out left of the plots it
+                # names. A facet title anchors to the column band, the same
+                # span the arm headers above are centred on.
+                title=ARM_GRID_X_TITLE,
+                header=alt.Header(
+                    labelFontSize=SUBSAMPLING_TITLE_PX,
+                    labelFontWeight="bold",
+                    titleOrient="bottom",
+                    titleAnchor="middle",
+                    titleFontSize=SUBSAMPLING_TITLE_PX,
+                    titleFontWeight="bold",
+                ),
+            ),
+            spacing={"row": 34, "column": 14},
+        )
+        .configure_axis(
+            labelFontSize=SUBSAMPLING_LABEL_PX, titleFontSize=SUBSAMPLING_LABEL_PX
+        )
+        .configure_header(labelLimit=0)
     )
 
 
@@ -1721,106 +1916,189 @@ def arm_ladder_grid(
     arms: Sequence[str],
     methods: Sequence[str],
     r_floor: float | None = None,
-) -> alt.VConcatChart:
+) -> alt.HConcatChart:
     """Panel D: r and the OLS slope, per clade, across the sampling depths.
 
-    **Clades across, statistics down**, which is panel C's shape rotated: a
-    reader compares the two approaches within a cell, then reads across to see
-    the comparison hold clade by clade. Five cells stacked instead would make a
-    column too tall to set beside the other panels.
+    **Ported from the published figure's own producer**, the
+    `panel_d_clade_ladder` cell of `notebooks/ladder.py` in `dasm2-experiments`,
+    `experiments/2026-09-02-v12-sampling-depth-ladder`.
 
-    Each row shares one y scale, so a clade whose counts side falls further is
-    drawn further down rather than rescaled to look like its neighbours. Only
-    the leftmost cell of a row carries the axis, and only the bottom row
-    carries the depth labels; repeating either ten times costs the panel more
-    width than the plots themselves.
+    **Clades down, the two statistics across.** That is what makes this the
+    tall, narrow panel `SUBSAMPLING_FIGURE_ROWS` stands beside the column of B
+    over C; laid out the other way it is a wide panel with nowhere to go.
 
-    **The slope row is on log2.** A slope is a ratio, so on a linear axis
-    halving looks smaller than doubling and a counts arm at 0.11 is drawn as
-    though it were nearly as good as one at 1.0.
+    Two faceted charts side by side rather than one grid faceted on the
+    statistic: a scale *type* cannot vary by facet column, so the slope column
+    could not be logarithmic. **The rows align only because no tick label sits
+    on a panel edge.** Vega pads a view to fit whatever its outermost label
+    overflows, and two concatenated grids padded by different amounts have
+    their rows offset against each other. Both domains below are therefore
+    padded so that every labelled tick is interior; changing one without
+    keeping its ticks interior will pull the two columns out of step again.
 
-    ``r_floor`` is ``None`` here, unlike :data:`LADDER_R_FLOOR`, which clamps
-    at zero: how far the counts side falls at the shallowest cap is this
-    panel's claim, and a floor would hide the bottom of it.
+    **The slope column is on log2**, labelled in ratios: a quarter, no
+    compression, four times. A slope is a ratio, so halving and doubling the
+    dynamic range are the same size of error in opposite directions, and a
+    linear axis makes the halving look smaller.
+
+    ``r_floor`` is ``None`` here, unlike :data:`LADDER_R_FLOOR`, which clamps at
+    zero: how far the counts side falls at the shallowest cap is this panel's
+    claim, and a floor would hide the bottom of it.
     """
-    frame = metrics[metrics["method"].isin(list(methods))]
+    long = metrics[
+        metrics["method"].isin(list(methods)) & metrics["clade"].isin(list(clades))
+    ].copy()
     if r_floor is not None:
-        frame = frame.assign(pearson_r=frame["pearson_r"].clip(lower=r_floor))
-    frame = frame.assign(depth=frame["arm"].map(depth_label))
-    order = [depth_label(arm) for arm in arms]
+        long["pearson_r"] = long["pearson_r"].clip(lower=r_floor)
+    arm_names = [depth_label(arm) for arm in arms]
+
+    # r is a correlation, so its axis is the whole of its range and nothing is
+    # gained by cropping. The domain is padded a hair past 0 and 1 for the
+    # layout reason above, not a statistical one.
+    r_scale = alt.Scale(domain=[-0.04, 1.04], nice=False)
+    r_axis = alt.Axis(values=[0.0, 0.5, 1.0], labelOverlap="greedy")
+
+    # A non-positive slope cannot be placed on a log axis at all. None occur in
+    # this readout, so this is a guard rather than a code path: it says so
+    # loudly instead of dropping points that would silently vanish.
+    dropped = int((long["regression_slope"] <= 0).sum())
+    if dropped:
+        raise ValueError(
+            f"{dropped} non-positive slopes have no logarithm and cannot be "
+            f"placed on this panel's slope axis."
+        )
+    reach = float(np.abs(np.log2(long["regression_slope"])).max()) * 1.05
+    slope_domain = [
+        min(2**-reach, ARM_SLOPE_TICKS[0] / ARM_TICK_MARGIN),
+        max(2**reach, ARM_SLOPE_TICKS[-1] * ARM_TICK_MARGIN),
+    ]
+    slope_scale = alt.Scale(
+        type="log", base=2, domain=slope_domain, nice=False, clamp=False
+    )
+    slope_axis = alt.Axis(
+        values=list(ARM_SLOPE_TICKS), format=".3~g", labelOverlap="greedy"
+    )
+
     colours = alt.Scale(
         domain=list(methods), range=[ARM_METHOD_COLOURS[m] for m in methods]
     )
-    rows = []
-    for field, y_title, scale in (
-        ("pearson_r", ["Pearson r"], alt.Scale(zero=False)),
-        ("regression_slope", ["OLS slope"], alt.Scale(type="log", base=2)),
-    ):
-        bottom = field == "regression_slope"
-        cells = []
-        for index, clade in enumerate(clades):
-            cell = frame[frame["clade"] == clade]
-            x_enc = alt.X(
-                "depth:O",
-                # Once, under the middle column: five copies of it is five
-                # times the ink for one fact, and the labels above each column
-                # already say what the axis is.
-                title=(
-                    ["sampling depth"] if bottom and index == len(clades) // 2 else None
-                ),
-                sort=order,
-                axis=alt.Axis(
-                    labelFontSize=PANEL_FONT_SIZE,
-                    titleFontSize=PANEL_FONT_SIZE,
-                    labels=bottom,
-                    labelAngle=-45,
-                ),
-            )
-            y_enc = alt.Y(
-                f"{field}:Q",
-                title=y_title if index == 0 else None,
-                scale=scale,
-                axis=alt.Axis(
-                    labelFontSize=PANEL_FONT_SIZE,
-                    titleFontSize=PANEL_FONT_SIZE,
-                    tickCount=4,
-                    labels=index == 0,
-                ),
-            )
-            colour = alt.Color("method:N", scale=colours, title=None)
-            line = (
-                alt.Chart(cell)
-                .mark_line(strokeWidth=2)
-                .encode(x=x_enc, y=y_enc, color=colour)
-            )
-            dots = (
-                alt.Chart(cell)
-                .mark_point(size=70, filled=True, opacity=1.0)
-                .encode(
-                    x=x_enc,
-                    y=y_enc,
-                    color=colour,
-                    tooltip=[
-                        alt.Tooltip("method:N"),
-                        alt.Tooltip("depth:N", title="depth"),
-                        alt.Tooltip(f"{field}:Q", format=".3f"),
-                        alt.Tooltip("n_mutations:Q", title="mutations", format=","),
-                    ],
+    shapes = alt.Scale(
+        domain=list(methods), range=[ARM_METHOD_SHAPES[m] for m in methods]
+    )
+
+    def column(field: str, title: str, scale, axis, row_labels: bool):
+        # The axis reads in plain English, so the plotted field is the label
+        # rather than the manifest's arm name.
+        rows = (
+            long.rename(columns={field: "value"})[["arm", "clade", "method", "value"]]
+            .assign(role="data")
+            .assign(arm_name=lambda d: d["arm"].map(depth_label))
+        )
+        # One rule per cell, at the trailing edge of the full-depth band, which
+        # is the boundary between the baseline and the downsampled arms.
+        seps = pd.DataFrame(
+            [
+                {
+                    "arm": arms[0],
+                    "arm_name": depth_label(arms[0]),
+                    "clade": clade,
+                    "method": methods[0],
+                    "value": np.nan,
+                    "role": "separator",
+                }
+                for clade in clades
+            ]
+        )
+        # `statistic` is a constant column carrying the column heading: a
+        # single-valued column facet is what centres the title over the plots.
+        frame = pd.concat([rows, seps], ignore_index=True).assign(statistic=title)
+        x_enc = alt.X("arm_name:N", sort=arm_names, title=ARM_X_TITLE, axis=ARM_X_AXIS)
+        y_enc = alt.Y("value:Q", title=None, scale=scale, axis=axis)
+        base = alt.Chart()
+        layers = [
+            base.mark_rule(strokeDash=[4, 4], color="grey", opacity=0.8)
+            .transform_filter(alt.datum.role == "separator")
+            # The x definition here has to match the line layer's exactly, apart
+            # from `bandPosition`. Layers share one x scale and Vega merges
+            # identical axis definitions into one -- but `axis=None` on any
+            # layer suppresses the shared axis, which is what left this figure
+            # with no ticks and no x label at all.
+            .encode(
+                x=alt.X(
+                    "arm_name:N",
+                    sort=arm_names,
+                    title=ARM_X_TITLE,
+                    axis=ARM_X_AXIS,
+                    bandPosition=1.0,
                 )
-            )
-            cells.append(
-                (line + dots).properties(
-                    width=ARM_LADDER_WIDTH,
-                    height=ARM_LADDER_HEIGHT,
-                    # The clade names the column, and only on the top row: the
-                    # cell below it is the same clade.
-                    title=alt.TitleParams(
-                        [clade] if not bottom else [],
-                        fontSize=PANEL_FONT_SIZE,
-                        offset=3,
-                        anchor="middle",
+            ),
+            base.mark_line(point=alt.OverlayMarkDef(size=180))
+            .transform_filter(alt.datum.role == "data")
+            .encode(
+                x=x_enc,
+                y=y_enc,
+                color=alt.Color("method:N", title=ARM_LEGEND_TITLE, scale=colours),
+                # Shape on the same field as colour, so Vega-Lite merges the two
+                # into one legend -- and so the DASM series is the triangle here
+                # that it is in `fig:agreement`, in print and in black and white
+                # alike. The same title as colour: Vega merges two channels on
+                # one field into a single legend only when their definitions
+                # agree.
+                shape=alt.Shape("method:N", title=ARM_LEGEND_TITLE, scale=shapes),
+                tooltip=["clade", "arm_name", "method", "value"],
+            ),
+        ]
+        return (
+            alt.layer(*layers, data=frame)
+            .properties(width=ARM_LADDER_WIDTH, height=ARM_LADDER_HEIGHT)
+            .facet(
+                # Clade labels once, to the left of the left column. The right
+                # column plots the same five rows in the same order, so a second
+                # copy would only be a second thing to read. The statistic heads
+                # its column, centred: a column facet header is drawn over the
+                # plotting area only, excluding the row-label band and the axis.
+                row=alt.Row(
+                    "clade:N",
+                    sort=list(clades),
+                    # What the rows are, said once down the left, the way the
+                    # scatter grid says its quantity. The labels themselves are
+                    # rotated and pulled in against the axis so the title fits
+                    # beside them rather than pushing the plots right.
+                    title="clade" if row_labels else None,
+                    header=alt.Header(
+                        labelOrient="left",
+                        labelAngle=-90,
+                        labelAlign="center",
+                        labelBaseline="middle",
+                        labelPadding=2,
+                        labelFontSize=SUBSAMPLING_LABEL_PX,
+                        titleFontSize=SUBSAMPLING_LABEL_PX,
+                        titleFontWeight="bold",
+                    )
+                    if row_labels
+                    else None,
+                ),
+                column=alt.Column(
+                    "statistic:N",
+                    title=None,
+                    header=alt.Header(
+                        labelFontSize=SUBSAMPLING_TITLE_PX, labelFontWeight="bold"
                     ),
-                )
+                ),
+                spacing={"row": 14, "column": 20},
             )
-        rows.append(alt.hconcat(*cells, spacing=8).resolve_scale(y="shared"))
-    return alt.vconcat(*rows, spacing=4)
+        )
+
+    return (
+        alt.hconcat(
+            column("pearson_r", "Pearson r", r_scale, r_axis, True),
+            column("regression_slope", "slope", slope_scale, slope_axis, False),
+        )
+        .resolve_scale(color="shared")
+        .configure_axis(
+            labelFontSize=SUBSAMPLING_LABEL_PX, titleFontSize=SUBSAMPLING_LABEL_PX
+        )
+        .configure_legend(
+            labelFontSize=SUBSAMPLING_LABEL_PX, titleFontSize=SUBSAMPLING_LABEL_PX
+        )
+    )

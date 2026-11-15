@@ -532,27 +532,51 @@ SUBSAMPLING_PANEL_LETTERS: dict[str, str] = {
     "D": LADDER_ARM_PANELS[1],
 }
 
-#: Which panels sit on which row, left to right. The depth pair shares the top
-#: row and each recovery panel takes a row of its own.
+#: Which panels sit on which row, left to right; a tuple inside a row is a
+#: column of panels stacked within it.
 #:
-#: **This is not the published figure's arrangement.** That was
-#: ``[["A"], [["B", "C"], "D"]]`` -- A across the top, B over C in one column,
-#: and D beside them -- in `dasm2-experiments`,
-#: `experiments/2026-09-09-viral-dasm-figure-drafts`, `notebooks/subsampling.py`,
-#: the notebook `main.tex`'s provenance comment names. That arrangement is a
-#: statement about those panels' shapes rather than about the figure: it works
-#: because that campaign's panel D was the tall, narrow one (2,541 x 3,104 px,
-#: the five clades stacked down the page) and its panel C the short, wide one.
-#: This pipeline's panel D puts the clades across and the two statistics down,
-#: so C is now the tall panel and D the wide one, and the column that fit D
-#: beside B and C no longer has a tall panel to hold.
-SUBSAMPLING_FIGURE_ROWS: tuple[tuple[str, ...], ...] = (("A", "B"), ("C",), ("D",))
+#: **This is the published figure's arrangement, carried across unchanged.** A
+#: spans the top, because 56 clades across need the width. Below it, B sits
+#: directly over C in one column, with D -- the tall one -- beside them and its
+#: top level with B's. It is `notebooks/subsampling.py`'s ``ROWS`` in
+#: `dasm2-experiments`, `experiments/2026-09-09-viral-dasm-figure-drafts`, the
+#: notebook `main.tex`'s provenance comment names.
+#:
+#: The arrangement only works while the panels keep the shapes it was chosen
+#: for: D tall and narrow (the five clades down the page, the two statistics
+#: across) and C short and wide (the four arms across, the two approaches
+#: down). `scripts/panel_charts.py` draws them that way deliberately, and
+#: `tests/test_panels.py` pins the aspect each one has to keep.
+SUBSAMPLING_FIGURE_ROWS: tuple[tuple[str | tuple[str, ...], ...], ...] = (
+    ("A",),
+    (("B", "C"), "D"),
+)
 
 #: The box this figure has to fit inside, in inches, and the fraction of it to
-#: use. `fig:agreement`'s box, which is what the published figure used too, so
-#: the two sit at one scale in the manuscript.
+#: use -- `fig:agreement`'s box and the published figure's own scale, so the
+#: two sit at one size in the manuscript. Nine tenths of the box: the panels'
+#: type is set larger on the page than the other figures' (see
+#: :data:`SUBSAMPLING_TITLE_PX`), and the figure gives back some width so the
+#: type-to-figure ratio lands where the manuscript wants it.
 SUBSAMPLING_BOX_IN: tuple[float, float] = (7.5, 8.0)
-SUBSAMPLING_FIGURE_SCALE = 1.0
+SUBSAMPLING_FIGURE_SCALE = 0.9
+
+#: What this figure's panel titles and axis labels measure in the Vega-Lite
+#: spec. The panel letters are sized against the title; see `figure_layout`'s
+#: header for the conversion.
+#:
+#: **This is the one figure not drawn at `PANEL_FONT_SIZE`**, and it is drawn
+#: larger for a reason that belongs to its layout rather than to its taste.
+#: `SUBSAMPLING_FIGURE_ROWS` puts two panels across the lower row, so about
+#: 1,580 Vega-Lite units of panel have to fit the page width, against roughly
+#: 1,350 for `fig:within_clade_shifts`' widest row and one panel for each row
+#: of a stacked figure. Type is sized in those same units, so the same spec
+#: size lands smaller on the page here than anywhere else: at
+#: `PANEL_FONT_SIZE` these titles compose to about 5 pt against the paper's
+#: 6.6 to 7.2 pt. The published figure's two sources both drew it at 24 px for
+#: this reason, and these are their sizes.
+SUBSAMPLING_TITLE_PX = 24
+SUBSAMPLING_LABEL_PX = 22
 
 #: `fig:within_clade_shifts`'s stems, one tuple per producing notebook.
 #: One stem per clade, not one image of both. The composed figure puts each
