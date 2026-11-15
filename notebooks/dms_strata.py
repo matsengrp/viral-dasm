@@ -72,6 +72,7 @@ def _(mo):
     import panel_charts as charts
     import panel_spec
     import pandas as pd
+    import altair as alt
 
     SELECTION = panel_spec.DMS_SELECTION
     HOMOLOG = panel_spec.SCATTER_HOMOLOG
@@ -83,6 +84,7 @@ def _(mo):
         HOMOLOG,
         SCORE_PATHS,
         SELECTION,
+        alt,
         charts,
         dms,
         dms_summary,
@@ -168,14 +170,15 @@ def _(SELECTION, charts, dms, frame, panel_spec, panels, stats):
 
 
 @app.cell
-def _(strata_panels):
-    strata_panels[0]
-    return
-
-
-@app.cell
-def _(strata_panels):
-    strata_panels[1]
+def _(alt, strata_panels):
+    # **Previewed as one chart, not as two cells.** The rows are saved as two
+    # panels because the composition letters them separately, but displaying
+    # them that way leaves the browser to lay each out on its own, and two
+    # independently placed charts do not line up however well their specs
+    # agree. Concatenating them hands the whole grid to one renderer, which
+    # places the columns once -- so what is on screen is aligned for the same
+    # reason the composed figure is, rather than coincidentally with it.
+    alt.vconcat(*strata_panels, spacing=24).resolve_scale(x="shared")
     return
 
 
