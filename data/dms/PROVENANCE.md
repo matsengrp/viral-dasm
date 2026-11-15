@@ -16,7 +16,7 @@ and anything derived from them may be committed.
 | XBB.1.5 | 23A | `dadonaite2024_XBB15_summary.csv` | [dms-vep/SARS-CoV-2_XBB.1.5_spike_DMS](https://github.com/dms-vep/SARS-CoV-2_XBB.1.5_spike_DMS), `results/summaries/summary.csv` | MIT, granting "this software and associated data" |
 | KP.3.1.1 | 24E | `dadonaite2025_KP311_func_effects.csv` | [dms-vep/SARS-CoV-2_KP.3.1.1_spike_DMS](https://github.com/dms-vep/SARS-CoV-2_KP.3.1.1_spike_DMS), `results/func_effects/averages/293T_medium_ACE2_entry_func_effects.csv` | MIT, as above |
 
-Citations: BA.1, Haddox et al., [10.1101/2023.08.01.551488](https://doi.org/10.1101/2023.08.01.551488); XBB.1.5, Dadonaite et al., [10.1038/s41586-024-07636-1](https://doi.org/10.1038/s41586-024-07636-1); KP.3.1.1, Dadonaite et al., [10.1128/jvi.01423-25](https://doi.org/10.1128/jvi.01423-25).
+Citations: BA.1, Haddox et al., [10.1101/2023.07.31.551037](https://doi.org/10.1101/2023.07.31.551037); XBB.1.5, Dadonaite et al., [10.1038/s41586-024-07636-1](https://doi.org/10.1038/s41586-024-07636-1); KP.3.1.1, Dadonaite et al., [10.1128/jvi.01423-25](https://doi.org/10.1128/jvi.01423-25).
 
 ## Filtering: each study's own, not a house rule
 
@@ -55,13 +55,19 @@ BA.1 shift, which is what identifies the reference.
 
 **This is a fitted artifact, not a raw measurement table.** It is the output
 of a multidms fit over that repository's own functional scores, so reproducing
-it means rerunning that pipeline rather than downloading a file.
+it means rerunning that pipeline rather than downloading a file. Unlike the
+other two, which are released measurements, this one is a model's parameters —
+which is also why the manuscript says the BA.1 effects it analyzes "are not
+that experiment's own estimates, but effects re-estimated from its data".
 
-> **Placeholder — to be completed by HH.** The provenance of this particular
-> fit, beyond the repository and commit above: which preprint version it
-> accompanies and how it relates to the numbers in later versions of that
-> paper. The file was chosen from the commit linked above; the rest of its
-> history has not been recorded here.
+**The commit is the one that accompanies the preprint**, Haddox et al.,
+"Jointly modeling deep mutational scans identifies shifted mutational effects
+among SARS-CoV-2 spike homologs", bioRxiv
+[2023.07.31.551037v1](https://doi.org/10.1101/2023.07.31.551037) — `main.bib`'s
+`haddox2023jointly`, whose PDF is in the manuscript repository's `papers/`.
+That is what fixes the fit this file holds: the `times_seen_threshold` and the
+lasso strength above are the ones that version's analysis notebook sets, and a
+later revision of the paper may move both.
 
 ### XBB.1.5 — already filtered by its study
 
