@@ -39,6 +39,11 @@ effects and selection factors are publishable; no panel carries a sequence.
 # pyarrow into a dry run to learn five file names.
 from panel_spec import (
     ARM,
+    DMS_BOX_IN,
+    DMS_FIGURE_STEM,
+    DMS_PANELS,
+    DMS_PANEL_LETTERS,
+    DMS_SELECTION,
     BACKGROUND_CSV,
     BACKGROUND_PANELS,
     CANDIDATE_CSV,
@@ -191,6 +196,120 @@ rule compose_subsampling:
         ],
     log:
         f"{ARTIFACT_ROOT}/logs/compose_subsampling.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "marimo export html {input.notebook} -o {output.html} --force"
+        " > {log} 2>&1"
+
+
+def dms_files(*_):
+    """The three prepared DMS CSVs, by the paths `config.yaml` names.
+
+    Declared as files rather than as the directory they share: that directory
+    is a shared functional-data store with other studies in it, and a rule
+    that declared it would rerun whenever any of them changed. The md5 in
+    `config.yaml` is the other half of this -- the paths catch a file that
+    moved, the digest catches one replaced in place.
+    """
+    return [str(dms_dataset(homolog).path) for homolog in dms_homologs()]
+
+
+rule dms:
+    """`fig:dms`, and so its four panels beneath it.
+
+    Two rules rather than one, as every figure here is split: the panels read
+    the scored table, the three assays and twenty founders; the composition
+    reads four PNGs.
+    """
+    input:
+        composed_paths(DMS_SELECTION, DMS_FIGURE_STEM),
+
+
+rule dms_correlations:
+    """All four panels: two count thresholds, scatters and bars at each.
+
+    One rule for the four, not two: the bars are the coefficient the scatters
+    label, computed over the same frames in the same pass, so splitting them
+    would read the scored table and all three assays twice to draw a number
+    that is already in hand.
+    """
+    input:
+        dms="scripts/dms.py",
+        panels="scripts/panels.py",
+        spec="scripts/panel_spec.py",
+        charts="scripts/panel_charts.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        # What the notebook reaches through those modules, spelled out per
+        # rule for the reason `rule subsampling_depth` spells its own out.
+        analysis_charts="dasm2/analysis/charts.py",
+        analysis_viral="dasm2/analysis/viral.py",
+        analysis_eval="dasm2/analysis/viral_fitness_eval.py",
+        codon_table="dasm2/codon_table.py",
+        functional="dasm2/data/functional/__init__.py",
+        dms_matrix="dasm2/data/functional/dms_matrix.py",
+        functional_formats="dasm2/data/functional_formats.py",
+        io="dasm2/io.py",
+        constants="dasm2/sequence/constants.py",
+        conversion="dasm2/sequence/conversion.py",
+        masking="dasm2/sequence/masking.py",
+        scov2_rates="dasm2/neutral/scov2_rates.py",
+        dasm2_init="dasm2/__init__.py",
+        notebook="notebooks/dms_correlations.py",
+        table=SCORED_TABLE,
+        # The assays themselves, and the founders every one of them is read
+        # against: `load_dms` drops the measurements whose wildtype disagrees
+        # with the clade founder, and the strata are the founder's codons.
+        dms_data=dms_files,
+        clade_founders=founder_fastas,
+        founder_reader="scripts/founders.py",
+        # The two layers of the loader's mask, in the three files they are
+        # read from. Not the figure's exclusion -- that arrives as the nulls
+        # `rule score` left behind -- but what `from_multidms` needs before it
+        # will parse a masked site. `censored_sites` calls `load_censor_table`
+        # on the mutations *and* the clades, so both are declared here: with
+        # only the first, a re-emitted clades table would leave these panels
+        # stale and snakemake would report nothing to do.
+        masked_nt_sites=str(mat_pcp_path("masked_nt_sites_file")),
+        censored_mutations=str(mat_pcp_path("censored_mutations_file")),
+        censored_clades=str(mat_pcp_path("censored_clades_file")),
+        reference=str(mat_pcp_path("reference_sequence_file")),
+    output:
+        html=f"{NOTEBOOK_DIR}/dms_correlations.html",
+        panels=panel_outputs(DMS_PANELS, DMS_SELECTION),
+    log:
+        f"{ARTIFACT_ROOT}/logs/dms_correlations.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "marimo export html {input.notebook} -o {output.html} --force"
+        " -- --table {input.table}"
+        " > {log} 2>&1"
+
+
+rule compose_dms:
+    """`fig:dms` itself, laid out from its four panels.
+
+    No scoring, no assay and no table: it reads PNGs, the split every
+    composition here is built on. The manuscript copy is not a declared
+    output, for the reason `rule compose_agreement` gives.
+    """
+    input:
+        layout="scripts/figure_layout.py",
+        spec="scripts/panel_spec.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        notebook="notebooks/dms.py",
+        panels=[
+            str(figure_dir(DMS_SELECTION) / f"{stem}.png")
+            for stem in DMS_PANEL_LETTERS.values()
+        ],
+    output:
+        html=f"{NOTEBOOK_DIR}/dms.html",
+        figure=[str(path) for path in composed_paths(DMS_SELECTION, DMS_FIGURE_STEM)],
+    log:
+        f"{ARTIFACT_ROOT}/logs/compose_dms.log",
     resources:
         mem_mb=PANEL_MEM_MB,
     shell:
@@ -732,6 +851,8 @@ rule figures:
             str(path)
             for path in composed_paths(SUBSAMPLING_SELECTION, SUBSAMPLING_FIGURE_STEM)
         ],
+        # `fig:dms`, on the same footing: one panel set, one directory.
+        [str(path) for path in composed_paths(DMS_SELECTION, DMS_FIGURE_STEM)],
 
 
 rule background_effects:

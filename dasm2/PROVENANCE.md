@@ -102,7 +102,11 @@ known failure mode in each direction, and both fired:
   cut is 107. The gap is the measurement's error bar.
 * **Alive by the trace, dead in fact.** `data/functional/codon_neighbor.py`
   executed one function, `_build_preferred_codons()`, at import — reached
-  only through a chain that was itself being deleted.
+  only through a chain that was itself being deleted. It stays cut: `fig:dms`
+  needs the single-nucleotide indicator that module builds, but the table it
+  builds it from, `codon_table.CODON_NEIGHBOR_MATRIX`, survived the prune, and
+  the indicator is a short loop over it in `scripts/dms.py`. See *What came
+  back for the DMS comparison*.
 
 So the trace was evidence, not a work order; what decided each cut was
 whether the tree still trained the same model afterwards.
@@ -641,3 +645,77 @@ partition itself". `panel_spec.era_of_clade` reads it, and
 It is in `panel_spec.py` rather than `lib.py` for a reason worth recording:
 every training rule declares `lib.py` as an input, so a helper added there puts
 the seven runs out of date and `snakemake -n figures` schedules `train`.
+
+## What came back for the DMS comparison (#26)
+
+Training reads no deep mutational scan, and neither does scoring, so
+`data/functional/` was absent and `analysis/whichmut_probs.py` with it.
+`fig:dms` correlates the model's fitness effects against three published
+cell-entry assays, at two count thresholds. Three modules came from the same
+source commit:
+
+| module | upstream | here | what was taken |
+|---|---:|---:|---|
+| `data/functional/__init__.py` | 104 | 38 | 1 of the 8 modules it re-exports |
+| `data/functional/dms_matrix.py` | 561 | 561 | every definition; two comments revised |
+| `data/functional_formats.py` | 799 | 799 | every definition; two comments revised |
+| `analysis/whichmut_probs.py` | 227 | 247 | every definition, plus one guard |
+
+**`whichmut_probs.py` is here for the analysis, not for a panel.** No rule and
+no notebook imports it: `fig:dms` draws fitness effects, and the contrast
+between a selection factor and the mutation probability `p = lambda f / Z`
+built from it is its own downstream question. It is vendored now, with its
+guard and its test, so that work starts from a module this repository has
+already recorded and checked rather than re-fetching one later.
+
+The two large files arrive whole for the reason `analysis/viral.py` did: both
+are frame-in, frame-out, their `dasm2` imports are `codon_table`,
+`heads/types` and `sequence/`, and every one of those was already here, so the
+vendoring closed on itself with nothing to restore. Definitions neither panel
+reaches are kept rather than cut, so the files still diff against the source
+commit.
+
+`__init__.py` is the exception, and is the only one trimmed. Upstream it
+re-exports eight modules -- consensus sequences, replicate averaging,
+single-mutant filtering, selection scores, HERMES logits, two plotting modules
+-- each of which would have had to be vendored to make the import work.
+`fig:dms` reaches `dms_matrix` alone.
+
+**`codon_neighbor.py` did not come back.** It is the obvious fourth module: it
+defines `make_codon_neighbor_indicator`, which is what splits every DMS
+mutation into the single- and multi-nucleotide strata the figure reports. But
+the function is a twenty-line loop over `codon_table.CODON_NEIGHBOR_MATRIX`,
+and that table survived the prune because the whichmut loss reads it. So the
+indicator is written in `scripts/dms.py` against a table this repository
+already carries, and the note above, which recorded the module as cut, now
+says why it stays cut rather than reading as an oversight.
+
+### The comment pass
+
+Measured as the fourth cut was, comparing definitions as ASTs with docstrings
+stripped: **26 of the 27 are code-identical to the source commit** -- 9 in
+`dms_matrix.py`, 13 in `functional_formats.py`, 4 of the 5 in
+`whichmut_probs.py`.
+
+Two private issue references were in the definitions taken, both in
+`functional_formats.py` and both attached to generic explanation rather than
+to a result: why a multidms manifest declares no `y_col`, and why
+`from_multidms` can emit a row whose wildtype disagrees with the founder. The
+explanations stay and the numbers are gone, since a reader of this repository
+cannot open either issue.
+
+### The one divergence: `aa_mutation_probabilities` gained a guard
+
+The 27th definition is not code-identical, and the change is deliberate. The
+function takes selection factors in **linear** space, and its own docstring
+said that a log factor passed instead "would be silently wrong rather than an
+error, since both are float tensors of the same shape" -- the only check being
+on shape. Panel D reads `log_selection_factor` out of a table whose every
+other consumer wants it logged, so this is the one mistake the arm is actually
+exposed to.
+
+It now refuses a negative factor. A selection factor is a ratio of rates and
+cannot be negative; a log factor is below zero wherever the mutation is
+deleterious, which on these founders is most of them. The guard is a refusal
+rather than an exponentiation on purpose: converting whatever arrives would
+make the function accept both and silently pick one reading of its own input.

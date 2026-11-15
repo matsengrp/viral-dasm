@@ -414,11 +414,16 @@ def _candidate_rows() -> list[tuple[str, str, str]]:
 #: `SELECTIONS`.
 SUBSAMPLING_SELECTION = "subsampling"
 
+#: The directory `fig:dms`'s panels are written under -- a **directory name,
+#: not a model selection**, and absent from :data:`SELECTIONS` for the same
+#: reason :data:`SUBSAMPLING_SELECTION` is. `tests/test_panels.py` pins it out.
+DMS_SELECTION = "dms"
+
 #: Which panel directories hold a composition the manuscript takes. See
 #: :func:`tex_figure_dir`, which is where the distinction bites: `fidelity`
 #: is the one directory that composes a figure the paper does not publish.
 PUBLISHED_SELECTIONS: frozenset[str] = frozenset(
-    {DEFAULT_SELECTION, SUBSAMPLING_SELECTION}
+    {DEFAULT_SELECTION, SUBSAMPLING_SELECTION, DMS_SELECTION}
 )
 
 #: The two clades panel B draws, under the names the paper uses beside the
@@ -462,6 +467,79 @@ def aamut_grid_path(root: Path, clade: str, arm: str) -> Path:
     """
     directory = root if arm == FULL_DEPTH.name else root / arm
     return directory / f"{clade}{FITNESS_SUFFIX}"
+
+
+# ---------------------------------------------------------------------------
+# `fig:dms`
+# ---------------------------------------------------------------------------
+
+#: The homolog whose scatter is panel A. The paper draws one homolog's cloud
+#: and leaves the other two to panel B's summary, so the choice is the
+#: figure's rather than this pipeline's: `main.tex`'s caption names KP.3.1.1.
+#: `tests/test_dms.py` requires it to be one of `config.yaml`'s homologs, since
+#: this module stays stdlib-and-`lib` only and does no config lookup of its own.
+SCATTER_HOMOLOG = "KP.3.1.1"
+
+#: The two populations `fig:dms` draws, top row then bottom: every mutation
+#: the tree could estimate at all, and the subset with at least ten actual or
+#: expected counts. The figure's own spelling of `dms.MIN_COUNTS`, which is
+#: where the two are defined; named here because they are in the panel stems,
+#: and a rule has to know which files it writes without importing the loader.
+DMS_MIN_COUNTS: tuple[int, ...] = (0, 10)
+
+#: `fig:dms`'s four stems. One scatter row and one bar row per threshold,
+#: each saved on its own rather than as a slice of a stacked pair: a single
+#: image of both rows would fix the split between them at whatever Vega-Lite
+#: produced, and the composition has no way to move it. Four images let the
+#: layout put the break in the same place on both sides, which is what makes
+#: the scatters and the bars line up.
+DMS_SCATTER_PANELS: tuple[str, ...] = tuple(
+    f"panel_{letter}_scatters_min{min_count}"
+    for letter, min_count in zip("ac", DMS_MIN_COUNTS)
+)
+DMS_BAR_PANELS: tuple[str, ...] = tuple(
+    f"panel_{letter}_bars_min{min_count}"
+    for letter, min_count in zip("bd", DMS_MIN_COUNTS)
+)
+DMS_PANELS: tuple[str, ...] = (*DMS_SCATTER_PANELS, *DMS_BAR_PANELS)
+
+#: The composed figure's stem, which is its LaTeX label: `main.tex` includes
+#: `figures/dms.pdf` and refers to `\\autoref{fig:dms}`.
+DMS_FIGURE_STEM = "dms"
+
+#: Which stem each letter is, reading across and then down: one row per
+#: threshold, scatters then bars. Every plot is lettered in its own right,
+#: because each is drawn on one population and headed with it, so a reader can
+#: take any one of them on its own terms.
+DMS_PANEL_LETTERS: dict[str, str] = {
+    chr(ord("A") + index): stem
+    for index, stem in enumerate(
+        stem
+        for scatter, bars in zip(DMS_SCATTER_PANELS, DMS_BAR_PANELS)
+        for stem in (scatter, bars)
+    )
+}
+
+#: Which letter sits where. Reading across answers "does this hold for the
+#: other homologs"; reading down answers "does it survive thresholding".
+#: Rows are top aligned and left justified, so the two bar panels start at the
+#: same x as each other and level with the scatters beside them -- the
+#: alignment a stacked column would give, but with each plot a cell of its own
+#: so that it can take a letter.
+DMS_FIGURE_ROWS: tuple[tuple[str, ...], ...] = (("A", "B"), ("C", "D"))
+
+#: `fig:agreement`'s box rather than `fig:within_clade_shifts`'s taller one:
+#: this figure is two plots a row, so it has no reason to overhang the text
+#: block. At scale 1.0 the width binds and the height comes out under 4 in,
+#: so there is nothing to give away.
+DMS_BOX_IN: tuple[float, float] = (7.5, 8.0)
+DMS_FIGURE_SCALE = 1.0
+
+#: The type both panels were drawn at, which is `panel_charts.DMS_FONT_SIZE`
+#: -- the source notebook's `PAPER_FONT_SIZE`, and its `BAR_FONT_SIZE` is set
+#: equal to it. Named here as well so the panel letters follow the panels when
+#: the type changes.
+DMS_TITLE_PX = 15
 
 
 #: Panel stems, as the figure's composition reads them. Named here so a rule
