@@ -976,3 +976,191 @@ def test_the_candidate_clades_match_the_candidate_file():
     from_file = {clade for clade, _ in panel_spec.figure_candidates()}
     from_file |= {clade for clade, _, _ in panel_spec.off_figure_candidates()}
     assert set(panel_spec.CANDIDATE_CLADES) == from_file
+
+
+def test_every_clade_row_has_both_of_its_panels():
+    """A clade of the figure gets a scatter and a background panel, or neither.
+
+    The composed figure is three rows of two, so a clade present in one stem
+    tuple and absent from the other would leave a row half drawn -- and the
+    letters in the caption would stop matching the images.
+    """
+    scatter = {stem.rsplit("_", 1)[-1] for stem in panel_spec.OUTLIER_PANELS}
+    backgrounds = {stem.rsplit("_", 1)[-1] for stem in panel_spec.BACKGROUND_PANELS}
+    assert scatter == backgrounds == set(panel_spec.CANDIDATE_CLADES)
+
+
+#: The smallest frame `background_panel` draws: two clades of unequal width,
+#: so the shared slot geometry has something to line up, and two backgrounds
+#: per candidate, which is the contrast the panel exists to show.
+def _background_frame():
+    rows = []
+    for clade, candidates in (
+        ("22D", ["D574V", "K444T", "L452R"]),
+        ("20B", ["D1259H"]),
+    ):
+        founder, derived = f"R346, K356 ({clade})", f"T346, T356 ({clade})"
+        for index, candidate in enumerate(candidates):
+            for order, (background, level) in enumerate(
+                ((founder, 6.0 - index), (derived, 1.0 + index))
+            ):
+                rows.append(
+                    {
+                        "cluster": clade,
+                        "candidate": candidate,
+                        "background": background,
+                        "background_order": order,
+                        "counts_effect": level,
+                        "dasm_effect": level + 0.2,
+                        "p_label": "p < 1e-4",
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
+def test_the_background_rows_come_out_the_same_size():
+    """B, D and F are three images that have to read as one exhibit.
+
+    They are stacked left justified, each beside its own clade's scatter, so
+    a reader compares their slopes by eye across rows. That only works if a
+    sub-panel sits at the same x and the same width in every row -- and the
+    rows do not have the same number of candidates, so nothing makes that
+    true on its own. Two things do: every row is drawn the same number of
+    slots wide, and every row after the first is given the first's margins.
+
+    This is the failure the Vega-Lite version had and had no symptom for.
+    Each row rendered correctly on its own; only the composed figure showed
+    that 20B's panels were wider than 22D's and started further left.
+    """
+    import panel_charts as charts
+
+    frame = _background_frame()
+    domain = charts.background_y_domain(frame)
+    slots = 4
+
+    sizes, geometries, h_params = [], [], None
+    for clade in ("22D", "20B"):
+        figure = charts.background_panel(
+            frame[frame["cluster"] == clade],
+            clade,
+            y_domain=domain,
+            columns=slots,
+            h_params=h_params,
+        )
+        if h_params is None:
+            pars = figure.subplotpars
+            h_params = (pars.left, pars.right, pars.wspace)
+        sizes.append(tuple(figure.get_size_inches()))
+        first = figure.axes[0].get_position()
+        geometries.append((round(first.x0, 6), round(first.width, 6)))
+
+    assert sizes[0] == sizes[1], (
+        f"the rows are {sizes[0]} and {sizes[1]} inches. Rows of different "
+        f"sizes cannot line up however they are composed."
+    )
+    assert geometries[0] == geometries[1], (
+        f"the first sub-panel sits at x0/width {geometries[0]} in 22D's row "
+        f"and {geometries[1]} in 20B's. `h_params` is what carries the "
+        f"widest row's margins onto the narrower ones; without it "
+        f"`tight_layout` measures each row's margins from its own tick "
+        f"labels and the narrower rows come out wider."
+    )
+
+
+def test_every_background_sub_panel_draws_its_grid():
+    """The grid is how a reader carries a level across a row.
+
+    `sharey` puts the tick *labels* on the leftmost sub-panel only, which is
+    right -- every cell shares one domain and the rest would repeat the same
+    numbers. It does not follow that the rest should lose their grid lines:
+    without them a reader comparing F486V's level against D574V's has
+    nothing to carry the value across four panels. The Vega-Lite version
+    dropped the axis and the grid together, which is how this came up.
+    """
+    import panel_charts as charts
+
+    frame = _background_frame()
+    figure = charts.background_panel(
+        frame[frame["cluster"] == "22D"],
+        "22D",
+        y_domain=charts.background_y_domain(frame),
+        columns=4,
+    )
+    drawn = [axis for axis in figure.axes if axis.get_title()]
+    assert len(drawn) == 3, f"expected three titled sub-panels, got {len(drawn)}."
+    for axis in drawn:
+        assert any(line.get_visible() for line in axis.get_ygridlines()), (
+            f"the {axis.get_title()} sub-panel has no horizontal grid. Only "
+            f"the leftmost cell carries tick labels, so the grid is the only "
+            f"thing the other cells give a reader to read a level against."
+        )
+
+
+def test_the_background_rows_share_one_value_axis():
+    """A steep line has to mean a large shift, not a narrow axis.
+
+    The three rows are the figure's claim that the DASM tracks a shift the
+    counts see, and their slopes are only commensurable on one scale. The
+    domain is computed over every clade at once for that reason, so this
+    checks the renderer honours what it is handed rather than rescaling to
+    the clade in front of it.
+    """
+    import panel_charts as charts
+
+    frame = _background_frame()
+    domain = charts.background_y_domain(frame)
+    for clade in ("22D", "20B"):
+        figure = charts.background_panel(
+            frame[frame["cluster"] == clade], clade, y_domain=domain, columns=4
+        )
+        for axis in figure.axes:
+            if axis.get_title():
+                assert axis.get_ylim() == pytest.approx(domain), (
+                    f"{clade}'s {axis.get_title()} panel is scaled to "
+                    f"{axis.get_ylim()}, not the figure's {domain}."
+                )
+
+
+def test_a_background_row_refuses_to_crowd_out_its_own_legend():
+    """Every row carries its own key, in a slot the padding leaves empty.
+
+    B, D and F are separately lettered panels and a reader may meet any one
+    of them first, so none can borrow its key from the row above. The key
+    lives in the first slot past that clade's sub-panels, which exists only
+    because every row is drawn one slot wider than the widest clade needs.
+    Lose that slot -- by sizing a row to its own candidates, say -- and the
+    legend is drawn over the last panel with nothing saying so.
+    """
+    import panel_charts as charts
+
+    frame = _background_frame()
+    with pytest.raises(ValueError, match="no slot for the legend"):
+        charts.background_panel(
+            frame[frame["cluster"] == "22D"],
+            "22D",
+            y_domain=charts.background_y_domain(frame),
+            columns=3,
+        )
+
+
+def test_a_background_panel_refuses_a_third_background():
+    """The panel draws a contrast, and a contrast has two sides.
+
+    A third pool reaching here would be plotted as a third x position with
+    nothing in the panel saying which pair of them the p-value above it
+    tested.
+    """
+    import panel_charts as charts
+
+    frame = _background_frame()
+    extra = frame[frame["cluster"] == "22D"].copy()
+    third = extra.head(1).copy()
+    third["background"] = "Q346, K356 (22D)"
+    third["background_order"] = 2
+    with pytest.raises(ValueError, match="not two"):
+        charts.background_panel(
+            pd.concat([extra, third]),
+            "22D",
+            y_domain=(0.0, 1.0),
+            columns=4,
+        )

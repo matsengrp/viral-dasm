@@ -556,3 +556,88 @@ for `S` it masks 18 nucleotides rather than the 51 their codons span, and a
 mutation reachable through the other 33 is one both sides estimated. The
 docstring now says that, and says no caller here passes the argument. The code is
 untouched, and the AST comparison above still holds.
+
+## What came back for the within-clade shift (#22)
+
+`fig:within_clade_shifts`' panels B, D and F measure a mutation's effect in each
+of two genetic backgrounds inside one clade, by counts and by the DASM. The
+counts half is `dasm2/analysis/within_clade_pools.py`, vendored from
+`matsengrp/dasm2-experiments` at `f255e9361`: **2,338 lines to 1,391**, 22
+top-level definitions of the source's 46.
+
+Half the source is the half this pipeline does not need, and for two different
+reasons.
+
+**The marker nomination is gone**, because the backgrounds are no longer chosen
+by the model. Upstream `find_background.py` scored every parent haplotype in the
+clade, ranked sites by effect size and nominated one, which made the contrast
+move with the checkpoint. `scripts/backgrounds.py` derives it from branch
+frequencies instead, so `marker_enrichment`, `marker_effect_size`,
+`marker_pool_support`, `cooccurrence`, `spread_iqr`, `majority_cotravellers`,
+`fixed_substitutions`, `cotraveller_pool_name`, `apply_substitutions` and their
+seven thresholds have no caller. `CLADE_FIXED_FRACTION` and
+`MAJORITY_COTRAVELLER_FRACTION` live in `scripts/backgrounds.py` now, with a
+comment pointing back here.
+
+**The systematic scan is gone**, because the figure panel it drew has been
+retired. That takes `permutation_scan_test`, `PermutationScan`,
+`benjamini_hochberg`, `MIN_FAMILY_EVENTS`, `DRAWS_PER_BATCH`, `count_parents`,
+`count_clades` and the `scipy.sparse` import with it.
+
+### Four divergences, so this module does not diff clean
+
+The three earlier vendored modules are code-identical to their source commits
+and only their comments differ. This one is not, and the module docstring says
+so at the top rather than leaving a reader to discover it.
+
+**1. The shared translation.** `PoolSpec.matches` calls
+`dasm2.sequence.conversion.translate_codon` where the source built its own
+exact-64-codon `_CODON_TO_RESIDUE` from `dasm2.codon_table`. The source's own
+note on `pool_average_log_sf` warns that a second table "would disagree with the
+shared one on N-containing codons, which BioPython resolves when the ambiguity
+is synonymous". Every other consumer in this repository — `substitution_mass`,
+`founder_background_fraction`, `founders.py` — uses the shared one, and a figure
+whose background frequencies and pool membership disagreed about `GGN` would
+lose those parents from one side only. The `dasm2.codon_table` and
+`AA_STR_SORTED` imports went with the table.
+
+**2. `chunk_rows` is required.** The source defaulted it to
+`DEFAULT_CHUNK_ROWS = 50_000`, whose comment says it exists to match a screen
+script that is not in this repository. Callers pass
+`panel_spec.PCP_CHUNK_ROWS`, which is this pipeline's one spelling for the
+same idea. `load_annotations`' own bare `500_000` is named
+`ANNOTATION_CHUNK_ROWS`.
+
+**3. `permutation_shift_test` is two-sided.** The source takes the tail on
+whichever side of zero the *observed* statistic fell, and its docstring
+justifies that by the marker having been chosen by the model, "so the direction
+is fixed before the counts are consulted". The implementation never did what
+that argument describes — `reaches = null <= observed if observed < 0 else null
+>= observed` reads the sign off the observed counts statistic, which is a tail
+chosen after the fact — and under the frequency rule the premise is gone too.
+The test asks whether a counts shift this large is likely to arise by chance,
+and nothing fixes a direction in advance.
+
+**4. `tally_pcps` serves every candidate of a clade in one pass.** The source
+took a single `focal_site` and `focal_mutant`, so 22D's seven candidates would
+have cost seven streaming reads of a 112 MB corpus to collect seven columns over
+the same branches. The synonymous count does not depend on the candidate, so the
+shared work is done once and the frame gains a `candidate` column.
+
+### The era seam
+
+A third seam beside "No manifest resolution" and "No checkpoint discovery".
+
+**No mat-pcp era module.** Upstream `measure_shift.py` calls
+`load_era_module(args.mat_pcp_root)` and `era_for_clade(clade)`, importing
+mat-pcp's `workflow/modules/era.py` to decide which fitted rate table a clade's
+expected counts are built from. This pipeline owns that partition:
+`data/eras-pre-omicron-omicron.yaml` is generated from the run's own
+`glm/era_fit_summary.csv` and `config.yaml` records that "the era partition is
+viral-dasm's own choice… these are the inputs it picks between, not the
+partition itself". `panel_spec.era_of_clade` reads it, and
+`lib.master_table_path` turns the answer into a path.
+
+It is in `panel_spec.py` rather than `lib.py` for a reason worth recording:
+every training rule declares `lib.py` as an input, so a helper added there puts
+the seven runs out of date and `snakemake -n figures` schedules `train`.

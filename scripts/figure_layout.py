@@ -26,7 +26,7 @@ GISAID-derived: the panels this places are rendered from mat-pcp counts and
 live under the artifact root. Nothing here reads or writes data.
 """
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -152,6 +152,42 @@ def load_panels(
         letter: mpimg.imread(panel_dir / f"{stem}.png")
         for letter, stem in panel_files.items()
     }
+
+
+def pad_to_common_width(
+    panels: MutableMapping[str, np.ndarray], keys: Sequence[str]
+) -> int:
+    """Widen each of `keys` to the widest of them, with transparent pixels.
+
+    For a figure whose rows are placed left justified. A row's second panel
+    starts wherever its first one ends, so panels in the *first* column that
+    are not the same width put every panel in the second column at a
+    different x -- and a column of panels that do not share a left edge does
+    not read as a column.
+
+    The widths differ for reasons that belong to the panel and not to the
+    figure: `fig:within_clade_shifts`' three scatters draw their callout
+    labels outside the plot where they fit and inside it where they do not,
+    so 22D's is the widest of the three by the width of a label column.
+    Padding is the fix that leaves both panels alone -- the pixels added are
+    transparent, so the panel moves without anything being drawn, and
+    nothing in either renderer has to know what it is being composed beside.
+
+    Mutates `panels` in place and returns the common width, in pixels.
+    """
+    width = max(panels[key].shape[1] for key in keys)
+    for key in keys:
+        image = panels[key]
+        short = width - image.shape[1]
+        if short > 0:
+            panels[key] = np.concatenate(
+                [
+                    image,
+                    np.zeros((image.shape[0], short, image.shape[2]), image.dtype),
+                ],
+                axis=1,
+            )
+    return width
 
 
 #: The spacing every composed figure uses unless a caller passes its own.

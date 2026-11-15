@@ -16,12 +16,51 @@ declared output the path the notebook actually writes.
 from __future__ import annotations
 
 import csv
+import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from lib import ARTIFACT_ROOT, REPO_ROOT, TEX_FIGURE_DIR
+
+#: The committed era partition: which clades each era's GLM was fitted over.
+#: `workflow/corpus.smk` spells this too, for the rule that renders the map.
+#:
+#: **Here rather than in `scripts/lib.py`, deliberately.** Every training rule
+#: declares `lib.py` as an input, so a helper added there puts the seven runs
+#: out of date and `snakemake -n figures` schedules `train` -- which is the one
+#: thing this pipeline must never do for a figure. This module is declared by
+#: the figure rules and by nothing upstream of them.
+#:
+#: The partition is viral-dasm's own choice, and reading it here rather than
+#: importing mat-pcp's `era.py` is the seam `dasm2/PROVENANCE.md` records.
+ERA_TEMPLATE = REPO_ROOT / "data" / "eras-pre-omicron-omicron.yaml"
+
+
+def era_of_clade(clade: str) -> str:
+    """Which era's fitted rate table a clade's expected counts are built from.
+
+    ``yaml`` is imported in the body rather than at module scope: this module
+    is parsed on every snakemake invocation, a dry run included, and its job
+    is to stay cheap enough that a `.smk` can read a path out of it.
+
+    Raises:
+        KeyError: If the clade is in no era. Defaulting would silently price a
+            clade's opportunity off the wrong fit, which reads downstream as
+            the model getting that clade wrong.
+    """
+    import yaml
+
+    spec = yaml.safe_load(ERA_TEMPLATE.read_text())
+    for era, body in spec["eras"].items():
+        if clade in body["clades"]:
+            return era
+    raise KeyError(
+        f"{clade} is in no era of {ERA_TEMPLATE}, so there is no fitted rate "
+        f"table for its expected counts."
+    )
+
 
 #: Where the panel images go: under the artifact root, not in the tree. A panel
 #: is a rebuildable picture of the CSV committed beside it, and `README.md`'s
@@ -113,29 +152,21 @@ LOOKUP_MUTATION = "F456L"
 # `fig:within_clade_shifts`
 # ---------------------------------------------------------------------------
 
+#: Rows per chunk when streaming the PCP corpus. The file is 112 MB gzipped
+#: and every row carries a 3,819-nucleotide parent, so it is read in pieces
+#: and reduced as it goes rather than held.
+#:
+#: Here rather than in `scripts/panels.py`, which is where it used to live:
+#: four modules now stream the corpus, and this one is stdlib-only, so a
+#: `.smk` can read it without pulling pandas into a dry run. `panels`
+#: re-exports it, so `from panels import PCP_CHUNK_ROWS` still resolves.
+PCP_CHUNK_ROWS = 200_000
+
 #: The clades that figure's rows cover, in the order the figure reads: the
 #: three at the head of the outlier ranking. Separate from
 #: :data:`SHIFT_CLADES`, which is `fig:agreement`'s cross-clade pairing and
 #: whose consumers would change meaning if these were added to it.
 CANDIDATE_CLADES: tuple[str, ...] = ("22D", "20B", "21K")
-
-#: The clades the scan's panel row draws, in the order the row reads. The scan
-#: axis is ten clades and the readout seven; these five are the seven minus
-#: :data:`CANDIDATE_CLADES`, which panels A and B already cover.
-SCAN_CLADES: tuple[str, ...] = ("21J", "22B", "21L", "21K", "20I")
-
-#: The rung the scan's panel is drawn at. One rung, not a sweep: the saved
-#: panel is written only at the lowest of the scan's three cutoffs, because
-#: letting another setting overwrite it is how a composed figure comes to
-#: disagree with its own caption.
-#:
-#: **Deliberately not tied to `PANEL_MIN_COUNT` or `COUNT_LADDER`, which hold
-#: the same number.** This counts a cell's pooled *events* across two
-#: backgrounds of one clade; those count a mutation's actual-or-expected
-#: occurrences in a clade. Different numerators over different denominators,
-#: equal at 10 today, with no reason to move together. It is also not the
-#: corroboration gate's own 20-event floor.
-SCAN_MIN_EVIDENCE = 10
 
 #: The candidate list panels A and B share, as tracked data rather than two
 #: hand-maintained lists. Moving a candidate off the figures is one edit that
@@ -192,6 +223,66 @@ SCORED_DIR = ARTIFACT_ROOT / "scored"
 #: on `(model, clade)` alone -- a haplotype row sharing it would be pooled into
 #: every agreement panel with nothing saying so.
 HAPLOTYPE_TABLE = SCORED_DIR / "haplotype_selection_factors.parquet"
+
+#: Where the figure's clades get their distinct amino-acid parents enumerated.
+#: Under the artifact root: a row is a Spike haplotype, so it is
+#: GISAID-derived. `scripts/clade_haplotypes.py` writes it and
+#: `rule score_haplotypes` scores it.
+CLADE_HAPLOTYPE_TABLE = ARTIFACT_ROOT / "backgrounds" / "clade_haplotypes.parquet"
+
+#: Where the pooled counts land: one row per (clade, candidate, pool, cell)
+#: and one per (clade, candidate) shift, plus the randomization test. Under
+#: the artifact root for the same reason -- a pool is named by the parents it
+#: holds -- with the per-panel CSVs under `results/` carrying only labels.
+POOL_DIR = ARTIFACT_ROOT / "pools"
+POOL_CELLS = POOL_DIR / "pool_cells.parquet"
+POOL_SHIFTS = POOL_DIR / "pool_shifts.parquet"
+POOL_SUMMARY = POOL_DIR / "pool_summary.json"
+
+
+#: ``<founder><site><mutant>``, e.g. ``D574V``. A candidate is named against
+#: the clade founder, which is why a consumer wants the pieces: on a haplotype
+#: that already differs from the founder at that site, the mutation's own
+#: string is spelled differently and a string match would miss it.
+MUTATION_RE = re.compile(r"^([A-Z])(\d+)([A-Z])$")
+
+
+def parse_mutation(text: str) -> tuple[str, int, str]:
+    """``"D574V"`` -> ``("D", 574, "V")``, the founder residue, 1-based site
+    and mutant residue.
+
+    One spelling, because two consumers need it -- the scorer, to pick the
+    cells of a haplotype's grid, and the counts side, to build the at-risk
+    requirement -- and a site read one-based in one place and zero-based in
+    the other is the error this exists to make impossible.
+    """
+    match = MUTATION_RE.match(text)
+    if match is None:
+        raise ValueError(
+            f"{text!r} is not a mutation of the form D574V (founder residue, "
+            f"1-based amino acid site, mutant residue)."
+        )
+    return match.group(1), int(match.group(2)), match.group(3)
+
+
+def candidate_cells() -> dict[str, tuple[tuple[int, str], ...]]:
+    """``{clade: ((aa_site, mutant_aa), ...)}`` for every candidate.
+
+    Every candidate, not only the ones drawn: the designed null and the
+    held-back nomination are measured through the same pipeline, which is
+    what makes them a null and a comparison rather than two rows nobody ran.
+
+    Keyed on ``(site, residue)`` rather than on the mutation string, which is
+    what a haplotype's grid can actually be indexed by.
+    """
+    cells: dict[str, list[tuple[int, str]]] = {}
+    for clade, mutation in [
+        *figure_candidates(),
+        *((clade, mutation) for clade, mutation, _ in off_figure_candidates()),
+    ]:
+        _, site, mutant = parse_mutation(mutation)
+        cells.setdefault(clade, []).append((site, mutant))
+    return {clade: tuple(sorted(set(v))) for clade, v in cells.items()}
 
 
 def figure_candidates() -> tuple[tuple[str, str], ...]:
@@ -339,8 +430,45 @@ OUTLIER_MIN_DIFFERENCE = 2.0
 #: but it is written through the same `write_panel_csv` choke point, so it
 #: carries the filter spec in its columns like every other tracked table here.
 OUTLIER_TABLE_STEM = "table_s1_outlier_ranking"
-BACKGROUND_PANELS = ("panel_b_background_effects",)
-SCAN_PANELS = ("panel_c_clade_row",)
+#: `fig:within_clade_shifts`' right-hand column: one stem per clade, paired
+#: with that clade's `OUTLIER_PANELS` stem. One image per clade rather than
+#: one of all three, for the reason `OUTLIER_PANELS` gives -- the composed
+#: figure puts each clade's pair on its own row, and a single image cannot be
+#: split across rows.
+BACKGROUND_PANELS = tuple(f"panel_b_backgrounds_{clade}" for clade in CANDIDATE_CLADES)
+
+#: `fig:within_clade_shifts`' stem, which is its LaTeX label: `main.tex`
+#: includes `figures/within_clade_shifts.pdf`. One spelling, so the file the
+#: manuscript includes and the file this pipeline writes cannot drift.
+SHIFT_FIGURE_STEM = "within_clade_shifts"
+
+#: Which panels sit on which row, left to right. Three rows of two: each
+#: clade's scatter beside that clade's background row. The keys are the
+#: letters drawn on the figure, which is also the order the caption reads.
+#:
+#: This is why both halves are written one image per clade rather than one
+#: image of all three -- a single stacked image cannot be split across rows.
+SHIFT_FIGURE_ROWS: tuple[tuple[str, ...], ...] = (("A", "B"), ("C", "D"), ("E", "F"))
+
+#: Which panel stem each letter is. Derived nowhere: a letter is a caption
+#: fact and a stem is a filename, and nothing in either implies the other.
+#: Built from :data:`CANDIDATE_CLADES` so the row order is the figure's one
+#: spelling of it, and a clade added there cannot be given a scatter and no
+#: background row.
+SHIFT_PANEL_LETTERS: dict[str, str] = {
+    letter: stem
+    for clade_index, _clade in enumerate(CANDIDATE_CLADES)
+    for letter, stem in (
+        ("ACE"[clade_index], OUTLIER_PANELS[clade_index]),
+        ("BDF"[clade_index], BACKGROUND_PANELS[clade_index]),
+    )
+}
+
+#: The box this figure has to fit inside, in inches. Taller than
+#: `fig:agreement`'s: three rows rather than two, and each row carries a
+#: scatter whose square aspect sets the row height.
+SHIFT_BOX_IN: tuple[float, float] = (7.5, 9.0)
+SHIFT_FIGURE_SCALE = 1.0
 
 #: The columns the panels read. Named rather than taken whole: the table is
 #: 1,425,760 rows per run over 24 columns, and the pooled `*_all` half,
@@ -412,14 +540,18 @@ FIGURE_SCALE = 0.9
 PANEL_TITLE_PX = 18
 
 
-def composed_path(selection: str, extension: str) -> Path:
-    """Where one selection's composed figure goes, in one format."""
-    return figure_dir(selection) / f"{FIGURE_STEM}.{extension}"
+def composed_path(selection: str, extension: str, stem: str = FIGURE_STEM) -> Path:
+    """Where one selection's composed figure goes, in one format.
+
+    ``stem`` defaults to `fig:agreement`'s, which is what every existing
+    caller means; `fig:within_clade_shifts` passes its own.
+    """
+    return figure_dir(selection) / f"{stem}.{extension}"
 
 
-def composed_paths(selection: str) -> list[Path]:
+def composed_paths(selection: str, stem: str = FIGURE_STEM) -> list[Path]:
     """One selection's composed figure, in every format it is written in."""
-    return [composed_path(selection, ext) for ext in COMPOSED_FORMATS]
+    return [composed_path(selection, ext, stem) for ext in COMPOSED_FORMATS]
 
 
 def tex_figure_dir(selection: str) -> Path | None:

@@ -114,9 +114,14 @@ ENTRY_POINTS = {
     "compose_agreement": "notebooks/agreement.py",
     "within_clade_outliers": "notebooks/within_clade_outliers.py",
     "outlier_ranking": "notebooks/outlier_ranking.py",
-    # `clade_backgrounds` arrived with the frequency rule and runs a script
-    # rather than a notebook, like the producers above the panel block.
+    "background_effects": "notebooks/background_effects.py",
+    "compose_within_clade_shifts": "notebooks/within_clade_shifts.py",
+    # `fig:within_clade_shifts`' producers. These run scripts rather than
+    # notebooks, like the producers above the panel block.
     "clade_backgrounds": "scripts/backgrounds.py",
+    "clade_haplotypes": "scripts/clade_haplotypes.py",
+    "score_haplotypes": "scripts/score_haplotypes.py",
+    "pool_counts": "scripts/pool_counts.py",
 }
 
 #: Rules that execute nothing. Asserted, not asserted-by-assertion: each must

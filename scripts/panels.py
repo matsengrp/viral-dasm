@@ -90,6 +90,7 @@ from founders import founder_aa_sequences
 # pyarrow to learn five file names.
 from panel_spec import (  # noqa: F401  (re-exported for the notebooks)
     ARM,
+    BACKGROUND_PANELS,
     CANDIDATE_CLADES,
     CANDIDATE_CSV,
     CANDIDATE_LABEL_SIDES,
@@ -107,6 +108,7 @@ from panel_spec import (  # noqa: F401  (re-exported for the notebooks)
     OUTLIER_TABLE_STEM,
     PANEL_CSV_DIR,
     PANEL_MIN_COUNT,
+    PCP_CHUNK_ROWS,
     SCATTER_CLADE,
     SELECTIONS,
     SHIFT_CLADES,
@@ -115,6 +117,7 @@ from panel_spec import (  # noqa: F401  (re-exported for the notebooks)
     figure_dir,
     labelled_candidates,
     panel_csv_path,
+    parse_mutation,
     selection_models,
 )
 
@@ -142,6 +145,10 @@ from dasm2.analysis.viral_fitness_eval import (  # noqa: F401  (re-exported)
     shift_pair_metrics,
     within_clade_count_ladder,
     within_clade_metrics,
+)
+from dasm2.analysis.within_clade_pools import (
+    DEFAULT_PERMUTATIONS,
+    ZERO_COUNT_PSEUDOCOUNT,
 )
 from dasm2.io import read_fasta_first_sequence
 from dasm2.neutral.scov2_rates import GENE_NT_LENGTH
@@ -339,12 +346,6 @@ def drop_unobservable_codons(frame: pd.DataFrame, clade: str) -> pd.DataFrame:
     if not codons:
         return frame
     return frame[~frame["aa_site"].isin(codons)]
-
-
-#: Rows per chunk when streaming the PCP corpus. The file is 112 MB gzipped
-#: and every row carries a 3,819-nucleotide parent, so it is read in pieces
-#: and reduced as it goes rather than held.
-PCP_CHUNK_ROWS = 200_000
 
 
 def founder_background_fraction(
@@ -698,6 +699,49 @@ def write_panel_csv(
             f"{stem}'s frame already carries {collisions}, which the filter "
             f"spec would overwrite. A panel's own column wins: rename the "
             f"spec's field rather than letting `assign` replace the data."
+        )
+    path = panel_csv_path(selection, stem)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frame.assign(**columns).to_csv(path, index=False)
+    return path
+
+
+def write_pool_csv(frame: pd.DataFrame, stem: str, *, selection: str) -> Path:
+    """Write one background panel's table, with its own provenance columns.
+
+    **Not** :func:`write_panel_csv`. That stamps a :class:`FilterSpec`, which
+    describes the agreement figure's filter chain -- a fitness metric, a count
+    cutoff, a clip at -4, a clade-mutation floor. None of them is true of a
+    pooled count: the estimate is ``log(actual / expected)`` over one
+    background's branches, unclipped, with no count cutoff and no clade floor.
+    Stamping that spec here would tell a reader the numbers were clipped when
+    they were not, which is exactly why `FilterSpec` dropped its
+    ``exclude_masked`` field rather than write ``True`` into panels carrying
+    masked sites.
+
+    What these tables do have is a provenance worth recording, and it is a
+    different list: the pseudocount convention, the randomization test's draw
+    count and sidedness, and where the two backgrounds came from.
+    """
+    columns = {
+        # Withheld except where a mutation is never observed on a background.
+        # In a sub-pool the expected counts run 0.01 to 1, so a two-sided
+        # pseudocount collapses the estimate onto a function of the event
+        # count with the expected count edited out.
+        "pool_zero_count_pseudocount": ZERO_COUNT_PSEUDOCOUNT,
+        "pool_permutation_draws": DEFAULT_PERMUTATIONS,
+        # Two-sided: the test asks whether a counts shift this large arises by
+        # chance, and nothing fixes a direction in advance.
+        "pool_permutation_sided": "two",
+        # No model has a say in which backgrounds are contrasted, which is
+        # what makes the comparison a test rather than a restatement.
+        "pool_background_source": "branch frequency",
+    }
+    collisions = sorted(set(columns) & set(frame.columns))
+    if collisions:
+        raise ValueError(
+            f"{stem}'s frame already carries {collisions}, which the pool "
+            f"provenance would overwrite."
         )
     path = panel_csv_path(selection, stem)
     path.parent.mkdir(parents=True, exist_ok=True)

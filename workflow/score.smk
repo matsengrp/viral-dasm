@@ -25,7 +25,14 @@ What is tracked is the single run the manuscript cites -- see
 """
 
 from lib import FITNESS_SUFFIX, FULL_DEPTH
-from panel_spec import FIGURE_MODEL
+from panel_spec import (
+    ARM,
+    CANDIDATE_CLADES,
+    CANDIDATE_CSV,
+    CLADE_HAPLOTYPE_TABLE,
+    FIGURE_MODEL,
+    HAPLOTYPE_TABLE,
+)
 from runs import SCORE_MEM_MB
 
 SCORED_DIR = f"{ARTIFACT_ROOT}/scored"
@@ -71,6 +78,17 @@ PUBLISHED_TABLE = f"results/selection_factors/{PUBLISHED_RUN}.parquet"
 def founder_fastas(*_):
     """Every clade founder FASTA under ``clade_founders_dir``."""
     return sorted(str(p) for p in mat_pcp_path("clade_founders_dir").glob("*.fa"))
+
+
+def background_clade_founders(*_):
+    """The founders `clade_haplotypes` compares its parents against.
+
+    The figure's three clades rather than all 56, because that is what the
+    rule reads: naming the rest would re-enumerate the haplotypes whenever an
+    unrelated clade's founder was re-released.
+    """
+    root = mat_pcp_path("clade_founders_dir")
+    return [str(root / f"{clade}.fa") for clade in CANDIDATE_CLADES]
 
 
 def per_clade_fitness_tables(*_):
@@ -247,3 +265,130 @@ rule publish_scored_table:
         table=PUBLISHED_TABLE,
     shell:
         "cp {input.table} {output.table}"
+
+
+# ---------------------------------------------------------------------------
+# `fig:within_clade_shifts`' model half
+# ---------------------------------------------------------------------------
+
+#: The haplotypes the figure's clades hold, and their scores. Both under the
+#: artifact root rather than tracked `results/`: a row is a Spike haplotype,
+#: so both are GISAID-derived. The tracked per-panel CSVs name a background by
+#: its residues and carry no sequence.
+CLADE_HAPLOTYPES = str(CLADE_HAPLOTYPE_TABLE)
+HAPLOTYPE_SCORES = str(HAPLOTYPE_TABLE)
+
+
+rule clade_haplotypes:
+    """Every distinct amino-acid parent of the three clades the figure draws.
+
+    The DASM side of panels B, D and F is the pool average -- the mean log
+    selection factor over the haplotypes a background contains, weighted by
+    each one's synonymous events -- so the model has to score every haplotype
+    a pool might hold. `pool_average_log_sf` raises on one it was not given,
+    rather than averaging over the intersection, and the clade's whole
+    distinct-parent set is the only superset of both pools that is known
+    before the counts pass runs.
+
+    Its own rule, ahead of the scoring, so the scoring rule does not depend on
+    the counts rule: 7,549 of the 8,693 haplotypes sit in a pool, and chasing
+    that 13% would buy the dependency this DAG is arranged to avoid.
+    """
+    input:
+        script="scripts/clade_haplotypes.py",
+        founder_reader="scripts/founders.py",
+        spec="scripts/panel_spec.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        pools="dasm2/analysis/within_clade_pools.py",
+        conversion="dasm2/sequence/conversion.py",
+        io="dasm2/io.py",
+        scov2_rates="dasm2/neutral/scov2_rates.py",
+        dasm2_init="dasm2/__init__.py",
+        # No `candidates`: this rule enumerates every parent haplotype of the
+        # three clades and never reads the candidate list, taking only
+        # `CANDIDATE_CLADES` from `panel_spec`. Declaring the CSV made adding
+        # or reclassifying a candidate re-stream the corpus here and then
+        # cascade into `score_haplotypes`, which is forty minutes, for a file
+        # the script does not open. `rule score_haplotypes` below does read
+        # it, through `candidate_cells`, and declares it.
+        pcps=str(corpus(ARM).source_pcp),
+        clade_founders=background_clade_founders,
+    output:
+        table=CLADE_HAPLOTYPES,
+    log:
+        f"{ARTIFACT_ROOT}/logs/clade_haplotypes.log",
+    resources:
+        mem_mb=SCORE_MEM_MB,
+    shell:
+        "python {input.script} --pcp {input.pcps} --output {output.table}"
+        " > {log} 2>&1"
+
+
+rule score_haplotypes:
+    """Score the figure's model on every one of those haplotypes.
+
+    **No GPU, and deliberately so.** Measured on `dasm-1077k_full_depth`, one
+    1,273-residue Spike haplotype is 28.5 ms on CPU against 4.7 ms on an idle
+    card: 4.1 minutes against 0.7 for the whole set. A 3.4-minute saving does
+    not justify holding a card a training run could be using, and it is what
+    makes "no rule of this figure takes a card" true outright. So this rule
+    carries neither `resources: gpu=1` nor `rule score`'s `{TRAIN_ENV}`
+    thread pinning, which exists for jobs that share a node with training.
+
+    One model, not the seven and not both selections. `fidelity` costs no
+    rescoring for `fig:agreement`, which is one table and one `groupby`, but
+    here it would mean scoring 8,693 haplotypes under two more checkpoints
+    for a comparison no panel reads.
+
+    Its own output, **not** rows in `selection_factors.parquet`:
+    `tests/test_score_run.py` pins `background` empty across all of that
+    table and `panels.base_frames` filters on `(model, clade)` alone, so a
+    haplotype row sharing it would be pooled into every agreement panel with
+    nothing raising.
+    """
+    input:
+        script="scripts/score_haplotypes.py",
+        score_run="scripts/score_run.py",
+        gpu_slot="scripts/gpu_slot.py",
+        spec="scripts/panel_spec.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        analysis_viral="dasm2/analysis/viral.py",
+        analysis_eval="dasm2/analysis/viral_fitness_eval.py",
+        checkpoints="dasm2/serialization/checkpoints.py",
+        masking="dasm2/sequence/masking.py",
+        conversion="dasm2/sequence/conversion.py",
+        constants="dasm2/sequence/constants.py",
+        head_types="dasm2/heads/types.py",
+        core_base="dasm2/models/core/base.py",
+        factory="dasm2/models/factory.py",
+        io="dasm2/io.py",
+        scov2_rates="dasm2/neutral/scov2_rates.py",
+        dasm2_init="dasm2/__init__.py",
+        candidates=str(CANDIDATE_CSV),
+        haplotypes=CLADE_HAPLOTYPES,
+        censored=mat_pcp_path("censored_mutations_file"),
+        clades=mat_pcp_path("censored_clades_file"),
+        masked=mat_pcp_path("masked_nt_sites_file"),
+        # The marker and its guard, as `rule score` declares them: a run that
+        # stopped anywhere but the learning-rate floor must not reach a panel.
+        done=f"{RUN_DIR}/{PUBLISHED_RUN}/training_complete.done",
+        run_guard=f"{ARTIFACT_ROOT}/run_guard/{PUBLISHED_RUN}.json",
+    output:
+        table=HAPLOTYPE_SCORES,
+    params:
+        outdir=f"{RUN_DIR}/{PUBLISHED_RUN}",
+    log:
+        f"{ARTIFACT_ROOT}/logs/score_haplotypes.log",
+    resources:
+        mem_mb=SCORE_MEM_MB,
+    shell:
+        "python {input.script}"
+        " --model {FIGURE_MODEL}"
+        " --corpus {FULL_DEPTH.name}"
+        " --run-dir {params.outdir}"
+        " --backgrounds {input.haplotypes}"
+        " --output {output.table}"
+        " --device cpu"
+        " > {log} 2>&1"

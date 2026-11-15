@@ -1,0 +1,5 @@
+clade,candidate,background,background_order,aa_site,clade_founder_aa,mutant_aa,n_pcps,synonymous_observed,actual,expected,counts_effect,se,dasm_effect,p_label,pool_zero_count_pseudocount,pool_permutation_draws,pool_permutation_sided,pool_background_source
+20B,D1259H,"T478, P681, T732",0,1259,D,H,26126,10218,2,0.69283104410224,1.0601162936813808,0.6324555320336759,3.980828129535298,p < 1e-4,0.5,10000,two,branch frequency
+20B,D1259H,"K478, H681, A732",1,1259,D,H,3407,1276,130,0.08651912431732807,7.314924249563026,0.0875376219064817,7.407772445019683,p < 1e-4,0.5,10000,two,branch frequency
+20B,E1258D,"T478, P681, T732",0,1258,E,D,26099,10205,12,3.602971673191348,1.203147680059237,0.282842712474619,1.5764548913761196,p < 1e-4,0.5,10000,two,branch frequency
+20B,E1258D,"K478, H681, A732",1,1258,E,D,3290,1258,321,0.4441487863669492,6.583036791384812,0.055771138653316045,7.155634132622534,p < 1e-4,0.5,10000,two,branch frequency

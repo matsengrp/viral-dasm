@@ -56,6 +56,20 @@ MASKED_SITE = 7
 CENSORED_SITE = 11
 DIRECTIONAL_SITE = 13
 
+#: The sites these tests score, and every residue at each of them.
+#:
+#: The producer scores the cells it is asked for rather than the whole
+#: ``[L, 20]`` grid -- a panel reads a handful of cells and the grid is 25,460
+#: rows that the source's cache never evicts. So the fixture has to name
+#: cells, and it names all twenty residues at each site: that gives exactly
+#: one synonymous row per site per haplotype, which is what
+#: :func:`test_each_row_agrees_with_its_own_parent_residue` counts, and it
+#: leaves :func:`test_the_split_site_is_what_moved` a spread of sites to find
+#: the moved one among.
+SCORED_SITES = sorted(
+    {MASKED_SITE, CENSORED_SITE, DIRECTIONAL_SITE, SPLIT_SITE, 100, 200, 300, 600}
+)
+
 
 def ci_run_dir() -> Path:
     """The baseline's run directory, or skip.
@@ -109,9 +123,14 @@ def scored_two_backgrounds(two_backgrounds) -> pd.DataFrame:
     source = score_haplotypes.SelectionFactorSource(
         {(lib.GENE, CI_RUN): lib.select_checkpoint(run_dir)}, "cpu"
     )
+    from dasm2.sequence.constants import AA_STR_SORTED
+
+    cells = [(site, aa) for site in SCORED_SITES for aa in AA_STR_SORTED]
     try:
-        frames = [
-            score_haplotypes.score_haplotype(
+        rows = [
+            row
+            for label, sequence in (("founder", founder), ("alternative", alternative))
+            for row in score_haplotypes.score_haplotype(
                 source,
                 gene=lib.GENE,
                 run_id=CI_RUN,
@@ -120,15 +139,15 @@ def scored_two_backgrounds(two_backgrounds) -> pd.DataFrame:
                 aa_sequence=sequence,
                 model="ci-484k",
                 corpus="full_depth",
+                cells=cells,
                 masked={MASKED_SITE},
                 censored={CENSORED_SITE},
                 censored_directional={DIRECTIONAL_SITE},
             )
-            for label, sequence in (("founder", founder), ("alternative", alternative))
         ]
     finally:
         source.release()
-    return pd.concat(frames, ignore_index=True)
+    return pd.DataFrame(rows, columns=list(score_haplotypes.OUTPUT_COLUMNS))
 
 
 @pytest.fixture(scope="module")

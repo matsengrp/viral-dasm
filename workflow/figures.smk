@@ -40,6 +40,7 @@ effects and selection factors are publishable; no panel carries a sequence.
 from panel_spec import (
     ARM,
     BACKGROUND_CSV,
+    BACKGROUND_PANELS,
     CANDIDATE_CSV,
     DEFAULT_SELECTION,
     LADDER_PANELS,
@@ -48,6 +49,12 @@ from panel_spec import (
     OUTLIER_TABLE_STEM,
     PANEL_LETTERS,
     PANEL_MEM_MB,
+    SHIFT_BOX_IN,
+    SHIFT_FIGURE_STEM,
+    SHIFT_PANEL_LETTERS,
+    POOL_CELLS,
+    POOL_SHIFTS,
+    POOL_SUMMARY,
     SELECTIONS,
     SHIFT_CLADES,
     composed_paths,
@@ -358,6 +365,111 @@ rule clade_backgrounds:
         " > {log} 2>&1"
 
 
+rule pool_counts:
+    """The counts half of `fig:within_clade_shifts`' panels B, D and F.
+
+    For every candidate mutation, its effect in each of its clade's two
+    backgrounds, the shift between them, and a randomization test of that
+    shift. Two streaming passes per clade rather than two per candidate:
+    `tally_pools` serves every pool in one and `tally_pcps` every candidate
+    in the other.
+
+    **No checkpoint and no card.** The split comes from branch frequencies
+    and the counts from the corpus, so nothing the model produces reaches the
+    pools or the p-value -- which is what makes the panel a test of the DASM
+    rather than a restatement of it. The scored haplotypes are an input
+    because the panel draws both estimates from one table, not because the
+    counts depend on them.
+    """
+    input:
+        script="scripts/pool_counts.py",
+        haplotype_reader="scripts/clade_haplotypes.py",
+        founder_reader="scripts/founders.py",
+        spec="scripts/panel_spec.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        pools="dasm2/analysis/within_clade_pools.py",
+        conversion="dasm2/sequence/conversion.py",
+        io="dasm2/io.py",
+        scov2_rates="dasm2/neutral/scov2_rates.py",
+        dasm2_init="dasm2/__init__.py",
+        candidates=str(CANDIDATE_CSV),
+        backgrounds=str(BACKGROUND_CSV),
+        scores=str(HAPLOTYPE_TABLE),
+        # The era partition this pipeline owns, and both fitted rate tables
+        # it picks between. Declared by hand: `test_rule_inputs.py` finds
+        # only literal `mat_pcp_path(...)` calls, and these are reached
+        # through `lib.master_table_path(era)`, so a re-emitted rate table
+        # would otherwise leave the panels stale with nothing reporting it.
+        era_template="data/eras-pre-omicron-omicron.yaml",
+        rates_pre_omicron=str(mat_pcp_path("master_table_pre_omicron_file")),
+        rates_omicron=str(mat_pcp_path("master_table_omicron_file")),
+        annotations=str(mat_pcp_path("site_annotations_file")),
+        pcps=str(corpus(ARM).source_pcp),
+        clade_founders=clade_founder_fastas,
+    output:
+        cells=str(POOL_CELLS),
+        shifts=str(POOL_SHIFTS),
+        summary=str(POOL_SUMMARY),
+    log:
+        f"{ARTIFACT_ROOT}/logs/pool_counts.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "python {input.script}"
+        " --pcp {input.pcps}"
+        " --backgrounds {input.backgrounds}"
+        " --haplotype-scores {input.scores}"
+        " --cells {output.cells}"
+        " --shifts {output.shifts}"
+        " --summary {output.summary}"
+        " > {log} 2>&1"
+
+
+rule compose_within_clade_shifts:
+    """`fig:within_clade_shifts` itself, laid out from the six panels.
+
+    No scoring, no tallying and no table: it reads PNGs, the same split that
+    makes `fig:agreement` cheap to re-lay-out. The panels cost two corpus
+    passes per clade and a scoring run; the layout costs a second, so the
+    spacing can be nudged without re-measuring anything.
+
+    The manuscript copy is not a declared output, for the reason
+    `rule compose_agreement` gives: `tex_figure_dir` points outside both this
+    repository and the artifact root, and snakemake deletes a job's declared
+    outputs when it fails -- so naming it would hand a failed layout the
+    power to delete the figure currently in the paper. The notebook copies it
+    and says whether it did.
+    """
+    wildcard_constraints:
+        selection="|".join(SELECTIONS),
+    input:
+        layout="scripts/figure_layout.py",
+        spec="scripts/panel_spec.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        notebook="notebooks/within_clade_shifts.py",
+        # The PNGs only: `compose` reads raster, and declaring the SVGs too
+        # would make this rule rerun on a vector copy it never opens.
+        panels=[
+            str(figure_dir("{selection}") / f"{stem}.png")
+            for stem in SHIFT_PANEL_LETTERS.values()
+        ],
+    output:
+        html=f"{NOTEBOOK_DIR}/within_clade_shifts_{{selection}}.html",
+        figure=[
+            str(path) for path in composed_paths("{selection}", SHIFT_FIGURE_STEM)
+        ],
+    log:
+        f"{ARTIFACT_ROOT}/logs/compose_within_clade_shifts_{{selection}}.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "marimo export html {input.notebook} -o {output.html} --force"
+        " -- --selection {wildcards.selection}"
+        " > {log} 2>&1"
+
+
 rule figures:
     """Every composed figure of the paper, and so every panel beneath them.
 
@@ -374,8 +486,58 @@ rule figures:
             for selection in SELECTIONS
             for path in composed_paths(selection)
         ],
-        # `fig:within_clade_shifts`' panel A, which has no composition rule
-        # yet. Declared here rather than waiting for one: a panel nothing
-        # builds is a tracked table that quietly stops matching the code
-        # beside it, which is what happened to the `fidelity` selection.
-        panel_outputs(OUTLIER_PANELS, DEFAULT_SELECTION),
+        # `fig:within_clade_shifts`, and so its six panels beneath it. The
+        # published selection only: its expensive half is the haplotype
+        # scoring, which `fidelity` would triple for a comparison no panel
+        # reads -- unlike `fig:agreement`, where a second selection is one
+        # more pass over a table already in hand.
+        [
+            str(path)
+            for path in composed_paths(DEFAULT_SELECTION, SHIFT_FIGURE_STEM)
+        ],
+
+
+rule background_effects:
+    """`fig:within_clade_shifts` panels B, D and F: one row per clade.
+
+    Its own rule rather than a cell of `rule pool_counts`, which streams the
+    corpus twice: this reads two small tables and draws, so the layout can be
+    nudged and re-run in a second instead of re-tallying every pool to move a
+    panel.
+    """
+    wildcard_constraints:
+        selection="|".join(SELECTIONS),
+    input:
+        panels="scripts/panels.py",
+        spec="scripts/panel_spec.py",
+        charts="scripts/panel_charts.py",
+        founder_reader="scripts/founders.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        analysis_charts="dasm2/analysis/charts.py",
+        analysis_viral="dasm2/analysis/viral.py",
+        analysis_eval="dasm2/analysis/viral_fitness_eval.py",
+        io="dasm2/io.py",
+        conversion="dasm2/sequence/conversion.py",
+        scov2_rates="dasm2/neutral/scov2_rates.py",
+        dasm2_init="dasm2/__init__.py",
+        notebook="notebooks/background_effects.py",
+        candidates=str(CANDIDATE_CSV),
+        cells=str(POOL_CELLS),
+        shifts=str(POOL_SHIFTS),
+        clade_founders=clade_founder_fastas,
+        masked_nt_sites=str(mat_pcp_path("masked_nt_sites_file")),
+        reference=str(mat_pcp_path("reference_sequence_file")),
+    output:
+        html=f"{NOTEBOOK_DIR}/background_effects_{{selection}}.html",
+        panels=panel_outputs(BACKGROUND_PANELS, "{selection}"),
+    log:
+        f"{ARTIFACT_ROOT}/logs/background_effects_{{selection}}.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "marimo export html {input.notebook} -o {output.html} --force"
+        " -- --cells {input.cells}"
+        " --shifts {input.shifts}"
+        " --selection {wildcards.selection}"
+        " > {log} 2>&1"
