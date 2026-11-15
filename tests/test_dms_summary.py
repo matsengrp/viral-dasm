@@ -22,9 +22,11 @@ for _path in (REPO_ROOT, REPO_ROOT / "scripts"):
         sys.path.insert(0, str(_path))
 
 pd = pytest.importorskip("pandas")
+pearsonr = pytest.importorskip("scipy.stats").pearsonr
 
 import dms
 import dms_summary
+from dms_summary import DMS_COLUMN
 from panel_spec import DMS_PREDICTORS
 
 #: Enough cells per stratum for `within_clade_metrics`, which refuses below three.
@@ -32,25 +34,42 @@ _PER_STRATUM = 6
 
 
 def _cells() -> pd.DataFrame:
-    """One homolog's joined frame: both strata, both predictors scored."""
+    """One homolog's joined frame: both strata, every predictor scored.
+
+    The score columns are built per predictor rather than spelled out, so an arm
+    added to :data:`DMS_PREDICTORS` extends this file's coverage instead of
+    breaking its fixture. No two of them are the same function of the
+    measurement, which is the property that makes them tell each other apart:
+    columns that were affine copies of one vector would share every rank and
+    every coefficient, and a summary that swapped or mislabelled two predictors
+    would still pass. :func:`test_each_predictor_is_scored_from_its_own_column`
+    is what holds that property in place.
+    """
     rows = []
     for index in range(_PER_STRATUM):
         for stratum in (dms.SINGLE_NT, dms.MULTI_NT):
             site = index + 1 + (0 if stratum == dms.SINGLE_NT else 100)
-            rows.append(
-                {
-                    "aa_site": site,
-                    "mutant_aa": "ACDEFG"[index],
-                    "parent_aa": "M",
-                    "dms_cell_entry": float(index) - 2.0,
-                    "stratum": stratum,
-                    # Deliberately not equal to each other, and neither equal to
-                    # the measurement: a summary that correlated a column with
-                    # itself would score 1.0 everywhere and pass a shape check.
-                    "blosum62": float(index) * 0.5,
-                    "leaf_logfreq": float(-index),
-                }
-            )
+            row = {
+                "aa_site": site,
+                "mutant_aa": "ACDEFG"[index],
+                "parent_aa": "M",
+                "dms_cell_entry": float(index) - 2.0,
+                "stratum": stratum,
+            }
+            for offset, predictor in enumerate(DMS_PREDICTORS):
+                # Built from the loop's own `index`, not from the frame's row
+                # number: the rows interleave the two strata, so a positional
+                # expression would score a cell against another cell's index.
+                #
+                # Sign alternates and odd cells are nudged by an amount that
+                # grows with the predictor, which is what makes every column
+                # score differently. Sign alone stops being enough at three
+                # arms: the first and third would share it, and a swap between
+                # them would go unseen.
+                row[predictor] = (-1.0) ** offset * (
+                    float(index) + offset * (index % 2) * 0.9
+                )
+            rows.append(row)
     return pd.DataFrame(rows)
 
 
@@ -75,6 +94,36 @@ def test_all_is_the_union_of_the_two_strata_and_not_a_third_label():
         counts = rows.set_index("stratum")["n_mutations"]
         assert counts[dms.ALL] == counts[dms.SINGLE_NT] + counts[dms.MULTI_NT]
         assert counts[dms.ALL] == 2 * _PER_STRATUM, predictor
+
+
+def test_each_predictor_is_scored_from_its_own_column():
+    """A summary that read one predictor's scores under another's label.
+
+    Every row is well formed under a column mixup -- the keys, the counts and
+    the column set are all unchanged -- so nothing structural catches it.
+
+    **Asserting only that the coefficients differ is not enough**, which is the
+    trap this test was rewritten to escape: rotating the labels permutes a set
+    of distinct values into another set of distinct values, so a distinctness
+    check passes. Each predictor's coefficient is therefore compared against one
+    computed independently from the column that bears its name.
+    """
+    cells = _cells()
+    table = dms_summary.summarize({"BA.1": cells}, _manifests())
+    reported = table[table["stratum"] == dms.ALL].set_index("predictor")["pearson_r"]
+
+    for predictor in DMS_PREDICTORS:
+        expected = pearsonr(cells[predictor], cells[DMS_COLUMN]).statistic
+        assert reported[predictor] == pytest.approx(expected, abs=1e-12), (
+            f"{predictor} is reported at {reported[predictor]:+.6f} but its own "
+            f"column correlates at {expected:+.6f}: the table is carrying "
+            f"another predictor's score under this label"
+        )
+    # And the fixture must keep the labels telling apart, or the loop above
+    # would hold under a rotation that happened to be the identity on values.
+    assert len(set(reported.round(9))) == len(DMS_PREDICTORS), (
+        f"the fixture no longer distinguishes predictors: {dict(reported)}"
+    )
 
 
 def test_a_predictor_that_scored_nothing_fails_rather_than_shortening_the_table():

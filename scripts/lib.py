@@ -472,6 +472,52 @@ def dms_dataset(homolog: str) -> DmsDataset:
     )
 
 
+@dataclass(frozen=True)
+class AntigenModel:
+    """The published model the DMS comparison sets the DASM against.
+
+    Two digests and a path that is not one. ``checkpoint`` and ``parents`` are
+    files this repository carries, gated by md5 for the reason
+    :class:`DmsDataset`'s is: both are received rather than built, and a
+    changed one would move the table's antiGen row while the pipeline kept
+    running. ``checkout`` is the antiGen source tree, which is **not** carried
+    -- see ``config.yaml`` for why it is a path rather than a dependency --
+    and so has no digest here; what pins the code is the commit
+    ``data/antigen/PROVENANCE.md`` records.
+
+    ``cutoff`` is the rung of the authors' time-cutoff grid the checkpoint was
+    trained at, carried so a score's manifest can name it rather than leaving
+    a reader to read it out of a filename.
+    """
+
+    checkout: Path
+    checkpoint: Path
+    checkpoint_md5: str
+    parents: Path
+    parents_md5: str
+    cutoff: float
+
+
+def antigen_model() -> AntigenModel:
+    """`config.yaml`'s ``antigen`` block, with its two roots joined.
+
+    ``root`` is joined onto :data:`REPO_ROOT` exactly as
+    :func:`dms_dataset` joins ``dms.root``, and for the same reason: left
+    relative it would resolve against the working directory, which is correct
+    under snakemake and pytest and silently wrong anywhere else.
+    """
+    block = CONFIG["antigen"]
+    root = REPO_ROOT / block["root"]
+    return AntigenModel(
+        checkout=Path(block["checkout"]),
+        checkpoint=root / block["checkpoint"]["file"],
+        checkpoint_md5=str(block["checkpoint"]["md5"]),
+        parents=root / block["parents"]["file"],
+        parents_md5=str(block["parents"]["md5"]),
+        cutoff=float(block["cutoff"]),
+    )
+
+
 def cap_of(corpus_name: str) -> int:
     """The per-clade cap a thinned corpus's name records.
 
@@ -760,6 +806,27 @@ def _check_config() -> None:
                 f"against identical predictions and read as agreement."
             )
         seen_clades[dataset.clade] = homolog
+    # Both antiGen digests, for the reason the DMS ones are checked: each gates
+    # a file this repository carries but did not build, and a digest YAML
+    # coerced to a number -- or one of the right length in the wrong alphabet
+    # -- stops being a gate without stopping being a string.
+    antigen = antigen_model()
+    for field_name, digest in (
+        ("checkpoint", antigen.checkpoint_md5),
+        ("parents", antigen.parents_md5),
+    ):
+        if not _MD5_HEX.fullmatch(digest):
+            raise ValueError(
+                f"antigen.{field_name}.md5 is {digest!r}, which is not 32 "
+                f"lowercase hex characters. It is a gate here, not a label."
+            )
+    if not antigen.checkout.is_absolute():
+        raise ValueError(
+            f"antigen.checkout is {str(antigen.checkout)!r}. It names a tree "
+            f"outside this checkout, so it must be absolute: a relative one "
+            f"would resolve against the working directory and import whatever "
+            f"happened to sit there."
+        )
 
 
 _check_config()

@@ -107,6 +107,13 @@ figure from this checkout rather than reassembling its inputs. The conversion
 to this pipeline's columns, and each study's own filtering, are applied in
 `scripts/dms_published.py` where they can be read and tested.
 
+`data/antigen/` holds the same arrangement for the published model that
+comparison scores against: the antiGen checkpoint and the three sequences it is
+fed, pinned by md5 in `config.yaml`'s `antigen` block and documented in
+`data/antigen/PROVENANCE.md`. The antiGen source tree is **not** carried — it is
+reached through `antigen.checkout`, a path outside this repository — because its
+own `pyproject.toml` pins a newer torch than this pipeline runs.
+
 The trained checkpoints are parameters, not sequence, so they are published.
 Every figure depends on a checkpoint *path* that either a training rule or a
 fetch rule can supply, and the figures rebuild in minutes for a reader who is
@@ -260,17 +267,24 @@ It is a second model pair through the same code and a diff to read when this
 filter changes again, not a live claim about upstream.
 
 `snakemake dms_predictors` builds the part of the DMS comparison that reads no
-scored table at all: the two reference predictors, and the join the published
-models will land through. BLOSUM62 asks how much of a deep mutational scan a
+scored table at all: two reference predictors, the published model they put in
+context, and the join all three land through. BLOSUM62 asks how much of a deep mutational scan a
 general substitution matrix already explains. The leaf frequency reconstructs
 every one of a clade's tree leaves from its own root-to-tip mutation path,
 tallies residues per site, and scores a substitution by the log ratio of its
-residue's leaf count to the clade founder's at that site.
+residue's leaf count to the clade founder's at that site. antiGen is a published
+transformer, scored at the last rung of its authors' own time-cutoff grid — the
+only rung whose training split contains all three DMS parent sequences, so every
+cell is scored by a model that saw its background. It is fed the WH1 projection
+of the construct each assay expressed rather than the clade founder the other
+two score against; the two differ only at columns `load_dms` has already
+dropped, and `data/antigen/PROVENANCE.md` records why.
 
 | rule | what it produces |
 |---|---|
 | `dms_leaf_counts` | one clade's per-site residue tally over its own tree leaves |
 | `dms_blosum_scores` | BLOSUM62's score for every cell one assay measured |
+| `dms_antigen_scores` | antiGen's log probability for every cell one assay measured |
 | `dms_leaf_scores` | the leaf frequency's score for every cell one assay measured |
 | `dms_predictor_summary` | the DMS predictor table: each predictor against the DMS, per homolog and stratum |
 

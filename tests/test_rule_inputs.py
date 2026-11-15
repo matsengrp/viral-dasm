@@ -126,6 +126,7 @@ ENTRY_POINTS = {
     # be drawn from.
     "dms_leaf_counts": "scripts/dms_leaf_freq.py",
     "dms_blosum_scores": "scripts/dms_blosum.py",
+    "dms_antigen_scores": "scripts/dms_antigen.py",
     "dms_leaf_scores": "scripts/dms_leaf_scores.py",
     "dms_predictor_summary": "scripts/dms_summary.py",
     # `fig:within_clade_shifts`' producers. These run scripts rather than
@@ -151,6 +152,36 @@ AGGREGATORS = (
     "dms",
     "dms_predictors",
 )
+
+
+def test_the_antigen_rule_declares_the_files_config_names_for_it():
+    """The two inputs this file's own parser cannot see.
+
+    Every other data input in `workflow/figures.smk` is either a literal string
+    or a ``mat_pcp_path("key")`` call, and both are checked elsewhere here. The
+    antiGen checkpoint and its query FASTA arrive as
+    ``str(antigen_model().checkpoint)`` and ``.parents`` -- attribute reads on a
+    call, which :func:`_literal_strings` drops and which no ``mat_pcp`` key
+    names -- so **nothing else in this suite would notice if the two
+    declarations were deleted**. The rule would keep running and would silently
+    stop tracking a model whose bytes decide what the table reports.
+
+    Read as source text rather than resolved, so the check holds whatever those
+    paths point at on the host running it.
+    """
+    source = (REPO_ROOT / "workflow" / "figures.smk").read_text()
+    marker = "rule dms_antigen_scores:"
+    assert marker in source, "rule dms_antigen_scores is gone from figures.smk"
+    block = source[source.index(marker) :]
+    block = block[: block.index("\nrule ", 1)]
+    for attribute in ("checkpoint", "parents"):
+        assert f"antigen_model().{attribute}" in block, (
+            f"rule dms_antigen_scores no longer declares "
+            f"antigen_model().{attribute} as an input, but "
+            f"`scripts/dms_antigen.py` opens it and gates it on the md5 "
+            f"`config.yaml` pins, so it is a tracked dependency"
+        )
+
 
 #: Rules that do run code and are still not import-checked, with the reason.
 #: Each must carry a ``shellcmd``, so an entry here describes a real

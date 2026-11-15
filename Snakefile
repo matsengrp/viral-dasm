@@ -34,6 +34,7 @@ from lib import (  # noqa: E402
     PREP_MEM_MB,
     SMOKE_CORPUS,
     VERSION,
+    antigen_model,
     corpus,
     corpus_max_aa_seq_len,
     dms_dataset,
