@@ -124,7 +124,6 @@ from panel_spec import (  # noqa: F401  (re-exported for the notebooks)
     SHIFT_CLADES,
     SUBSAMPLING_CLIP_LOWER,
     SUBSAMPLING_LADDER_CLADES,
-    SUBSAMPLING_MODEL,
     SUBSAMPLING_SCATTER_CLADE,
     SUBSAMPLING_SELECTION,
     TABLE_COLUMNS,
@@ -136,6 +135,7 @@ from panel_spec import (  # noqa: F401  (re-exported for the notebooks)
     parse_mutation,
     selection_models,
     subsampling_caps,
+    subsampling_model,
 )
 
 from dasm2.analysis.viral import filter_merged_fitness, normalize_fitness_columns
@@ -1041,7 +1041,6 @@ def ladder_frames(
     aamut_dir: Path,
     *,
     clades: Sequence[str] = SUBSAMPLING_LADDER_CLADES,
-    model: str = SUBSAMPLING_MODEL,
     spec: FilterSpec = SUBSAMPLING_SPEC,
     arms: Sequence[str] | None = None,
 ) -> dict[tuple[str, str, str], pd.DataFrame]:
@@ -1059,13 +1058,19 @@ def ladder_frames(
     predictor changes -- the arm's DASM for one method, the arm's own counts
     refit for the other.
 
+    **Each arm's DASM is the model `subsampling_model` names for it**, which
+    is the largest one trained on that tree rather than one model throughout.
+    See that function on what it means for how the panels read. The population
+    is still fixed on full depth, so the arms are compared over one mutation
+    set whatever model scored them.
+
     Returns:
         ``{(arm, clade, method): frame}``, each frame carrying
         ``aa_mutation``, ``delta_fitness_ratio`` (the target) and
         ``log_selection_factor`` (the predictor), clipped by ``spec``.
 
     Raises:
-        ValueError: If ``model`` has no rows at some arm. A half-scored
+        ValueError: If an arm's model has no rows at that arm. A half-scored
             campaign would otherwise draw a panel with a column missing and
             nothing saying which.
     """
@@ -1073,12 +1078,16 @@ def ladder_frames(
     target = spec.fitness_metric
 
     population: dict[str, pd.DataFrame] = {}
+    # The population is a count threshold on the full-depth *counts*, which
+    # every model at that arm shares, so which model defines it is immaterial
+    # -- it is this arm's own model for the sake of reading one table.
+    full_model = subsampling_model(FULL_DEPTH.name)
     full = read_scored_table(
-        table_path, models=[model], arm=FULL_DEPTH.name, clades=clades
+        table_path, models=[full_model], arm=FULL_DEPTH.name, clades=clades
     )
     for clade, frame in by_clade(
-        base_frames(full, spec=spec, models=[model], clades=clades),
-        model,
+        base_frames(full, spec=spec, models=[full_model], clades=clades),
+        full_model,
     ).items():
         population[clade] = apply_count_threshold(frame, PANEL_MIN_COUNT)[
             ["aa_mutation", f"{target}_raw"]
@@ -1086,16 +1095,19 @@ def ladder_frames(
 
     frames: dict[tuple[str, str, str], pd.DataFrame] = {}
     for arm in arms:
-        table = read_scored_table(table_path, models=[model], arm=arm, clades=clades)
+        arm_model = subsampling_model(arm)
+        table = read_scored_table(
+            table_path, models=[arm_model], arm=arm, clades=clades
+        )
         if table.empty:
             raise ValueError(
-                f"{model!r} has no rows at arm {arm!r} in {table_path}. Panels "
-                f"C and D compare the arms, so a missing one is a gap in the "
-                f"comparison rather than a column to leave out."
+                f"{arm_model!r} has no rows at arm {arm!r} in {table_path}. "
+                f"Panels C and D compare the arms, so a missing one is a gap "
+                f"in the comparison rather than a column to leave out."
             )
         dasm = by_clade(
-            base_frames(table, spec=spec, models=[model], clades=clades),
-            model,
+            base_frames(table, spec=spec, models=[arm_model], clades=clades),
+            arm_model,
         )
         for clade, kept in population.items():
             arm_dasm = dasm[clade].merge(kept[["aa_mutation"]], on="aa_mutation")

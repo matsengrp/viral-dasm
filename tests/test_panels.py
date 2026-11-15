@@ -1424,7 +1424,7 @@ def fake_arm_table(seed: int = 3) -> pd.DataFrame:
                     rows.append(
                         {
                             "clade": clade,
-                            "model": panel_spec.SUBSAMPLING_MODEL,
+                            "model": panel_spec.subsampling_model(arm),
                             "arm": arm,
                             "aa_mutation": f"{parent}{site}{mutant}",
                             "aa_site": site,
@@ -1595,5 +1595,5 @@ def test_the_subsampling_clip_is_not_the_library_clip():
 
     assert panel_spec.SUBSAMPLING_CLIP_LOWER == -6.0
     assert panel_spec.SUBSAMPLING_CLIP_LOWER != CLIP_LOWER
-    assert panel_spec.SUBSAMPLING_MODEL in MODELS
+    assert set(panel_spec.SUBSAMPLING_MODELS) <= set(MODELS)
     assert panel_spec.SUBSAMPLING_SCATTER_CLADE in panel_spec.SUBSAMPLING_LADDER_CLADES

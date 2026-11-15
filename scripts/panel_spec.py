@@ -489,13 +489,47 @@ LADDER_ARM_PANELS = (
     "panel_d_arm_ladder",
 )
 
-#: The model panels C and D draw, and the one documented exception to
-#: :data:`FIGURE_MODEL`. `scripts/runs.py`'s `RUNS` trains `dasm-85k` on all
-#: four corpora and every other architecture on `full_depth` alone, because
-#: this is the architecture the sampling-depth ladder trained at every depth.
-#: A figure about what thinning costs can only be drawn for a model that was
-#: trained thinned.
-SUBSAMPLING_MODEL = "dasm-85k"
+#: The model panels C and D draw **at each sampling depth**: the largest one
+#: trained on that tree, since a dramatically thinned tree is fitted with a
+#: smaller model.
+#:
+#: **The comparison these panels make is unaffected.** Each column sets the
+#: DASM approach against the counts approach on one tree, and both sides of
+#: that comparison see the same tree; the model's size varies down the
+#: sampling ladder but never within a column, which is where the claim lives.
+#:
+#: Full depth is :data:`FIGURE_MODEL`, so panel C's baseline column is the
+#: model the rest of the paper publishes and `fig:agreement` panel B draws --
+#: the same clade and the same mutations, which is a comparison a reader will
+#: make whether or not the caption invites it.
+#:
+#: The thinned arms are `dasm-85k` because that is the only architecture
+#: `scripts/runs.py`'s `RUNS` trains on the cap corpora; every other one runs
+#: at full depth alone. So this mapping is not free -- adding an arm here
+#: means training it there.
+SUBSAMPLING_FULL_DEPTH_MODEL = FIGURE_MODEL
+SUBSAMPLING_THINNED_MODEL = "dasm-85k"
+
+
+def subsampling_model(arm: str) -> str:
+    """Which model panels C and D draw at ``arm``.
+
+    A function rather than a dict literal so a corpus added to `config.yaml`
+    is covered the moment it exists, and the full-depth name is spelled once.
+    """
+    return (
+        SUBSAMPLING_FULL_DEPTH_MODEL
+        if arm == FULL_DEPTH.name
+        else SUBSAMPLING_THINNED_MODEL
+    )
+
+
+#: Every model the two panels load, deduplicated and in arm order. The rules
+#: declare their scored inputs from this, so a model named above and never
+#: trained fails at the DAG rather than inside the notebook.
+SUBSAMPLING_MODELS: tuple[str, ...] = tuple(
+    dict.fromkeys(subsampling_model(arm) for arm in CORPUS_NAMES)
+)
 
 #: The clade panel C scatters, at every arm. Delta, the deepest clade: the
 #: panel's job is to show the clouds behind one row of panel D.
