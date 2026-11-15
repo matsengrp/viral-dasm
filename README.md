@@ -203,6 +203,14 @@ already did the forward passes, so a panel rule reads
 | `agreement_ladders` | panels C and E: both correlations against the count cutoff |
 | `compose_agreement` | the figure itself, laid out from those five PNGs |
 
+`snakemake dms` draws `fig:dms` the same way, from the same scored table plus
+the three published assays:
+
+| rule | what it produces |
+|---|---|
+| `dms_correlations` | all four panels: the clouds and the bars, at each of the two count thresholds |
+| `compose_dms` | the figure itself, laid out from those four PNGs |
+
 `snakemake figures` runs all three. **Composition is its own rule because the
 two costs are not alike**: a panel rule reads a 1.4M-row Parquet per model and
 takes a minute, and the layout reads five PNGs and takes a second, so the

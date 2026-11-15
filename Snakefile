@@ -36,6 +36,8 @@ from lib import (  # noqa: E402
     VERSION,
     corpus,
     corpus_max_aa_seq_len,
+    dms_dataset,
+    dms_homologs,
     mat_pcp_path,
 )
 

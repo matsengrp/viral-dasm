@@ -28,8 +28,8 @@ from __future__ import annotations
 
 import sys
 import tempfile
-from collections.abc import Iterable
-from dataclasses import asdict, dataclass
+from collections.abc import Iterable, Sequence
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -51,6 +51,10 @@ assert_dasm2_is_this_repo()
 
 import pandas as pd
 from founders import founder_aa_sequence, founder_nt_sequence
+from panel_spec import FIGURE_MODEL
+from panel_spec import TABLE_COLUMNS as BASE_TABLE_COLUMNS
+from panels import BASE_SPEC, FilterSpec, base_frames
+from scipy import stats
 
 from dasm2.codon_table import CODON_NEIGHBOR_MATRIX
 from dasm2.data.functional import to_dms_matrix
@@ -383,3 +387,180 @@ def melt_dms(matrix: pd.DataFrame, clade: str, gene: str = GENE) -> pd.DataFrame
     merged["aa_site"] = merged["position"].astype(int) + 1
     merged["stratum"] = merged["single_nt"].map({True: SINGLE_NT, False: MULTI_NT})
     return merged[["aa_site", "mutant_aa", "dms_cell_entry", "stratum"]]
+
+
+# ---------------------------------------------------------------------------
+# The figure's frames: the assay joined to what `rule score` already computed
+# ---------------------------------------------------------------------------
+
+#: The pooled counts estimate panel A's third column and panel B's third bar
+#: are drawn from. `panel_spec.TABLE_COLUMNS` leaves every `*_all` column out,
+#: because no panel of `fig:agreement` reads one; this figure's "full-tree
+#: counts" predictor is exactly that column, so it is named here rather than
+#: by widening a tuple every other panel pays for.
+POOLED_METRIC = "delta_fitness_ratio_all"
+
+#: What this figure reads out of `selection_factors.parquet`.
+TABLE_COLUMNS: tuple[str, ...] = (*BASE_TABLE_COLUMNS, POOLED_METRIC)
+
+#: The clip the published figure was drawn at: on **both** sides, on all three
+#: predictors, and never on the measurement.
+#:
+#: Wider than `fig:agreement`'s -4 and `fig:subsampling`'s -6, and ported
+#: rather than re-chosen -- `dms_comparison.py`'s `DEFAULT_CLIP_MIN` and
+#: `DEFAULT_CLIP_MAX`. Those two figures clip a counts estimate against a
+#: counts estimate, where the floor is set by how deeply the clade was
+#: sampled. Here the y axis is an assay with a floor of its own, and clipping
+#: the model harder than the assay measures is what would move the
+#: correlation.
+CLIP_LOWER = -8.0
+CLIP_UPPER = 6.0
+
+#: The two populations the figure draws, top row then bottom.
+#:
+#: 0 is not the no-op it looks like. A mutation mat-pcp never estimated
+#: carries no count at all and no fitness effect, so the top row is already
+#: restricted to what the tree could estimate -- which, as the source
+#: experiment establishes, is the single-nucleotide-reachable set. 10 is the
+#: well-observed subset of it.
+MIN_COUNTS: tuple[int, ...] = (0, 10)
+
+#: The three predictors, in the order both panels draw them: the column each
+#: reads, and the name the figure gives it. Ported from `dms_comparison.py`'s
+#: `_specs` and `_methods`, which are the same three in the same order.
+METHODS: tuple[tuple[str, str], ...] = (
+    ("log_selection_factor", "DASM"),
+    ("delta_fitness_ratio", "per-clade counts"),
+    (POOLED_METRIC, "full-tree counts"),
+)
+
+#: The column every predictor is correlated against.
+TARGET = "dms_cell_entry"
+
+
+def dms_spec(min_count: int) -> FilterSpec:
+    """The filter one row of `fig:dms` is drawn under.
+
+    The clip the spec carries is the lower bound alone, which is what
+    :func:`clip_axes` applies and what `write_panel_csv` stamps.
+    :func:`dms_frame` applies the upper bound beside it and writes it as a
+    column of its own, rather than widening :class:`FilterSpec` with a field
+    no other figure sets.
+    """
+    return replace(BASE_SPEC, min_count=float(min_count), clip_lower=CLIP_LOWER)
+
+
+def dms_frame(
+    table: pd.DataFrame,
+    homolog: str,
+    *,
+    model: str = FIGURE_MODEL,
+    min_count: int = 0,
+) -> pd.DataFrame:
+    """One homolog's measured effects beside the three predictors of them.
+
+    The tidy table `build_tidy.py` assembles in the source experiment, minus
+    the scoring pass: `rule score` already evaluated the checkpoint on every
+    clade founder and joined mat-pcp's per-clade and pooled estimates onto it,
+    so what is left here is the assay.
+
+    **The population is this pipeline's, not the source's.** There the mask
+    was read from `counts_all.csv`'s `exclude` and `masked_in_usher` flags and
+    widened to whole codon sites; here the same exclusion arrives already
+    applied, per nucleotide route, as the nulls `rule score` left behind --
+    which :func:`base_frames` drops. That is the one reason the retained
+    counts differ, and :class:`DmsAccounting` reports what the loader dropped
+    on top of it.
+
+    Args:
+        table: :func:`read_scored_table` over :data:`TABLE_COLUMNS`.
+        homolog: One of ``config.yaml``'s, which fixes both the clade and the
+            assay.
+        model: The checkpoint's model name; the paper's is `dasm-1077k`.
+        min_count: The actual-or-expected floor; see :data:`MIN_COUNTS`.
+
+    Returns:
+        One row per measured, estimated mutation, carrying ``dms_cell_entry``,
+        the three predictors clipped to ``[CLIP_LOWER, CLIP_UPPER]``, their
+        ``*_raw`` originals, and the ``mutation`` and ``site`` the scatter's
+        tooltip reads.
+    """
+    dataset = dms_dataset(homolog)
+    matrix, _accounting = load_dms(homolog)
+    measured = melt_dms(matrix, dataset.clade)
+    frames = base_frames(
+        table, spec=dms_spec(min_count), models=[model], clades=[dataset.clade]
+    )
+    frame = frames.get((model, dataset.clade))
+    if frame is None:
+        raise ValueError(
+            f"{homolog}: the scored table carries no {model} rows for clade "
+            f"{dataset.clade}, so there is nothing to set the assay against."
+        )
+    joined = frame.merge(measured, on=["aa_site", "mutant_aa"], how="inner")
+    # The pooled column arrives unclipped: `clip_axes` clips
+    # `log_selection_factor` and `FITNESS_METRICS`, and the pooled estimate is
+    # in neither. It is clipped here on both sides, and the two columns
+    # `clip_axes` did reach get their upper bound here, so all three
+    # predictors sit on the one scale the source figure drew them on.
+    for column, _label in METHODS:
+        if f"{column}_raw" not in joined:
+            joined[f"{column}_raw"] = joined[column]
+        joined[column] = joined[column].clip(lower=CLIP_LOWER, upper=CLIP_UPPER)
+    return joined.assign(
+        homolog=homolog,
+        mutation=joined["aa_mutation"],
+        site=joined["aa_site"],
+    )
+
+
+def dms_frames(
+    table: pd.DataFrame,
+    homologs: Sequence[str],
+    *,
+    model: str = FIGURE_MODEL,
+    min_counts: Sequence[int] = MIN_COUNTS,
+) -> dict[tuple[str, int], pd.DataFrame]:
+    """``{(homolog, min_count): frame}`` over every cell the figure draws."""
+    return {
+        (homolog, min_count): dms_frame(
+            table, homolog, model=model, min_count=min_count
+        )
+        for homolog in homologs
+        for min_count in min_counts
+    }
+
+
+def dms_correlations(frames: dict[tuple[str, int], pd.DataFrame]) -> pd.DataFrame:
+    """Panel B's and panel D's table: one r per homolog, threshold and method.
+
+    Ported from `dms_comparison.py`'s `corr_vs_target` and the cell that calls
+    it: the correlation against the measurement with the ``n`` it was computed
+    over, dropping the rows where either side is missing.
+
+    Spearman rides along, as `corr_vs_target` returns it. The bars draw
+    Pearson -- the source figure's own choice, because these subsets are the
+    regime where the predictors are close -- and the CSV carries both, so the
+    rank correlation the source README reports needs no second pass.
+    """
+    rows = []
+    for (homolog, min_count), frame in frames.items():
+        for column, method in METHODS:
+            pair = frame.dropna(subset=[column, TARGET])
+            if len(pair) > 1:
+                pearson = float(stats.pearsonr(pair[column], pair[TARGET])[0])
+                spearman = float(stats.spearmanr(pair[column], pair[TARGET]).statistic)
+            else:
+                pearson = spearman = float("nan")
+            rows.append(
+                {
+                    "homolog": homolog,
+                    "min_count": min_count,
+                    "method": method,
+                    "column": column,
+                    "pearson": pearson,
+                    "spearman": spearman,
+                    "n": len(pair),
+                }
+            )
+    return pd.DataFrame(rows)

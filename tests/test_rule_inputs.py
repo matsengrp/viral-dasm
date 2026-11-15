@@ -119,6 +119,8 @@ ENTRY_POINTS = {
     "subsampling_depth": "notebooks/subsampling_depth.py",
     "subsampling_ladder": "notebooks/subsampling_ladder.py",
     "compose_subsampling": "notebooks/subsampling.py",
+    "dms_correlations": "notebooks/dms_correlations.py",
+    "compose_dms": "notebooks/dms.py",
     # `fig:within_clade_shifts`' producers. These run scripts rather than
     # notebooks, like the producers above the panel block.
     "clade_backgrounds": "scripts/backgrounds.py",
@@ -139,6 +141,7 @@ AGGREGATORS = (
     "panels",
     "figures",
     "subsampling",
+    "dms",
 )
 
 #: Rules that do run code and are still not import-checked, with the reason.

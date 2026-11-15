@@ -132,33 +132,21 @@ def test_the_codon_mask_agrees_with_the_one_the_scored_table_was_built_with():
 
 
 @needs_mat_pcp
-def test_the_figures_exclusion_is_wider_than_the_loaders_mask():
-    """The reversion layer is additional, and belongs to the panels, not here.
+def test_the_loaders_mask_is_exactly_what_from_multidms_needs():
+    """Two layers here, and the figure's population is not built from them.
 
-    `dms.unreadable_sites` is two layers on purpose: it exists so
-    `from_multidms` does not raise on a wildtype disagreement, and the
-    disagreements sit at masked sites. The figure's own exclusion is
-    `panels.excluded_sites`, which adds the per-clade reversion rule. If the
-    reversion sites were a subset of the two layers here, a panel built on this
-    set alone would look right, so the test is that they are not.
+    `dms.unreadable_sites` exists so `from_multidms` does not raise on a
+    wildtype disagreement, and those disagreements sit at masked sites. It is
+    **not** what `fig:dms` excludes. Since #36 the figure's exclusion is
+    mat-pcp's own per-mutation `exclude`, applied before any fitness effect is
+    computed and so arriving as the nulls :func:`panels.base_frames` drops,
+    together with :func:`panels.drop_unobservable_codons`. A third layer
+    folded in here would quietly make the loader's mask the population, which
+    is the mistake this pins.
     """
-    import panels
-
-    audit = panel_spec.AUDIT_JSON
-    if not audit.is_file():
-        pytest.skip(f"no censor audit at {audit}")
-    reverting = panels.reverting_sites_by_clade(audit)
     for clade in EXPECTED_CENSORED_SITES:
-        # Exactly two layers, so a third folded in here would fail even if the
-        # difference below stayed non-empty.
         assert dms.unreadable_sites(clade) == (
             dms.globally_masked_sites() | dms.censored_sites(clade)
-        )
-        extra = panels.reverting_sites(reverting, clade) - dms.unreadable_sites(clade)
-        assert extra, (
-            f"{clade}: every reverting site is already in the loader's mask, so "
-            f"a panel built on that mask alone would be indistinguishable from "
-            f"one built on all three layers."
         )
 
 
@@ -367,19 +355,94 @@ def test_the_scatter_homolog_is_one_this_pipeline_reads():
     assert panel_spec.SCATTER_HOMOLOG in lib.dms_homologs()
 
 
-def test_every_stratum_has_both_label_forms():
-    """A missing short form overlaps its neighbour in panel B's facet header.
+def test_every_method_the_frames_carry_has_an_axis_title():
+    """A method with no axis title raises at draw time, after the whole pass.
 
-    Vega-Lite neither wraps nor elides a header label, so two long labels over
-    150 px columns simply overlap and the row becomes unreadable with nothing
-    raising. :func:`panel_charts.stratum_label` falls back to the raw key, which
-    is why the coverage is asserted rather than left to the fallback.
+    `panel_charts` spells the method names as literals because it must not
+    import `dms`: a chart module that reached for the frame layer would pull
+    the DMS loader into the declarations of every panel rule. This is what
+    keeps the two spellings in step.
     """
-    assert set(panel_charts.STRATUM_LABELS) == set(dms.STRATA), (
-        "panel_charts spells the stratum keys as literals because it must not "
-        "import dms, so this is what keeps the two in step."
+    assert set(panel_charts.DMS_AXIS_TITLES) == {
+        label for _column, label in dms.METHODS
+    }
+    for title in panel_charts.DMS_AXIS_TITLES.values():
+        assert len(title) == 2, "two lines, so all three sit on one baseline"
+
+
+def test_every_threshold_the_figure_draws_has_a_row_colour():
+    """A row with no colour is a `KeyError` in the middle of the draw."""
+    assert set(panel_charts.DMS_ROW_COLORS) == set(dms.MIN_COUNTS)
+
+
+def test_the_count_label_names_the_unfiltered_row_as_unfiltered():
+    """At 0 the floor admits every mutation carrying an estimate at all.
+
+    Printing it as "≥ 0 counts" sends a reader looking for a cut that is not
+    there, which is the source notebook's own reason for the special case.
+    """
+    assert panel_charts.dms_count_label(0) == "all mutations"
+    assert panel_charts.dms_count_label(10) == "≥ 10 counts"
+
+
+SCORED_TABLE = panel_spec.SCORED_DIR / "selection_factors.parquet"
+
+needs_scored_table = pytest.mark.skipif(
+    not SCORED_TABLE.is_file(), reason=f"no scored table at {SCORED_TABLE}"
+)
+
+
+@pytest.fixture(scope="module")
+def figure_frames():
+    import panels
+
+    table = panels.read_scored_table(
+        SCORED_TABLE,
+        models=[panel_spec.FIGURE_MODEL],
+        clades=[lib.dms_dataset(homolog).clade for homolog in lib.dms_homologs()],
+        columns=dms.TABLE_COLUMNS,
     )
-    for stratum in dms.STRATA:
-        long_form, short_form = panel_charts.STRATUM_LABELS[stratum]
-        assert long_form and short_form
-        assert len(short_form) <= len(long_form)
+    return dms.dms_frames(table, lib.dms_homologs())
+
+
+@needs_mat_pcp
+@needs_dms
+@needs_scored_table
+def test_the_drawn_frame_holds_only_estimated_mutations_inside_the_clip(
+    figure_frames,
+):
+    """What a panel draws is what the CSV beside it reports.
+
+    Three ways this join goes wrong without raising: a left join leaves rows
+    the tree never estimated, which a correlation then averages in as though
+    they were measurements of zero; an unclipped predictor puts the axis where
+    one outlier is; and a clip applied to `log_selection_factor` alone leaves
+    the two counts columns on a different scale from the model drawn beside
+    them.
+    """
+    for (homolog, _min_count), frame in figure_frames.items():
+        assert len(frame), homolog
+        for column, _label in dms.METHODS:
+            assert frame[column].notna().all(), f"{homolog}: null {column}"
+            assert frame[column].min() >= dms.CLIP_LOWER
+            assert frame[column].max() <= dms.CLIP_UPPER
+        # The assay is never clipped: it has a floor of its own, and clipping
+        # it would be this figure measuring its own axis.
+        assert "dms_cell_entry_raw" not in frame
+
+
+@needs_mat_pcp
+@needs_dms
+@needs_scored_table
+def test_the_count_floor_keeps_a_subset_and_nothing_else(figure_frames):
+    """The bottom row is the top row's well-observed part, mutation for mutation.
+
+    A floor applied to the wrong column -- or with `and` where mat-pcp's own
+    convention is `or` -- still returns fewer rows, which is all a count check
+    would notice.
+    """
+    for homolog in lib.dms_homologs():
+        loose = set(figure_frames[(homolog, 0)]["aa_mutation"])
+        strict = set(figure_frames[(homolog, 10)]["aa_mutation"])
+        assert strict <= loose, homolog
+        assert strict, homolog
