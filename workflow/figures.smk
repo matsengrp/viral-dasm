@@ -375,14 +375,21 @@ def dms_all_scores(*_):
 
 
 rule dms_predictors:
-    """The DMS predictor comparison, as far as it is built without a model.
+    """The DMS predictor comparison: every predictor's correlation, per stratum.
 
-    The two reference predictors and the join they land through. **A table and
-    no panel:** `fig:dms`'s four drawn panels are the published figure's, which
-    `rule dms` builds, and this comparison has no drawn home until the DASM's
-    own column lands -- a filter on `selection_factors.parquet`, so it arrives
-    with `rule score`'s table. A target that demanded the chart now would be red
-    for the whole gap.
+    The two reference predictors, antiGen, and the DASM, through one join onto
+    one population. `fig:dms_strata` is what draws it; `rule dms_strata` builds
+    that, and this target is the table alone.
+
+    **This target is no longer model-free, and that changed when the DASM
+    joined `DMS_PREDICTORS`.** It was: the three reference predictors needed no
+    checkpoint, which is why the section header above says they could land
+    before #16. `dms_dasm_scores` reads `selection_factors.parquet`, so this
+    target now sits downstream of `rule score` and therefore of `rule train`.
+    Building it alone puts the training rules in the plan -- which is a
+    statement about the DAG rather than about this rule, since `rule all`
+    already reaches `train` through `models` and `scored`. Dry-run before
+    running it, as with anything that can reach a checkpoint.
     """
     input:
         str(panel_csv_path(DMS_SELECTION, DMS_PREDICTOR_CORRELATIONS)),
@@ -754,6 +761,7 @@ rule compose_dms_strata:
         spec="scripts/panel_spec.py",
         lib="scripts/lib.py",
         config="config.yaml",
+        charts="scripts/panel_charts.py",
         notebook="notebooks/dms_strata_figure.py",
         panels=[
             str(figure_dir(DMS_SELECTION) / f"{stem}.png")

@@ -48,8 +48,8 @@ was learnable from it. ``panels.unobservable_founder_codons`` is the predicate
 `fig:dms` already drops on, and it is applied here for the same reason rather
 than rebuilt. It is site-level, so it reaches both strata.
 
-**Three sources, because the mask has three layers and only one is applied
-upstream.** ``dms.unreadable_sites`` drops globally masked and per-clade censored
+**Of the mask's four layers, one is applied upstream and three are rebuilt
+here.** ``dms.unreadable_sites`` drops globally masked and per-clade censored
 *sites* before ``from_multidms`` parses, and says in its own docstring that it is
 "not the figure's exclusion, which adds the reversion layer". The two it leaves
 are rebuilt here: the per-mutation censor table, and the founder-to-reference
@@ -60,8 +60,9 @@ reversions that live in no file because a training run derives them
 from __future__ import annotations
 
 import sys
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
+from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -76,7 +77,11 @@ assert_dasm2_is_this_repo()
 from founders import founder_nt_sequence
 from panels import unobservable_founder_codons
 
-from dasm2.codon_table import CODON_AA_INDICATOR_MATRIX
+from dasm2.codon_table import (
+    CODON_SINGLE_MUTATIONS,
+    CODON_TO_AA_WITH_STOP,
+    STOP_AA_IDX,
+)
 from dasm2.sequence.constants import AA_STR_SORTED, BASES, CODONS
 from dasm2.sequence.conversion import iter_codons
 from dasm2.sequence.masking import (
@@ -90,33 +95,51 @@ from dasm2.sequence.masking import (
 #: ``load_reference_base_idxs`` both use.
 _BASE_INDEX = {base: index for index, base in enumerate(BASES)}
 
-#: Sense codon to the residue it encodes. The three stops are **absent** rather
-#: than mapped to a sentinel, so a route to a stop is skipped by the lookup
-#: failing rather than by a test someone can forget: the DASM gives no estimate
-#: for a stop (`main.tex`: "excluding those to a stop"), so a stop is not a
-#: destination this module reasons about.
-#:
-#: Built from :data:`CODON_AA_INDICATOR_MATRIX`, whose stop rows are all zero,
-#: in 64-codon space throughout. **This module reads codons one way only.**
-#: ``AA_TO_SENSE_CODONS`` answers the inverse question but is keyed in
-#: 61-sense-codon space, and the two spaces coincide only below the first stop
-#: (``TAA``, 64-index 48) and drift by one, two and three above it -- so mixing
-#: them silently mis-identifies routes to C, F, W, Y and to the ``T**``
-#: realizations of L and S. ``tests/test_dms_censor.py`` pins the amino-acid
-#: equality that catches exactly that.
-_CODON_TO_AA: dict[str, str] = {
-    codon: AA_STR_SORTED[int(row.argmax())]
-    for codon, row in zip(CODONS, CODON_AA_INDICATOR_MATRIX)
-    if int(row.sum()) > 0
-}
+#: Codon index to the codon's three nucleotides, the inverse of
+#: ``CODONS.index``. Built once rather than searched per lookup.
+_CODON_INDEX = {codon: index for index, codon in enumerate(CODONS)}
+
+# **Both codon tables below are dasm2's, and reading them is the point.**
+# `CODON_TO_AA_WITH_STOP` is `(64,)` and `CODON_SINGLE_MUTATIONS` is keyed by
+# the same 64-codon index, so this module works in one codon space throughout.
+#
+# An earlier version of this file built its own translation from
+# `CODON_AA_INDICATOR_MATRIX` and enumerated neighbours by hand, and reached
+# for `AA_TO_SENSE_CODONS` to invert it -- which is keyed in 61-*sense*-codon
+# space. The two coincide only below the first stop (`TAA`, 64-index 48) and
+# drift by one, two and three above it, so routes to C, F, W, Y and to the
+# `T**` realizations of L and S were mis-identified. `codon_table.py`'s
+# `_build_codon_to_aa_with_stop` exists precisely because that confusion is
+# easy, and `tests/test_dms_censor.py` is what catches it.
 
 
-@lru_cache(maxsize=None)
-def _censor_sources(clade: str, gene: str) -> tuple:
-    """The three mask layers for one clade, read once.
+class _CensorSources(NamedTuple):
+    """One clade's per-nucleotide censoring, as the route test reads it.
+
+    Named rather than a bare tuple so a caller cannot unpack it in the wrong
+    order, and **immutable throughout** because :func:`_censor_sources` is
+    cached: a mutable set returned from a cache is shared by every later
+    caller, so one in-place ``update`` would quietly poison the mask for the
+    rest of the process.
+    """
+
+    founder_nt: str
+    blocked_sites: frozenset[int]
+    directional: frozenset[tuple[int, int, int]]
+    reference: tuple[int, ...]
+
+
+@cache
+def _censor_sources(clade: str, gene: str) -> _CensorSources:
+    """The three rebuilt mask layers for one clade, read once.
 
     Cached because every homolog of a clade asks for the same three files, and
     the reference FASTA and censor table are read from the mat-pcp mount.
+
+    The cache keys on ``(clade, gene)`` and not on the paths behind them, so a
+    test that repoints ``mat_pcp_path`` mid-process gets the first run's
+    answer. Nothing does that today; a test that needs to should call
+    ``_censor_sources.cache_clear()``.
     """
     table = load_censor_table(
         mat_pcp_path("censored_mutations_file"),
@@ -138,19 +161,23 @@ def _censor_sources(clade: str, gene: str) -> tuple:
         int(index)
         for index in parse_masked_nt_sites_file(mat_pcp_path("masked_nt_sites_file"))
     )
-    directional = {
-        (int(row[0]), int(row[1]), int(row[2])) for row in spec.directional
-    }
-    return founder_nt, blocked_sites, directional, [int(x) for x in reference]
+    return _CensorSources(
+        founder_nt=founder_nt,
+        blocked_sites=frozenset(blocked_sites),
+        directional=frozenset(
+            (int(row[0]), int(row[1]), int(row[2])) for row in spec.directional
+        ),
+        reference=tuple(int(index) for index in reference),
+    )
 
 
 def _route_is_censored(
     nt_index: int,
     from_base: int,
     to_base: int,
-    blocked_sites: set[int],
-    directional: set[tuple[int, int, int]],
-    reference: list[int],
+    blocked_sites: frozenset[int],
+    directional: frozenset[tuple[int, int, int]],
+    reference: tuple[int, ...],
 ) -> bool:
     """Whether one single-nucleotide route is closed to training.
 
@@ -167,7 +194,7 @@ def _route_is_censored(
     return to_base == reference[nt_index] and from_base != reference[nt_index]
 
 
-@lru_cache(maxsize=None)
+@cache
 def censored_mutations(clade: str, gene: str = GENE) -> frozenset[tuple[int, str]]:
     """``(aa_site, mutant_aa)`` pairs the DASM was never trained to predict.
 
@@ -184,7 +211,7 @@ def censored_mutations(clade: str, gene: str = GENE) -> frozenset[tuple[int, str
         The censored pairs. Empty for a clade whose spec censors nothing and
         whose founder matches the reference everywhere, which is legitimate.
     """
-    founder_nt, blocked_sites, directional, reference = _censor_sources(clade, gene)
+    sources = _censor_sources(clade, gene)
 
     # Every mutation at a codon whose founder background the tree cannot show.
     # Site-level rather than per route, and deliberately so: the rule is about
@@ -201,8 +228,8 @@ def censored_mutations(clade: str, gene: str = GENE) -> frozenset[tuple[int, str
     censored: set[tuple[int, str]] = {
         (site, mutant_aa) for site in unobservable for mutant_aa in AA_STR_SORTED
     }
-    for position, codon in enumerate(iter_codons(founder_nt)):
-        if codon not in CODONS:
+    for position, codon in enumerate(iter_codons(sources.founder_nt)):
+        if codon not in _CODON_INDEX:
             # `dms.single_nt_indicator` refuses the same codons for the same
             # reason: a partially ambiguous codon still translates, so it would
             # survive the wildtype check and be answered here with a guess.
@@ -215,28 +242,29 @@ def censored_mutations(clade: str, gene: str = GENE) -> frozenset[tuple[int, str
         codon_start = position * 3
 
         # The codon's nine single-nucleotide neighbours, grouped by the residue
-        # each encodes. Enumerated forwards rather than looked up per target
-        # residue: a route *is* one substitution in this codon, so building it
-        # that way needs no inverse table and so cannot mix two codon index
-        # spaces. A residue absent from the grouping has no single-nucleotide
-        # route, which is what makes it multi-nucleotide.
+        # each encodes. Read from dasm2's own table rather than enumerated
+        # here: a route *is* one substitution in this codon, and
+        # `CODON_SINGLE_MUTATIONS` already holds exactly that, keyed by the
+        # same 64-codon index `CODON_TO_AA_WITH_STOP` is. A residue absent from
+        # the grouping has no single-nucleotide route, which is what makes it
+        # multi-nucleotide.
         routes: dict[str, list[tuple[int, int, int]]] = {}
-        for offset in range(3):
-            from_letter = codon[offset]
-            for to_letter in BASES:
-                if to_letter == from_letter:
-                    continue
-                neighbour = codon[:offset] + to_letter + codon[offset + 1 :]
-                mutant_aa = _CODON_TO_AA.get(neighbour)
-                if mutant_aa is None:  # a stop; not a destination we score
-                    continue
-                routes.setdefault(mutant_aa, []).append(
-                    (
-                        codon_start + offset,
-                        _BASE_INDEX[from_letter],
-                        _BASE_INDEX[to_letter],
-                    )
+        for child_index, offset, to_letter in CODON_SINGLE_MUTATIONS[
+            _CODON_INDEX[codon]
+        ]:
+            aa_index = int(CODON_TO_AA_WITH_STOP[child_index])
+            if aa_index == STOP_AA_IDX:
+                # Not a destination this module reasons about: the DASM gives
+                # no estimate for a stop (`main.tex`, "excluding those to a
+                # stop").
+                continue
+            routes.setdefault(AA_STR_SORTED[aa_index], []).append(
+                (
+                    codon_start + offset,
+                    _BASE_INDEX[codon[offset]],
+                    _BASE_INDEX[to_letter],
                 )
+            )
 
         # Only residues with at least one route are eligible, so the
         # multi-nucleotide stratum is untouched here: it has no routes at all,
@@ -247,9 +275,9 @@ def censored_mutations(clade: str, gene: str = GENE) -> frozenset[tuple[int, str
                     nt_index,
                     from_base,
                     to_base,
-                    blocked_sites,
-                    directional,
-                    reference,
+                    sources.blocked_sites,
+                    sources.directional,
+                    sources.reference,
                 )
                 for nt_index, from_base, to_base in aa_routes
             ):

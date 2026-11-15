@@ -191,8 +191,11 @@ def merged_frames(
     ``dms_models.homolog_cells`` is that there is only one.
 
     Raises:
-        SystemExit: If a homolog is missing a predictor. Skipping one would
-            shorten the table rather than fail the rule.
+        ValueError: If a homolog is missing a predictor. Skipping one would
+            shorten the table rather than fail the rule. A ``ValueError``
+            rather than the ``SystemExit`` this used to raise inline, because
+            `notebooks/dms_strata.py` calls it too and a ``SystemExit`` in a
+            notebook cell kills the kernel instead of reporting.
     """
     loaded = [dms_models.read_scores(path) for path in score_paths]
 
@@ -206,7 +209,7 @@ def merged_frames(
             if homolog in set(frame["homolog"].unique())
         ]
         if len(for_homolog) != len(DMS_PREDICTORS):
-            raise SystemExit(
+            raise ValueError(
                 f"{homolog}: {len(for_homolog)} of {len(DMS_PREDICTORS)} "
                 f"predictors passed. Skipping one would shorten the table rather "
                 f"than fail the rule."

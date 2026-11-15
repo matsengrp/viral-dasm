@@ -477,7 +477,14 @@ DMS_AXIS_BAND = 55
 #: One hue per row, carried by that row's dots and by its heading so the two
 #: read as one unit. Okabe-Ito blue and vermillion: far apart in lightness and
 #: in hue, and distinguishable under every common form of colour blindness.
-DMS_ROW_COLORS: dict[int, str] = {0: "#0072B2", 10: "#D55E00"}
+#: The pair of hues the DMS figures are drawn in, named once. Okabe-Ito blue
+#: and vermillion: far apart in lightness and in hue, and distinguishable under
+#: every common form of colour blindness. Two dicts below key them to different
+#: meanings, which is why they are a constant rather than a literal in each.
+OKABE_ITO_BLUE = "#0072B2"
+OKABE_ITO_VERMILLION = "#D55E00"
+
+DMS_ROW_COLORS: dict[int, str] = {0: OKABE_ITO_BLUE, 10: OKABE_ITO_VERMILLION}
 
 #: The bars' own geometry. Half the scatter panels' width, because three bars
 #: need far less room than a point cloud and the vertical tick labels mean the
@@ -501,6 +508,13 @@ DMS_Y_HEADROOM = 0.12
 
 #: The measurement's axis title, shared by all three columns.
 DMS_Y_TITLE = "DMS effect (cell entry)"
+
+#: The same string, named for the axis it labels on `fig:dms_strata`, which
+#: puts the measurement on x. Borrowing :data:`DMS_Y_TITLE` there would leave a
+#: constant named for one axis labelling the other -- and `28-dms-predictors`
+#: gives `DMS_Y_TITLE` a different string, so the borrow would silently change
+#: this figure's x title when that branch merges.
+DMS_STRATA_X_TITLE = DMS_Y_TITLE
 
 #: Each predictor's axis title, keyed by the name the figure gives it. Two
 #: lines even where one would fit, so all three titles sit on the same
@@ -753,8 +767,8 @@ DMS_STRATUM_LABELS: dict[str, tuple[str, ...]] = {
 #: a failed attempt at the same encoding -- but a reader given no caption would
 #: carry the first meaning onto the second figure.
 DMS_STRATUM_COLORS: dict[str, str] = {
-    "single_nt": "#0072B2",
-    "multi_nt": "#D55E00",
+    "single_nt": OKABE_ITO_BLUE,
+    "multi_nt": OKABE_ITO_VERMILLION,
 }
 
 
@@ -861,9 +875,7 @@ def dms_stratum_row(
 
     cells = []
     for stratum in stratum_order:
-        cell_frame = (
-            frame if stratum == "all" else frame[frame["stratum"] == stratum]
-        )
+        cell_frame = frame if stratum == "all" else frame[frame["stratum"] == stratum]
         row = None
         if stats is not None:
             matching = stats[stats["stratum"] == stratum]
@@ -878,7 +890,7 @@ def dms_stratum_row(
         # to be readable without tracing down the page.
         x_enc = alt.X(
             "dms_cell_entry:Q",
-            title=DMS_Y_TITLE if show_x_title else None,
+            title=DMS_STRATA_X_TITLE if show_x_title else None,
             axis=axis,
             scale=x_scale,
         )
@@ -894,8 +906,7 @@ def dms_stratum_row(
                 # band and their plots start at the same x. See
                 # `DMS_Y_LABEL_CHARS`.
                 labelExpr=(
-                    f"pad(datum.label, {DMS_Y_LABEL_CHARS}, "
-                    f"'{DMS_LABEL_PAD}', 'left')"
+                    f"pad(datum.label, {DMS_Y_LABEL_CHARS}, '{DMS_LABEL_PAD}', 'left')"
                 ),
             )
             if not cells
@@ -912,9 +923,11 @@ def dms_stratum_row(
         # colour. This is the row-limit escape described above, and it is also
         # why no `alt.Color` scale and no `legend=None` appear anywhere here.
         layers = [
-            alt.Chart(cell_frame[cell_frame["stratum"] == present][
-                ["dms_cell_entry", score_column]
-            ])
+            alt.Chart(
+                cell_frame[cell_frame["stratum"] == present][
+                    ["dms_cell_entry", score_column]
+                ]
+            )
             .mark_point(
                 size=DMS_POINT_SIZE,
                 opacity=DMS_POINT_OPACITY,

@@ -155,7 +155,7 @@ def load_panels(
 
 
 def pad_to_common_width(
-    panels: MutableMapping[str, np.ndarray], keys: Sequence[str], *, side: str = "right"
+    panels: MutableMapping[str, np.ndarray], keys: Sequence[str]
 ) -> int:
     """Widen each of `keys` to the widest of them, with transparent pixels.
 
@@ -173,38 +173,20 @@ def pad_to_common_width(
     transparent, so the panel moves without anything being drawn, and
     nothing in either renderer has to know what it is being composed beside.
 
-    **Which side depends on where the extra width is.** The default is
-    ``"right"``: a panel that drew a label column beyond its plot is wider on
-    that side, and padding the others' right edges leaves every plot where it
-    was. ``"left"`` is for the opposite case -- a row whose *y axis* is wider
-    than another's, which is the whole width difference when the rows are
-    otherwise identical. `fig:dms_strata` is that case: its two rows draw the
-    same three cells at the same width, and antiGen's tick labels run to three
-    characters where the DASM's run to two, so the narrower row's plots sit
-    left of the other's by exactly the band between them. Padding it on the
-    left moves its plots right onto the other's, and because the rows' right
-    margins already agree the right edges land together too.
-
-    A caller passing ``"left"`` is asserting that the width difference is all
-    on the left. Where it is not -- a row both wider on the left and narrower
-    on the right -- neither side fixes it and the panels need the same axis,
-    not the same padding.
-
     Mutates `panels` in place and returns the common width, in pixels.
-
-    Raises:
-        ValueError: On a side other than ``"left"`` or ``"right"``.
     """
-    if side not in ("left", "right"):
-        raise ValueError(f"side must be 'left' or 'right', got {side!r}")
     width = max(panels[key].shape[1] for key in keys)
     for key in keys:
         image = panels[key]
         short = width - image.shape[1]
         if short > 0:
-            blank = np.zeros((image.shape[0], short, image.shape[2]), image.dtype)
-            parts = [blank, image] if side == "left" else [image, blank]
-            panels[key] = np.concatenate(parts, axis=1)
+            panels[key] = np.concatenate(
+                [
+                    image,
+                    np.zeros((image.shape[0], short, image.shape[2]), image.dtype),
+                ],
+                axis=1,
+            )
     return width
 
 

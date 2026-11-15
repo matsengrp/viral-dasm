@@ -58,14 +58,16 @@ DASM = "dasm"
 #: and a reader should be able to see what was renamed.
 SCORE_COLUMN = "log_selection_factor"
 
-#: The slice of :data:`panel_spec.TABLE_COLUMNS` this reader needs. The table is
-#: ~1.4M rows per run and the filter is pushed into Parquet, so asking for five
-#: columns rather than fifteen is most of what makes this cheap.
+#: The slice of :data:`panel_spec.TABLE_COLUMNS` this reader needs, named apart
+#: from it so a grep for ``TABLE_COLUMNS`` does not conflate the two. The table
+#: is ~1.4M rows per run and the filter is pushed into Parquet, so asking for
+#: seven columns rather than fifteen is most of what makes this cheap.
+#:
 #: ``parent_aa`` is here although this module never reads it:
 #: ``panels.read_scored_table`` copies it to ``clade_founder_aa`` on the way
 #: out, and raises on a frame that does not carry it. The founder residue this
 #: module does use comes from ``homolog_cells``, which reads the FASTA.
-TABLE_COLUMNS: tuple[str, ...] = (
+SCORE_TABLE_COLUMNS: tuple[str, ...] = (
     "clade",
     "model",
     "arm",
@@ -94,7 +96,7 @@ def dasm_scores(
         table_path,
         models=[FIGURE_MODEL],
         clades=[clade],
-        columns=TABLE_COLUMNS,
+        columns=SCORE_TABLE_COLUMNS,
     )
 
     scores = table[["aa_site", "mutant_aa", SCORE_COLUMN]].drop_duplicates(

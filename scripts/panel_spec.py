@@ -595,7 +595,7 @@ DMS_PREDICTOR_CORRELATIONS = "predictor_correlations"
 #: rows never share a y domain. Two lines each so both titles take the same
 #: width and the cells line up.
 DMS_STRATA_MODELS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("dasm", ("DASM", "fitness effect")),
+    ("dasm", ("DASM", "fitness effect")),  # `panel_charts.DMS_AXIS_TITLES`' DASM entry
     ("antigen", ("antiGen", "log probability")),
 )
 
@@ -638,9 +638,10 @@ DMS_STRATA_FIGURE_ROWS: tuple[tuple[str, ...], ...] = tuple(
 DMS_STRATA_BOX_IN: tuple[float, float] = (7.5, 8.0)
 DMS_STRATA_FIGURE_SCALE = 1.0
 
-#: The type the panels are drawn at, which is `panel_charts.DMS_FONT_SIZE`.
-#: Named here as well so the panel letters follow the panels when it changes.
-DMS_STRATA_TITLE_PX = 15
+#: The type the panels are drawn at. The same size `fig:dms` is drawn at, and
+#: taken from it rather than respelled: both figures are Vega-Lite at
+#: `panel_charts.DMS_FONT_SIZE`, so a change there has to move both.
+DMS_STRATA_TITLE_PX = DMS_TITLE_PX
 
 #: Where `fig:dms`'s predictor intermediates go: under the artifact root, not in
 #: the tree. One narrow Parquet per `(predictor, homolog)`.

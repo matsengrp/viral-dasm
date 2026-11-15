@@ -45,6 +45,7 @@ def _():
             sys.path.insert(0, str(_path))
 
     import figure_layout as fl
+    import panel_charts as charts
     import panel_spec as spec
 
     # `DMS_SELECTION`, shared with `fig:dms`: it is the directory these panels
@@ -52,11 +53,11 @@ def _():
     # from `FIGURE_MODEL`.
     SELECTION = spec.DMS_SELECTION
     PANEL_DIR = spec.figure_dir(SELECTION)
-    return PANEL_DIR, SELECTION, fl, spec
+    return PANEL_DIR, SELECTION, charts, fl, spec
 
 
 @app.cell
-def _(PANEL_DIR, fl, mo, spec):
+def _(PANEL_DIR, charts, fl, mo, spec):
     # `mo.stop` rather than a raise, for `notebooks/dms.py`'s reason: a reader
     # exporting this by hand before the panels exist should be told which rule
     # writes them. Under `rule compose_dms_strata` the case cannot arise.
@@ -74,15 +75,25 @@ def _(PANEL_DIR, fl, mo, spec):
 
     PANELS = fl.load_panels(PANEL_DIR, spec.DMS_STRATA_PANEL_LETTERS)
 
-    # Align the columns. The two rows draw the same three cells at the same
-    # width, so their images differ only by the width of the y axis on the
-    # left: antiGen's tick labels run to three characters where the DASM's run
-    # to two. Left justified that puts the top row's plots a band to the left
-    # of the bottom row's, and a column whose plots do not share an x is not a
-    # column. Padding the narrower row on the left moves its plots onto the
-    # other's; the rows' right margins already agree, so the right edges land
-    # together as well.
-    fl.pad_to_common_width(PANELS, list(PANELS), side="left")
+    # **Checked, not corrected.** The rows draw the same three cells at the
+    # same width, so equal image widths mean their y axes are the same band
+    # and the columns line up. That is `panel_charts.DMS_Y_LABEL_CHARS`' doing,
+    # in the chart, where it also reaches the panel PNGs and the preview.
+    #
+    # Padding them to a common width here instead would align the composed
+    # figure and hide the regression that made it necessary -- `pad` only ever
+    # adds, so a row whose tick labels outgrew the reserved width would widen,
+    # get silently padded back, and look right while the panels beside it did
+    # not. So this raises.
+    _widths = {key: panel.shape[1] for key, panel in PANELS.items()}
+    if len(set(_widths.values())) != 1:
+        raise ValueError(
+            f"the rows differ in width ({_widths}), so their y axes are "
+            f"different bands and the columns will not line up. "
+            f"`panel_charts.DMS_Y_LABEL_CHARS` is "
+            f"{charts.DMS_Y_LABEL_CHARS}, which no longer covers the widest "
+            f"tick label either row draws."
+        )
 
     mo.md(
         "At the size the panel rule rendered it:\n\n"
@@ -103,9 +114,7 @@ def _(PANELS, fl, spec):
         [list(_row) for _row in spec.DMS_STRATA_FIGURE_ROWS],
         box_in=spec.DMS_STRATA_BOX_IN,
         scale=spec.DMS_STRATA_FIGURE_SCALE,
-        title_px_on_disk=fl.vega_title_px_on_disk(
-            title_px=spec.DMS_STRATA_TITLE_PX
-        ),
+        title_px_on_disk=fl.vega_title_px_on_disk(title_px=spec.DMS_STRATA_TITLE_PX),
     )
     print(composed.summary())
     composed.figure

@@ -161,7 +161,16 @@ def _(SELECTION, charts, dms, frame, panel_spec, panels, stats):
         # `spec=None`: these panels applied no count floor and no clip, and
         # `dms.dms_spec` would stamp both onto the CSV's provenance.
         panels.write_panel_csv(
-            frame[["aa_site", "parent_aa", "mutant_aa", "stratum", "dms_cell_entry", _model]],
+            frame[
+                [
+                    "aa_site",
+                    "parent_aa",
+                    "mutant_aa",
+                    "stratum",
+                    "dms_cell_entry",
+                    _model,
+                ]
+            ],
             _stem,
             selection=SELECTION,
             spec=None,
