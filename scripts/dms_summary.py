@@ -123,7 +123,7 @@ def summarize(
             f"built from fewer arms than the panel names."
         )
 
-    full: dict[tuple[str, str, str], pd.DataFrame] = {}
+    groups: dict[tuple[str, str, str], pd.DataFrame] = {}
     for homolog, frame in merged.items():
         for predictor in DMS_PREDICTORS:
             scored = frame.rename(columns={predictor: METRIC_COLUMN})
@@ -133,9 +133,9 @@ def summarize(
                     if stratum == dms.ALL
                     else scored[scored["stratum"] == stratum]
                 )
-                full[(homolog, predictor, stratum)] = subset
+                groups[(homolog, predictor, stratum)] = subset
 
-    table = _metrics(full)
+    table = _metrics(groups)
 
     # Coverage, not the partition. `all` is the unfiltered frame and the two
     # strata are filters on it, so they sum by construction -- `melt_dms` labels

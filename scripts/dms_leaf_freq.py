@@ -256,9 +256,8 @@ def read_counts(path: Path) -> pd.DataFrame:
 def counts_at(counts: pd.DataFrame, sites, residues):
     """The tally's value for each ``(site, residue)`` pair, as an array.
 
-    One helper rather than the same fancy-index in each caller: the scorer needs
-    it for the mutant residue and for the parent, and `scripts/dms_summary.py`
-    needs it for the mutant alone.
+    One helper rather than the same fancy-index written twice: the scorer reads
+    it for the mutant residue and again for the parent.
     """
     return counts.to_numpy()[
         np.asarray(sites) - 1,

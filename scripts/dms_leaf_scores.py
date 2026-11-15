@@ -63,10 +63,10 @@ LEAF_LOGFREQ = "leaf_logfreq"
 #: to +0.0798 over the same sweep, because ``p`` sets how far the unobserved
 #: band sits from the rest and a linear coefficient reads that distance.
 #:
-#: So this constant is load-bearing for the reported metric, and it is **not**
-#: chosen by what it scores. One is the plain Laplace choice, fixed before the
-#: correlation was looked at; tuning it would be fitting the coefficient the
-#: manuscript quotes.
+#: So this constant is load-bearing for the reported metric. One is the plain
+#: Laplace choice and is kept for that reason alone -- picking it by which value
+#: scored best would be fitting the coefficient the manuscript quotes, so the
+#: sweep above is recorded as a sensitivity rather than used as a selection.
 LEAF_PSEUDOCOUNT = 1.0
 
 
