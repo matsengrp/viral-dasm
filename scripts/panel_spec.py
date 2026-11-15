@@ -548,7 +548,11 @@ DMS_TITLE_PX = 15
 #: pandas, Biopython and `dasm2`: this module is stdlib-plus-`lib` so that
 #: `workflow/figures.smk` stays cheap to parse. `tests/test_dms_models.py` pins
 #: the two together.
-DMS_PREDICTORS: tuple[str, ...] = ("blosum62", "leaf_logfreq")
+#:
+#: The two reference floors first and the published model last, which is the
+#: order a reader needs: what a substitution matrix and a per-site conservation
+#: statistic already explain, and only then the model the paper claims to beat.
+DMS_PREDICTORS: tuple[str, ...] = ("blosum62", "leaf_logfreq", "antigen")
 
 #: Every predictor's correlation with the DMS, per homolog and per stratum.
 #:

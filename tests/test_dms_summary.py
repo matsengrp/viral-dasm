@@ -44,14 +44,17 @@ def _cells() -> pd.DataFrame:
                     "parent_aa": "M",
                     "dms_cell_entry": float(index) - 2.0,
                     "stratum": stratum,
-                    # Deliberately not equal to each other, and neither equal to
-                    # the measurement: a summary that correlated a column with
-                    # itself would score 1.0 everywhere and pass a shape check.
-                    "blosum62": float(index) * 0.5,
-                    "leaf_logfreq": float(-index),
                 }
             )
-    return pd.DataFrame(rows)
+    frame = pd.DataFrame(rows)
+    # One score column per predictor the spec declares, rather than two spelled
+    # out: an arm added to `DMS_PREDICTORS` should extend this file's coverage,
+    # not break its fixture. Each column is a different function of the index,
+    # and none equals the measurement -- a summary that correlated a column with
+    # itself would score 1.0 everywhere and pass a shape check.
+    for offset, predictor in enumerate(DMS_PREDICTORS):
+        frame[predictor] = (frame.index % _PER_STRATUM) * (0.5 + offset) - offset
+    return frame
 
 
 def _manifests(strata=(dms.ALL,)) -> dict:

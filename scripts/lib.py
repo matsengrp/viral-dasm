@@ -472,6 +472,52 @@ def dms_dataset(homolog: str) -> DmsDataset:
     )
 
 
+@dataclass(frozen=True)
+class AntigenModel:
+    """The published model `fig:dms` panel C sets the DASM against.
+
+    Two digests and a path that is not one. ``checkpoint`` and ``parents`` are
+    files this repository carries, gated by md5 for the reason
+    :class:`DmsDataset`'s is: both are received rather than built, and a
+    changed one would move panel C's antiGen bar while the pipeline kept
+    running. ``checkout`` is the antiGen source tree, which is **not** carried
+    -- see ``config.yaml`` for why it is a path rather than a dependency --
+    and so has no digest here; what pins the code is the commit
+    ``data/antigen/PROVENANCE.md`` records.
+
+    ``cutoff`` is the rung of the authors' time-cutoff grid the checkpoint was
+    trained at, carried so a score's manifest can name it rather than leaving
+    a reader to read it out of a filename.
+    """
+
+    checkout: Path
+    checkpoint: Path
+    checkpoint_md5: str
+    parents: Path
+    parents_md5: str
+    cutoff: float
+
+
+def antigen_model() -> AntigenModel:
+    """`config.yaml`'s ``antigen`` block, with its two roots joined.
+
+    ``root`` is joined onto :data:`REPO_ROOT` exactly as
+    :func:`dms_dataset` joins ``dms.root``, and for the same reason: left
+    relative it would resolve against the working directory, which is correct
+    under snakemake and pytest and silently wrong anywhere else.
+    """
+    block = CONFIG["antigen"]
+    root = REPO_ROOT / block["root"]
+    return AntigenModel(
+        checkout=Path(block["checkout"]),
+        checkpoint=root / block["checkpoint"]["file"],
+        checkpoint_md5=str(block["checkpoint"]["md5"]),
+        parents=root / block["parents"]["file"],
+        parents_md5=str(block["parents"]["md5"]),
+        cutoff=float(block["cutoff"]),
+    )
+
+
 def cap_of(corpus_name: str) -> int:
     """The per-clade cap a thinned corpus's name records.
 

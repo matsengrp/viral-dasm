@@ -339,10 +339,10 @@ rule compose_dms:
 # `fig:dms`'s reference predictors: the floors that are not the DASM
 # ---------------------------------------------------------------------------
 #
-# Four rules rather than two. The leaf tally is the expensive one -- clade 21K
-# is 1.9M leaves and 1.6 GB of paths -- and it does not depend on BLOSUM62, so
-# folding both predictors into one rule would rebuild it on every edit to the
-# substitution matrix.
+# One rule per predictor, plus the leaf tally on its own. The tally is the
+# expensive one -- clade 21K is 1.9M leaves and 1.6 GB of paths -- and neither
+# BLOSUM62 nor antiGen reads it, so folding the predictors together would
+# rebuild it on every edit to the substitution matrix.
 #
 # Nothing here reads `selection_factors.parquet`: these are the part of the DMS
 # comparison that needs no trained model, which is why they can land before #16.
@@ -474,6 +474,59 @@ rule dms_blosum_scores:
         scores=str(dms_score_path("blosum62", "{homolog}")),
     log:
         f"{ARTIFACT_ROOT}/logs/dms_scores_blosum62_{{homolog}}.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "python {input.script}"
+        " --homolog {wildcards.homolog}"
+        " --output {output.scores}"
+        " > {log} 2>&1"
+
+
+rule dms_antigen_scores:
+    """antiGen's log probability for every cell one homolog's assay measured.
+
+    **Claims no GPU.** `antiGen/infer.py` takes CUDA whenever a card is visible
+    and the figure rules hold no slot from `scripts/gpu_slot.py`, so the script
+    pins the device rather than defaulting it; the pass is a few seconds of CPU
+    on one 1,273-residue query.
+
+    Declares no leaf tally, for `dms_blosum_scores`' reason, and declares two
+    files no import walk can see: the checkpoint and the query FASTA, which the
+    script reaches through `config.yaml`'s `antigen` block. It does **not**
+    declare the antiGen source tree -- that lives outside the checkout, is not
+    content-tracked here, and is pinned by the commit
+    `data/antigen/PROVENANCE.md` records.
+    """
+    wildcard_constraints:
+        homolog="|".join(re.escape(homolog) for homolog in dms_homologs()),
+    input:
+        script="scripts/dms_antigen.py",
+        models="scripts/dms_models.py",
+        dms="scripts/dms.py",
+        published="scripts/dms_published.py",
+        founder_reader="scripts/founders.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        scov2_rates="dasm2/neutral/scov2_rates.py",
+        constants="dasm2/sequence/constants.py",
+        conversion="dasm2/sequence/conversion.py",
+        parquet_backend="dasm2/data/parquet_backend.py",
+        dasm2_init="dasm2/__init__.py",
+        dms_csv=lambda w: str(dms_dataset(w.homolog).path),
+        clade_founders=clade_founder_fastas,
+        censored=str(mat_pcp_path("censored_mutations_file")),
+        clades=str(mat_pcp_path("censored_clades_file")),
+        masked=str(mat_pcp_path("masked_nt_sites_file")),
+        # The model, and the construct projection it is fed. Both gated on the
+        # md5 `config.yaml` pins, as the DMS CSVs are, so a replaced checkpoint
+        # fails rather than moving the antiGen row quietly.
+        checkpoint=str(antigen_model().checkpoint),
+        parents=str(antigen_model().parents),
+    output:
+        scores=str(dms_score_path("antigen", "{homolog}")),
+    log:
+        f"{ARTIFACT_ROOT}/logs/dms_scores_antigen_{{homolog}}.log",
     resources:
         mem_mb=PANEL_MEM_MB,
     shell:

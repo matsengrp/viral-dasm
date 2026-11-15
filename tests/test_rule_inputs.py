@@ -126,6 +126,7 @@ ENTRY_POINTS = {
     # be drawn from.
     "dms_leaf_counts": "scripts/dms_leaf_freq.py",
     "dms_blosum_scores": "scripts/dms_blosum.py",
+    "dms_antigen_scores": "scripts/dms_antigen.py",
     "dms_leaf_scores": "scripts/dms_leaf_scores.py",
     "dms_predictor_summary": "scripts/dms_summary.py",
     # `fig:within_clade_shifts`' producers. These run scripts rather than
