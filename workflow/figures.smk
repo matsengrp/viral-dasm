@@ -38,9 +38,14 @@ effects and selection factors are publishable; no panel carries a sequence.
 # invocation, and importing the panel code here would pull `dasm2`, pandas and
 # pyarrow into a dry run to learn five file names.
 from panel_spec import (
+    ARM,
+    BACKGROUND_CSV,
+    CANDIDATE_CSV,
     DEFAULT_SELECTION,
     LADDER_PANELS,
     MUTATION_PANELS,
+    OUTLIER_PANELS,
+    OUTLIER_TABLE_STEM,
     PANEL_LETTERS,
     PANEL_MEM_MB,
     SELECTIONS,
@@ -216,6 +221,143 @@ rule compose_agreement:
         " > {log} 2>&1"
 
 
+rule within_clade_outliers:
+    """`fig:within_clade_shifts` panel A: the candidate mutations, two clades.
+
+    Its own rule rather than a third panel of `rule agreement_mutations`,
+    which draws a different figure: these two are built and read together, and
+    a rule that wrote panels of two figures would rebuild one whenever the
+    other's notebook changed.
+    """
+    wildcard_constraints:
+        selection="|".join(SELECTIONS),
+    input:
+        panels="scripts/panels.py",
+        spec="scripts/panel_spec.py",
+        charts="scripts/panel_charts.py",
+        founder_reader="scripts/founders.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        # As the agreement rules: spelled out rather than shared through a
+        # dict, because `tests/test_rule_inputs.py` reads these blocks as
+        # source and cannot see an input expanded from a variable.
+        analysis_charts="dasm2/analysis/charts.py",
+        analysis_viral="dasm2/analysis/viral.py",
+        analysis_eval="dasm2/analysis/viral_fitness_eval.py",
+        io="dasm2/io.py",
+        conversion="dasm2/sequence/conversion.py",
+        scov2_rates="dasm2/neutral/scov2_rates.py",
+        dasm2_init="dasm2/__init__.py",
+        notebook="notebooks/within_clade_outliers.py",
+        table=SCORED_TABLE,
+        # The candidate list the panel labels. A rule input, not just a module
+        # constant, so moving a mutation off the figure redraws the panel.
+        candidates=str(CANDIDATE_CSV),
+        # ...and the derived half of that list: the substitutions that define
+        # each clade's two backgrounds, which the panel names in its own ink.
+        backgrounds=str(BACKGROUND_CSV),
+        clade_founders=clade_founder_fastas,
+        masked_nt_sites=str(mat_pcp_path("masked_nt_sites_file")),
+        reference=str(mat_pcp_path("reference_sequence_file")),
+    output:
+        html=f"{NOTEBOOK_DIR}/within_clade_outliers_{{selection}}.html",
+        panels=panel_outputs(OUTLIER_PANELS, "{selection}"),
+    log:
+        f"{ARTIFACT_ROOT}/logs/within_clade_outliers_{{selection}}.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "marimo export html {input.notebook} -o {output.html} --force"
+        " -- --table {input.table}"
+        " --selection {wildcards.selection}"
+        " > {log} 2>&1"
+
+
+rule outlier_ranking:
+    """Table S1: the mutations the two approaches most disagree about.
+
+    A table rather than a panel, and its own rule rather than a cell of a
+    panel notebook: it is the agreement comparison at a higher count floor,
+    read by the supplement, and nothing in a figure depends on it.
+    """
+    wildcard_constraints:
+        selection="|".join(SELECTIONS),
+    input:
+        panels="scripts/panels.py",
+        spec="scripts/panel_spec.py",
+        lib="scripts/lib.py",
+        founder_reader="scripts/founders.py",
+        config="config.yaml",
+        analysis_viral="dasm2/analysis/viral.py",
+        analysis_eval="dasm2/analysis/viral_fitness_eval.py",
+        io="dasm2/io.py",
+        conversion="dasm2/sequence/conversion.py",
+        scov2_rates="dasm2/neutral/scov2_rates.py",
+        dasm2_init="dasm2/__init__.py",
+        notebook="notebooks/outlier_ranking.py",
+        table=SCORED_TABLE,
+        # The clade roster, taken from the agreement figure's own tracked
+        # table so the two cannot disagree about which clades are compared.
+        roster=str(panel_csv_path(DEFAULT_SELECTION, "panel_c_within_clade_ladder")),
+        # The branches each clade's opportunity is measured over. mat-pcp's
+        # PCPs rather than this pipeline's Parquet: the Parquet drops the
+        # branch length the mass is weighted by.
+        pcps=str(corpus(ARM).source_pcp),
+        clade_founders=clade_founder_fastas,
+        masked_nt_sites=str(mat_pcp_path("masked_nt_sites_file")),
+        reference=str(mat_pcp_path("reference_sequence_file")),
+    output:
+        html=f"{NOTEBOOK_DIR}/outlier_ranking_{{selection}}.html",
+        table_csv=str(panel_csv_path("{selection}", OUTLIER_TABLE_STEM)),
+    log:
+        f"{ARTIFACT_ROOT}/logs/outlier_ranking_{{selection}}.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "marimo export html {input.notebook} -o {output.html} --force"
+        " -- --table {input.table}"
+        " --selection {wildcards.selection}"
+        " > {log} 2>&1"
+
+
+rule clade_backgrounds:
+    """The two genetic backgrounds each clade of `fig:within_clade_shifts` splits into.
+
+    From branch frequencies alone: no model, no selection, no wildcard. That
+    is the point of the rule. The earlier pipeline chose the split by scoring
+    every parent haplotype under the DASM, which made the contrast move with
+    the checkpoint; defined this way it is a property of the tree, so every
+    model is measured against the same two backgrounds.
+
+    Two passes over a 112 MB corpus, so it is its own rule rather than a cell
+    of the panel notebook: the panels are redrawn often and this answer does
+    not change unless the corpus does.
+    """
+    input:
+        backgrounds="scripts/backgrounds.py",
+        panels="scripts/panels.py",
+        spec="scripts/panel_spec.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        conversion="dasm2/sequence/conversion.py",
+        dasm2_init="dasm2/__init__.py",
+        # The branches the frequencies are measured over, and the founders
+        # each parent is compared against. mat-pcp's PCPs rather than this
+        # pipeline's Parquet, which drops the branch length the mass is
+        # weighted by.
+        pcps=str(corpus(ARM).source_pcp),
+        clade_founders=clade_founder_fastas,
+    output:
+        table=str(BACKGROUND_CSV),
+    log:
+        f"{ARTIFACT_ROOT}/logs/clade_backgrounds.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "python {input.backgrounds} --pcp {input.pcps} --out {output.table}"
+        " > {log} 2>&1"
+
+
 rule figures:
     """Every composed figure of the paper, and so every panel beneath them.
 
@@ -232,3 +374,8 @@ rule figures:
             for selection in SELECTIONS
             for path in composed_paths(selection)
         ],
+        # `fig:within_clade_shifts`' panel A, which has no composition rule
+        # yet. Declared here rather than waiting for one: a panel nothing
+        # builds is a tracked table that quietly stops matching the code
+        # beside it, which is what happened to the `fidelity` selection.
+        panel_outputs(OUTLIER_PANELS, DEFAULT_SELECTION),

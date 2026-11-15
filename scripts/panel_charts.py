@@ -17,6 +17,7 @@ pipeline runs only where ``snakemake`` is installed.
 from __future__ import annotations
 
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -56,6 +57,38 @@ FIT_FIREBRICK = "#b22222"
 #: them was a reference line.
 COUNTS_GREY = "#4d4d4d"
 DASM_PURPLE = "#8172b3"
+
+#: The name on a mutation `fig:within_clade_shifts`' panel A calls out.
+#: Near-black rather than a fourth hue: the mark it names is already
+#: `POINT_BLUE`, and a coloured label would read as a second measurement of the
+#: same mutation instead of an annotation on the one beneath it.
+LABEL_INK = "#111111"
+
+#: ...except for the mutations that define the background panels B and D split
+#: on, which *are* a second thing being said about the clade and are named in
+#: the text as such. They are the clade's own sweep: their counts-based
+#: estimates are understated because most of the clade already carries them, so
+#: they sit in the same corner of the panel as the shifted mutations for an
+#: unrelated reason. Orange separates the two readings; near-black would merge
+#: them.
+BACKGROUND_INK = "#e07b00"
+
+#: The ink each labelled group is drawn in, keyed by the candidate status
+#: `data/shift_candidates.csv` records. A Vega colour *scale* rather than a
+#: mark constant, because one frame carries both groups: the label column is
+#: stacked over all of them at once, and splitting it into two frames would
+#: stack each group blind to the other's rows.
+CANDIDATE_INK = {"figure": LABEL_INK, "background": BACKGROUND_INK}
+
+#: Roughly how tall one line of label text is, as a multiple of its font size.
+#: It sets the minimum separation between two labels and nothing else, so an
+#: approximation is enough: generous costs empty space, short costs a
+#: collision.
+LABEL_LINE_HEIGHT = 1.3
+
+#: Gap in pixels between a mark and the start of its leader, and between the
+#: panel edge and the label column.
+LABEL_LEAD_PX = 10
 
 #: One type size for every panel. A figure that mixes two text scales reads as
 #: two figures.
@@ -132,6 +165,131 @@ def _corner_label(stat: str, font_size: int = PANEL_FONT_SIZE) -> alt.Chart:
     )
 
 
+def stacked_label_y(
+    values: Sequence[float], *, min_gap: float, ceiling: float
+) -> list[float]:
+    """``values`` pushed apart downward to ``min_gap``, starting at the top.
+
+    Each label keeps its own height where it can and is pushed down only where
+    it cannot, which preserves the marks' vertical order and so keeps every
+    label beside the mark it names. A fixed ladder does neither: it sends the
+    whole column to the bottom of the panel however close the points were.
+
+    Args:
+        values: The marks' y values, highest first.
+        min_gap: Minimum separation between two labels, in data units.
+        ceiling: y the topmost label may not exceed.
+
+    Returns:
+        The label y values, in the order given.
+    """
+    placed: list[float] = []
+    for value in values:
+        limit = ceiling if not placed else placed[-1] - min_gap
+        placed.append(min(value, limit))
+    return placed
+
+
+def _candidate_labels(
+    labelled: pd.DataFrame,
+    *,
+    metric: str,
+    x_enc: alt.X,
+    y_enc: alt.Y,
+    scale: alt.Scale,
+    axis: alt.Axis,
+    side: str,
+    size: int,
+) -> alt.LayerChart:
+    """A leader and a name on each labelled mutation, in a column of its own.
+
+    **The column sits outside the data, not in an empty corner of it.** On the
+    right it is drawn past the panel's edge, which is what ``clamp=False`` on
+    the scale is for; on the left it stops just short of the leftmost labelled
+    mark. Widening the domain to park text inside it would invite a reader to
+    look for data in the empty half.
+
+    **Which side is a property of where a clade's candidates sit.** They are
+    outliers below the diagonal, so they lie to the lower right of the cloud:
+    in 22D that is the cloud's right-hand end, where the right gutter is the
+    nearest empty space, but in 20B they are high above the middle of the
+    diagonal and reaching the right edge would drag a leader across the whole
+    cloud, while directly to their left there is nothing at all.
+
+    **No ring on the marks.** One drawn large enough to read at this panel's
+    size on the page covers its own neighbours, and the leader already says
+    which mark a label belongs to -- a ring marks points that are not in doubt
+    at the cost of hiding points that are. The marks are instead redrawn
+    opaque, in their group's own ink: that reads at panel size without taking
+    up more room than the mark already does.
+
+    **Two groups, one ink scale.** ``candidate_group`` names which, and
+    :data:`CANDIDATE_INK` maps it to a colour. The scale's domain is the set
+    the frame carries rather than the constant's keys, so a panel with one
+    group does not reserve a slot for the other.
+    """
+    groups = [
+        status for status in CANDIDATE_INK if status in set(labelled["candidate_group"])
+    ]
+    ink = alt.Color(
+        "candidate_group:N",
+        scale=alt.Scale(domain=groups, range=[CANDIDATE_INK[g] for g in groups]),
+        legend=None,
+    )
+    low, high = float(scale.domain[0]), float(scale.domain[1])
+    units_per_px = (high - low) / size
+    ordered = labelled.sort_values(metric, ascending=False).copy()
+    if side == "right":
+        align = "left"
+        ordered["_label_x"] = high + units_per_px * LABEL_LEAD_PX
+    else:
+        align = "right"
+        ordered["_label_x"] = (
+            float(ordered["log_selection_factor"].min()) - units_per_px * LABEL_LEAD_PX
+        )
+    ordered["_label_y"] = stacked_label_y(
+        ordered[metric].astype(float).tolist(),
+        min_gap=units_per_px * PANEL_FONT_SIZE * LABEL_LINE_HEIGHT,
+        ceiling=high,
+    )
+
+    marks = (
+        alt.Chart(ordered)
+        .mark_point(size=64, opacity=1.0, filled=True)
+        .encode(x=x_enc, y=y_enc, color=ink)
+    )
+    leaders = (
+        alt.Chart(ordered)
+        .mark_rule(strokeWidth=0.8, opacity=0.55)
+        .encode(
+            x=x_enc,
+            y=y_enc,
+            x2=alt.X2("_label_x:Q"),
+            y2=alt.Y2("_label_y:Q"),
+            color=ink,
+        )
+    )
+    # Spelled from `scale` and `axis` rather than read off `x_enc`: an
+    # encoding's `.scale` is a property setter, not the value it was built
+    # with, and reaching for it raises at render time rather than here.
+    text = (
+        alt.Chart(ordered)
+        .mark_text(
+            align=align,
+            baseline="middle",
+            fontSize=PANEL_FONT_SIZE,
+            fontWeight="bold",
+        )
+        .encode(
+            x=alt.X("_label_x:Q", title=X_AXIS_TITLE, scale=scale, axis=axis),
+            y=alt.Y("_label_y:Q", title=Y_AXIS_TITLE, scale=scale, axis=axis),
+            text="aa_mutation:N",
+            color=ink,
+        )
+    )
+    return marks + leaders + text
+
+
 def scatter_panel(
     frame: pd.DataFrame,
     *,
@@ -140,6 +298,9 @@ def scatter_panel(
     clip_lower: float,
     stat: str,
     size: int = 225,
+    labelled: pd.DataFrame | None = None,
+    label_side: str = "right",
+    title: Sequence[str] | None = None,
 ) -> alt.LayerChart:
     """Panel B: one clade's mutations, log SF against the counts-based effect.
 
@@ -152,11 +313,37 @@ def scatter_panel(
     Every layer states the same x and y definition. Vega-Lite merges a layer's
     axes, and a single ``axis=None`` among them disables the merged axis
     outright, ticks and labels included.
+
+    ``labelled`` and ``title`` are what ``fig:within_clade_shifts``' panel A
+    adds, and both default to the agreement figure's behaviour: that panel is
+    this one over a different clade with a few mutations named, which is why it
+    is a parameter here rather than a second builder drifting from this one.
+    The labelled rows are drawn from ``frame``'s own values, so a label cannot
+    sit anywhere but on its mark.
+
+    **Labelling changes the scale and the ticks, and only then.** The label
+    column is drawn past the panel's edge, which needs ``clamp=False`` or Vega
+    pulls it back onto the boundary, and the ticks are stated rather than left
+    to Vega, which would otherwise tick out across the gutter -- an axis that
+    keeps going past the last point invites a reader to look for one. Neither
+    applies without ``labelled``, so the agreement figure's panel is unchanged.
     """
-    axis = alt.Axis(labelFontSize=PANEL_FONT_SIZE, titleFontSize=PANEL_FONT_SIZE)
     high = float(max(frame["log_selection_factor"].max(), frame[metric].max()))
     padding = 0.04 * ((high - clip_lower) or 1)
-    scale = alt.Scale(domain=[clip_lower - padding, high + padding], nice=False)
+    domain = [clip_lower - padding, high + padding]
+    axis_options = {
+        "labelFontSize": PANEL_FONT_SIZE,
+        "titleFontSize": PANEL_FONT_SIZE,
+    }
+    if labelled is not None:
+        axis_options["values"] = [
+            value for value in range(-20, 21, 2) if domain[0] <= value <= domain[1]
+        ]
+    axis = alt.Axis(**axis_options)
+    scale_options: dict[str, object] = {"domain": domain, "nice": False}
+    if labelled is not None:
+        scale_options["clamp"] = False
+    scale = alt.Scale(**scale_options)
     x_enc = alt.X("log_selection_factor:Q", title=X_AXIS_TITLE, scale=scale, axis=axis)
     y_enc = alt.Y(f"{metric}:Q", title=Y_AXIS_TITLE, scale=scale, axis=axis)
     base = (
@@ -197,15 +384,29 @@ def scatter_panel(
     )
     # The cloud first, then the lines over it: a reference line under a dense
     # scatter is buried wherever the data is thickest, which is exactly where a
-    # reader looks for it.
-    return (base + diagonal + fit + _corner_label(stat)).properties(
+    # reader looks for it. The labels last of all, over everything.
+    layered = base + diagonal + fit + _corner_label(stat)
+    if labelled is not None and len(labelled):
+        layered = layered + _candidate_labels(
+            labelled,
+            metric=metric,
+            x_enc=x_enc,
+            y_enc=y_enc,
+            scale=scale,
+            axis=axis,
+            side=label_side,
+            size=size,
+        )
+    return layered.properties(
         width=size,
         height=size,
         title=alt.TitleParams(
             # A list is two title lines; a "\n" in a title string is inert in
             # Vega-Lite, which governs text marks rather than titles. Broken
             # before the noun phrase rather than inside it.
-            [
+            list(title)
+            if title is not None
+            else [
                 "estimated fitness effects to the",
                 f"{clade} clade-founder sequence",
             ],
