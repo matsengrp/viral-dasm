@@ -1238,20 +1238,22 @@ def test_a_background_panel_refuses_a_third_background():
 #: or the gene filter moved, and either should fail here rather than quietly
 #: redraw the paper's figure with different numbers.
 ECDF_SHARE_AT_THRESHOLD = {
-    ("21J", "full_depth"): 0.6579,
-    ("21J", "cap_50000_0"): 0.0705,
-    ("21J", "cap_20000_0"): 0.0478,
+    ("21J", "full_depth"): 0.6531,
+    ("21J", "cap_50000_0"): 0.0663,
+    ("21J", "cap_20000_0"): 0.0438,
     ("21J", "cap_5000_0"): 0.0004,
-    ("25C", "full_depth"): 0.0680,
-    ("25C", "cap_50000_0"): 0.0416,
-    ("25C", "cap_20000_0"): 0.0148,
+    ("25C", "full_depth"): 0.0636,
+    ("25C", "cap_50000_0"): 0.0390,
+    ("25C", "cap_20000_0"): 0.0124,
     ("25C", "cap_5000_0"): 0.0009,
 }
 
-#: Each clade's spike amino-acid grid: the non-synonymous rows of the
-#: per-clade table, 7,901 of 21J's 9,140 spike rows. This is the population the
-#: paper's "7,901 amino-acid mutations to its founder spike sequence" names.
-SPIKE_GRID_ROWS = {"21J": 7901, "25C": 7795}
+#: Each clade's spike amino-acid grid: the per-clade table's spike rows, less
+#: the synonymous and the nonsense ones. This is the population the paper's
+#: "amino-acid mutations to its founder spike sequence" names, and the one
+#: panels C and D are built on -- see `panels._aa_grid` on why the stops come
+#: out.
+SPIKE_GRID_ROWS = {"21J": 7512, "25C": 7405}
 
 
 def _aamut_dir() -> Path:

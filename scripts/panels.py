@@ -807,9 +807,14 @@ def shift_pair_founders(clades: Sequence[str] = SHIFT_CLADES) -> dict[str, str]:
 #: says, and they are what makes a tracked table a diff on noise.
 SHARE_DECIMALS = 6
 
+#: How mat-pcp's grid spells a stop. `_aa_grid` drops these, because the
+#: scored table panels C and D read has 20 amino acids per site and no stop,
+#: so a stop kept here would be a mutation only one half of the figure counts.
+STOP_AA = "*"
+
 #: The amino-acid-grid columns panel B reads. The grid is genome-wide, so
 #: `gene` restricts it to spike; the founder and mutant residues are read to
-#: drop the synonymous rows, and the two counts are the statistic.
+#: drop the synonymous and nonsense rows, and the two counts are the statistic.
 AA_GRID_COLUMNS = (
     "actual_count",
     "expected_count",
@@ -905,12 +910,20 @@ def _aa_grid(
     ``workflow/figures.smk`` declares this rule's inputs from, so the file a
     rule promises and the file this opens are one spelling.
 
-    **The synonymous rows come out, and the stops stay in.** The paper counts
-    "amino-acid mutations to the founder spike sequence", which is every row
-    whose mutant residue differs from the founder's: 7,901 for 21J, against
-    9,140 rows in the file. A row where the two agree is a synonymous codon
-    change counted at the amino-acid level and is not a mutation this figure is
-    about; a stop is.
+    **The synonymous rows come out, and so do the stops.** The paper counts
+    "amino-acid mutations to the founder spike sequence": every row whose
+    mutant residue differs from the founder's, less the nonsense ones. A row
+    where the two agree is a synonymous codon change counted at the amino-acid
+    level and is not a mutation this figure is about.
+
+    **The stops come out because the DASM estimates nothing for them.** The
+    scored table is 20 amino acids per site with no stop, so panels C and D
+    never see one. With stops kept, 21J's panel B was drawn over 7,901
+    mutations and put 5,198 above the count threshold, while panels C and D
+    were built on 4,901 of the same clade -- 292 stops and 5 others apart. One
+    figure cannot answer "what share of this clade's mutations clear the
+    threshold" over one population and "how well is that share recovered" over
+    another.
 
     ``gene`` is a semicolon-joined list where a site falls in more than one
     reading frame, and is null on the intergenic rows, so the membership test
@@ -920,7 +933,11 @@ def _aa_grid(
         aamut_grid_path(aamut_dir, clade, arm), usecols=list(AA_GRID_COLUMNS)
     )
     in_gene = frame["gene"].fillna("").str.split(";").apply(lambda g: gene in g)
-    return frame.loc[in_gene & (frame["mutant_aa"] != frame["clade_founder_aa"])]
+    return frame.loc[
+        in_gene
+        & (frame["mutant_aa"] != frame["clade_founder_aa"])
+        & (frame["mutant_aa"] != STOP_AA)
+    ]
 
 
 def count_ecdf_frame(
