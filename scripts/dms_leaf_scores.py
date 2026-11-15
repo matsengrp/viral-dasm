@@ -8,23 +8,13 @@ is what puts it on the same axis as BLOSUM62's log-odds and the DASM's log
 selection factor; a conventional PSSM's ``log(p_obs / p_background)`` would be
 comparable to neither.
 
-**What it measures is the site, not the substitution.** Measured on all three
-homologs, BA.1 / XBB.1.5 / KP.3.1.1: ``-log(parent + 1)`` alone -- one minus the
-site's deviation fraction, which carries no information at all about which
-residue the substitution goes to -- scores Spearman +0.350 / +0.384 / +0.500
-against the DMS, against the full score's +0.302 / +0.404 / +0.516. It is ahead
-on BA.1 and within 0.02 on the other two, so the mutant term adds almost
-nothing, and the pseudocount is inert over five orders of magnitude for the same
-reason. Centre both the score and the measurement on their per-site means and
-the leaf predictor falls to +0.14 / +0.17 / +0.10 while BLOSUM62 -- which knows
-nothing about the site -- rises to +0.33 / +0.27 / +0.32.
-
-So this is a **per-site conservation statistic**, and a pooled correlation over
-every measured cell is dominated by between-site variance. That is a real and
-strong signal: how variable a spike site is among sampled leaves predicts that
-site's mean DMS effect. It is not a statement about which substitution at a site
-is tolerated, and `scripts/dms_summary.py` reports the within-site correlation
-beside the pooled one so the two cannot be confused.
+**What it measures is closer to the site than to the substitution.** A
+substitution's score is dominated by the parent residue's own leaf count, which
+is a property of the site: a site the clade varies at scores every substitution
+away from it as cheap, whatever the substitution is. So a correlation with the
+DMS over every measured cell is substantially a statement about which sites are
+variable, and is not evidence that this ranks which substitution at a site the
+assay tolerates. Anything written from it should say which of the two it means.
 
 **It is also a standing-frequency measure, not a count of evidence.** A clade's
 leaves are not independent observations: one old substitution with 50,000
@@ -65,13 +55,18 @@ LEAF_LOGFREQ = "leaf_logfreq"
 #: rather than a residue frequency; they hold different numbers for different
 #: reasons and must not be assumed to move together.
 #:
-#: Its value barely matters, which is itself the finding. Every unobserved
-#: mutant lands at ``-log(parent + p)``, which is monotone in the parent count
-#: for any ``p``, so the ranking of the 77% of cells whose mutant residue the
-#: clade has never shown is the site statistic regardless: sweeping
-#: ``p`` over 0.01 to 1000 moves KP.3.1.1's pooled Spearman from +0.5262 to
-#: +0.5315. One is kept because it is the plain Laplace choice and nothing is
-#: gained by tuning a parameter the result does not depend on.
+#: **Its value does not change the ranking, but it does change the Pearson.**
+#: Every unobserved mutant lands at ``-log(parent + p)``, which is monotone in
+#: the parent count for any ``p``, so the rank ordering is the same whatever is
+#: chosen: sweeping ``p`` over 0.01 to 1000 moves KP.3.1.1's pooled Spearman
+#: only from +0.5162 to +0.5239. It moves that homolog's Pearson from +0.3366
+#: to +0.0798 over the same sweep, because ``p`` sets how far the unobserved
+#: band sits from the rest and a linear coefficient reads that distance.
+#:
+#: So this constant is load-bearing for the reported metric, and it is **not**
+#: chosen by what it scores. One is the plain Laplace choice, fixed before the
+#: correlation was looked at; tuning it would be fitting the coefficient the
+#: manuscript quotes.
 LEAF_PSEUDOCOUNT = 1.0
 
 

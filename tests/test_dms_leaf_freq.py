@@ -36,8 +36,6 @@ pd = pytest.importorskip("pandas")
 import dms
 import dms_leaf_freq
 import dms_leaf_scores
-import dms_models
-import dms_summary
 import panel_spec
 from founders import founder_aa_sequence
 
@@ -55,19 +53,6 @@ CLADE = "24E"
 #: replayed against an offset of plus or minus one, these 3,000 leaves give over
 #: 140,000 mismatches.
 LEAVES_CHECKED = 3_000
-
-#: Cells of KP.3.1.1's assay whose mutant residue clade 24E's leaves carry at
-#: all. Pinned because it moves under any real reconstruction error -- a shifted
-#: map or the wrong root -- and because the figure's own caveat is stated in
-#: terms of it. It does **not** move under a sign flip or a changed pseudocount,
-#: which is why the score's value is asserted separately.
-#:
-#: 2,093 of KP.3.1.1's 7,031 cells, re-measured on `2d0ebae`. It was 2,218 of
-#: 9,803 before that commit applied the study's own `times_seen >= 2`, so the
-#: share sitting at the pseudocount floor fell from 77.4% to 70.2%: filtering on
-#: how often a variant was seen drops rarely-observed mutations, and those are
-#: disproportionately the ones a clade's leaves never carry either.
-EXPECTED_MUTANT_OBSERVED = 2093
 
 #: Sites where the modal residue is not the clade founder's, per clade.
 #:
@@ -391,13 +376,6 @@ def test_the_score_is_the_log_ratio_it_claims_to_be(tally_counts):
     unseen = merged[merged["leaf_count"] == 0]
     assert len(seen) and len(unseen)
     assert seen["score"].median() > unseen["score"].median()
-
-
-def test_most_scored_cells_have_an_unobserved_mutant(tally_counts):
-    """The caveat the figure's readout rests on, as a number rather than a claim."""
-    cells, _ = dms_models.homolog_cells(panel_spec.SCATTER_HOMOLOG)
-    observed = dms_summary.mutant_observed(cells, tally_counts)
-    assert int(observed.sum()) == EXPECTED_MUTANT_OBSERVED
 
 
 @needs_counts

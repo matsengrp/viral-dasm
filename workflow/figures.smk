@@ -369,11 +369,6 @@ def dms_all_scores(*_):
     ]
 
 
-def dms_all_counts(*_):
-    """Every matched clade's leaf tally."""
-    return [str(dms_leaf_count_path(clade)) for clade in DMS_CLADES]
-
-
 rule dms_predictors:
     """The DMS predictor comparison, as far as it is built without a model.
 
@@ -533,7 +528,6 @@ rule dms_predictor_summary:
     input:
         script="scripts/dms_summary.py",
         models="scripts/dms_models.py",
-        leaf_freq="scripts/dms_leaf_freq.py",
         dms="scripts/dms.py",
         published="scripts/dms_published.py",
         spec="scripts/panel_spec.py",
@@ -547,12 +541,14 @@ rule dms_predictor_summary:
         parquet_backend="dasm2/data/parquet_backend.py",
         dasm2_init="dasm2/__init__.py",
         dms_csv=dms_files,
+        # No leaf tally: this reads the scores, and the correlation it computes
+        # is over the cells they carry. The tallies reach it only through
+        # `dms_leaf_scores`, which is upstream of the scores it does read.
         clade_founders=clade_founder_fastas,
         censored=str(mat_pcp_path("censored_mutations_file")),
         clades=str(mat_pcp_path("censored_clades_file")),
         masked=str(mat_pcp_path("masked_nt_sites_file")),
         scores=dms_all_scores,
-        counts=dms_all_counts,
     output:
         table=str(panel_csv_path(DMS_SELECTION, DMS_PREDICTOR_CORRELATIONS)),
     log:
@@ -562,7 +558,6 @@ rule dms_predictor_summary:
     shell:
         "python {input.script}"
         " --scores {input.scores}"
-        " --counts {input.counts}"
         " --output {output.table}"
         " > {log} 2>&1"
 

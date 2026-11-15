@@ -274,16 +274,12 @@ residue's leaf count to the clade founder's at that site.
 | `dms_leaf_scores` | the leaf frequency's score for every cell one assay measured |
 | `dms_predictor_summary` | the DMS predictor table: each predictor against the DMS, per homolog and stratum |
 
-**The two live at different altitudes, and the table reports both.** Pooled over
-every measured cell, the leaf predictor leads on all three homologs. But it is
-very nearly a per-site statistic — `-log(parent count + 1)` alone, which says
-nothing about which residue a substitution goes to, scores as well as the full
-thing — while BLOSUM62 carries no site information at all, so a pooled
-correlation is mostly a statement about between-site variance. Centre both the
-score and the measurement on their per-site means and the ordering reverses:
-BLOSUM62 is the better substitution-level predictor on every homolog. So the
-table carries the pooled and the within-site coefficients side by side, and
-anything written from it should say which question it is answering.
+**What the leaf predictor measures is closer to the site than to the
+substitution**, because a substitution's score is dominated by the parent
+residue's own leaf count. A correlation over every measured cell is therefore
+substantially a statement about which sites a clade varies at. The table reports
+the correlation; reading it as "this ranks which substitution is tolerated"
+would be reading more than it says.
 
 **These rules are in the default target.** `rule all` includes them, so a bare
 `snakemake` plans the three leaf tallies -- about 2.4 GB of path files read, and
