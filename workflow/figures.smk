@@ -204,13 +204,17 @@ rule compose_subsampling:
 
 
 def dms_files(*_):
-    """The three prepared DMS CSVs, by the paths `config.yaml` names.
+    """The three published DMS files, by the paths `config.yaml` names.
 
-    Declared as files rather than as the directory they share: that directory
-    is a shared functional-data store with other studies in it, and a rule
-    that declared it would rerun whenever any of them changed. The md5 in
-    `config.yaml` is the other half of this -- the paths catch a file that
-    moved, the digest catches one replaced in place.
+    They are copies of what each study released, carried in `data/dms/` and
+    converted by `scripts/dms_published.py` when they are read, so this figure
+    rebuilds from the checkout alone.
+
+    Declared as files rather than as the directory holding them, so that
+    `data/dms/PROVENANCE.md` -- which these rules do not read -- cannot
+    invalidate a panel by being edited. The md5 in `config.yaml` is the other
+    half: the paths catch a file that moved, the digest catches one replaced
+    in place by a later release.
     """
     return [str(dms_dataset(homolog).path) for homolog in dms_homologs()]
 
@@ -236,6 +240,7 @@ rule dms_correlations:
     """
     input:
         dms="scripts/dms.py",
+        published="scripts/dms_published.py",
         panels="scripts/panels.py",
         spec="scripts/panel_spec.py",
         charts="scripts/panel_charts.py",
@@ -258,9 +263,10 @@ rule dms_correlations:
         dasm2_init="dasm2/__init__.py",
         notebook="notebooks/dms_correlations.py",
         table=SCORED_TABLE,
-        # The assays themselves, and the founders every one of them is read
-        # against: `load_dms` drops the measurements whose wildtype disagrees
-        # with the clade founder, and the strata are the founder's codons.
+        # The assays themselves, as `data/dms/` carries them, and the founders
+        # every one of them is read against: `load_dms` drops the measurements
+        # whose wildtype disagrees with the clade founder, and the strata are
+        # the founder's codons.
         dms_data=dms_files,
         clade_founders=founder_fastas,
         founder_reader="scripts/founders.py",

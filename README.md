@@ -40,7 +40,8 @@ results/      the publishable tables it writes, tracked
 ```
 
 The two data directories split by direction, not by provenance. `data/` holds
-input a reader may edit -- today just the era template. `results/` holds what
+input a reader may edit -- the era template, the shift candidates and the
+three published DMS files. `results/` holds what
 the pipeline produces and the repository keeps: `runs.csv`, and one CSV per
 figure panel. Everything large or intermediate -- corpora,
 checkpoints, the scored table, logs -- goes under `artifact_root` on the
@@ -87,13 +88,15 @@ outputs. mat-pcp's outputs are plain inputs here — this pipeline never reaches
 behind them to a tree, an alignment or a MAT, so a missing input stops the DAG
 at the mat-pcp target that produces it.
 
-**One input is not GISAID-derived.** `fig:dms` reads three published deep
-mutational scans — full-spike cell-entry measurements on BA.1, XBB.1.5 and
-KP.3.1.1 — which have their own papers and their own repositories. A reader
-without GISAID access can obtain them. `config.yaml`'s `dms` block names them
-by path and pins each one's md5, and this repository does not redistribute
-them: they belong to the groups that published them, and a reader who wants to
-rebuild that figure fetches them from those repositories.
+**One input is not GISAID-derived, and it is carried here.** `fig:dms` reads
+three published deep mutational scans — full-spike cell-entry measurements on
+BA.1, XBB.1.5 and KP.3.1.1 — which have their own papers and their own
+repositories. `data/dms/` holds a copy of each study's released file, pinned
+by md5 in `config.yaml`'s `dms` block and documented in
+`data/dms/PROVENANCE.md`, so a reader without GISAID access rebuilds that
+figure from this checkout rather than reassembling its inputs. The conversion
+to this pipeline's columns, and each study's own filtering, are applied in
+`scripts/dms_published.py` where they can be read and tested.
 
 The trained checkpoints are parameters, not sequence, so they are published.
 Every figure depends on a checkpoint *path* that either a training rule or a

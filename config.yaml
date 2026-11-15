@@ -246,38 +246,64 @@ smoke_corpus:
 # matched to the clade whose founder the model is scored on.
 #
 # The one block here that is NOT GISAID-derived. These are published datasets
-# with their own papers, so a reader without GISAID access can still rebuild
-# this figure, and the files may be redistributed. They are named as prepared
-# CSVs rather than as the repositories they came from: the preparation --
-# replicate averaging, the lasso shift, the `times_seen` filter -- belongs to
-# whoever published them, and repeating it here would be a second, divergent
-# definition of each dataset.
+# with their own papers, carried in `data/dms/` exactly as each study released
+# them, so a reader without GISAID access rebuilds this figure from the
+# checkout alone. `data/dms/PROVENANCE.md` records each file's repository,
+# commit and citation.
 #
-# `md5` is a gate, not a label, and it is the reason this block carries one at
-# all. EPIC #1's M5 records that KP.3.1.1 should be repointed at filtered
-# measurements, and that repoint replaces the file *at this same path*. Without
-# a digest every retained-mutation count this figure reports would go stale
-# silently, while the pipeline kept running.
+# Each entry names the study's own columns and, where the study applies a
+# filter its released file does NOT already carry, that study's own
+# thresholds. `scripts/dms_published.py` applies them and says where each was
+# read from. A homolog with no threshold here is one whose published file is
+# already filtered -- which is the common case, and the reason the two keys
+# are absent rather than zero.
+#
+# `md5` is a gate, not a label. These copies are of released files that their
+# studies can re-release at the same path, and without a digest every
+# retained-mutation count this figure reports would go stale silently while
+# the pipeline kept running.
 #
 # `clade` is the Nextstrain label this pipeline keys every table on, not the
 # Pango alias the papers use. `scripts/dms.py` requires each one to be in
 # `lib.clade_roster()`, so a homolog whose clade has no founder fails there
 # rather than joining to nothing.
 dms:
-    root: /fh/fast/matsen_e/shared/bcr-mut-sel/functional-data
+    root: data/dms
     homologs:
+        # Already filtered by its own study: `spike-analysis.ipynb` writes this
+        # table at `times_seen_threshold = 1` over both replicate fits
+        # (`how="inner"`), at the lasso strength that notebook calls the chosen
+        # one for the final spike model results, 5e-05. BA.1 is the model's
+        # reference condition, which is why its predicted score carries no
+        # homolog suffix.
         BA.1:
             clade: 21K
-            file: haddox_spike_Omicron_BA1.csv
-            md5: 9f21c3ee991c1e7ea7a4362e510bc3c2
+            file: haddox2023_BA1_mutations_df.csv
+            md5: f0bab6c525807fb8c98f035d8956090c
+            wt_column: wts
+            site_column: sites
+            mutant_column: muts
+            effect_column: avg_predicted_func_score
+        # Already filtered by its own study: this is the summary that
+        # experiment publishes across its assays, and `spike mediated entry`
+        # is the phenotype this figure reads.
         XBB.1.5:
             clade: 23A
-            file: dadonaite2024_XBB15_cell_entry.csv
-            md5: 18c630548aa0e5d3b3a6e341bc8bbd26
+            file: dadonaite2024_XBB15_summary.csv
+            md5: 780555ebc4431ff36b55fb0ddd52de6a
+            effect_column: spike mediated entry
+        # NOT filtered by its own study, which publishes the averaged
+        # per-phenotype table and leaves the thresholds to the consumer. The
+        # two below are that repository's own, from
+        # `data/func_effects_config.yml` and `data/summaries_config.yml`;
+        # applying them reproduces its published filtered column exactly.
         KP.3.1.1:
             clade: 24E
-            file: dadonaite2025_KP311_cell_entry.csv
-            md5: 6cb4e58c8e61831fac6f470325b68a7c
+            file: dadonaite2025_KP311_func_effects.csv
+            md5: 3ffae2185b691e40bd35359feb55489e
+            effect_column: effect
+            min_times_seen: 2
+            max_effect_std: 2.5
 
 # The split every reference run held out, and every model in the paper holds
 # out. Only the three numbers every arm shares live here; the resulting fold
