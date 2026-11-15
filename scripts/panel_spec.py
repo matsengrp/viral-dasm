@@ -28,6 +28,7 @@ from lib import (
     FITNESS_SUFFIX,
     FULL_DEPTH,
     REPO_ROOT,
+    SAMPLE_PATHS_SUFFIX,
     TEX_FIGURE_DIR,
     cap_of,
 )
@@ -540,6 +541,56 @@ DMS_FIGURE_SCALE = 1.0
 #: equal to it. Named here as well so the panel letters follow the panels when
 #: the type changes.
 DMS_TITLE_PX = 15
+
+
+#: `fig:dms`'s reference predictors, in the order the comparison groups them.
+#: Spelled here rather than imported from `scripts/dms_models.py`, which pulls
+#: pandas, Biopython and `dasm2`: this module is stdlib-plus-`lib` so that
+#: `workflow/figures.smk` stays cheap to parse. `tests/test_dms_models.py` pins
+#: the two together.
+DMS_PREDICTORS: tuple[str, ...] = ("blosum62", "leaf_logfreq")
+
+#: Every predictor's correlation with the DMS, per homolog and per stratum.
+#:
+#: **A table, not a panel.** The four stems in :data:`DMS_PANELS` are the
+#: published figure's, reproduced by #27; the comparison this names has no drawn
+#: home until the DASM's own column lands, which needs
+#: `selection_factors.parquet`. So the stem is the CSV's and the figure is
+#: untouched -- and it is deliberately not spelled `panel_c_*`, which on this
+#: figure already means something else.
+DMS_PREDICTOR_CORRELATIONS = "predictor_correlations"
+
+#: Where `fig:dms`'s predictor intermediates go: under the artifact root, not in
+#: the tree. One narrow Parquet per `(predictor, homolog)`.
+DMS_SCORE_DIR = ARTIFACT_ROOT / "dms" / "scores"
+
+#: Where each clade's leaf residue tally goes. **Under the artifact root, not in
+#: tracked ``results/``.** A 20 x 1,273 tally over a clade's GISAID leaves is a
+#: derived per-site slice of the tree, which `README.md` says this repository
+#: does not hold; what is committed is the correlation table built from it, which
+#: carries no site and no sample.
+DMS_LEAF_COUNT_DIR = ARTIFACT_ROOT / "dms" / "leaf_counts"
+
+
+def dms_score_path(model: str, homolog: str) -> Path:
+    """One predictor's scores for one homolog."""
+    return DMS_SCORE_DIR / f"{model}_{homolog}.parquet"
+
+
+def dms_leaf_count_path(clade: str) -> Path:
+    """One clade's leaf residue tally."""
+    return DMS_LEAF_COUNT_DIR / f"{clade}.csv"
+
+
+def sample_paths_path(root: Path, clade: str) -> Path:
+    """One clade's per-leaf mutation paths, inside the directory `config.yaml` names.
+
+    Here for the reason the other path helpers are here: `workflow/figures.smk`
+    declares this file as a rule's input and `scripts/dms_leaf_freq.py` opens it,
+    so a rule that declared one spelling while the script read another would be a
+    `MissingInputException` at best and an undeclared input at worst.
+    """
+    return root / f"{clade}{SAMPLE_PATHS_SUFFIX}"
 
 
 #: Panel stems, as the figure's composition reads them. Named here so a rule

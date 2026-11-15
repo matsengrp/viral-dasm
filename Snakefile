@@ -61,3 +61,4 @@ rule all:
         rules.scored.input,
         rules.figures.input,
         rules.subsampling.input,
+        rules.dms_predictors.input,

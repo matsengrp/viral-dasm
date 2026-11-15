@@ -82,6 +82,22 @@ mat_pcp:
     # founders, the per-clade fitness tables and `censored_clades_file` to name
     # the same set.
     clade_founders_dir: clade_founders/S
+    # One `{clade}_sample_paths.tsv` per clade: one row per leaf, holding that
+    # leaf's whole root-to-tip path as `node_id:NT_MUT[,NT_MUT...]` tokens.
+    # `fig:dms`'s leaf log-frequency predictor reconstructs each leaf's spike
+    # from these and tallies residues per site.
+    #
+    # The per-leaf paths, not `{clade}_mutations.tsv`'s `aa_mutations` column,
+    # which would skip the nucleotide step: 964 of clade 24E's 88,722 distinct
+    # path tokens have no row in that file at all, so those branches'
+    # substitutions would be dropped with nothing saying so. Nor
+    # `leaves_sharing_mutations`, which would skip the per-leaf expansion: a
+    # leaf's residue at a site is set by the *last* mutation on its path, so
+    # reversions and repeat hits break a weighted tally.
+    #
+    # GISAID-derived, and the only file here whose rows carry sample names. The
+    # tally built from it stays under `artifact_root`; see `README.md`.
+    sample_paths_dir: mutations
     # The run's axes, spelled out rather than parsed back out of `manifest`.
     # They appear in every neutral archive's stem and in the era map's
     # `neutral_model_name`, which is the only record in a finished Parquet of

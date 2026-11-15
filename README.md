@@ -81,6 +81,15 @@ The clade founders are the one derived sequence that *is* published, inside
 the scored table and the panel CSVs — see the layout note above for why they
 do not fall under this.
 
+One case this pipeline produces itself is decided the same way. `fig:dms`'s
+leaf-frequency predictor tallies, per site, which residues a clade's own tree
+leaves carry — a 20 x 1,273 table over as many as 1.9 million named GISAID
+samples. That table holds no sample name and no sequence, so the clause above
+does not forbid it outright; it is kept under `artifact_root` anyway, because it
+is a residue-level summary of per-sample material and committing it buys
+nothing. What is committed is the correlation table built from it, which carries
+a homolog, a predictor, a stratum and a coefficient.
+
 Reproducibility therefore runs through the code, not the data. Both pipelines
 are published: a reader with their own GISAID access runs `mat-pcp` on the
 UShER tree to produce PCPs and counts, then runs this pipeline on those
@@ -204,6 +213,10 @@ already did the forward passes, so a panel rule reads
 |---|---|
 | `agreement_mutations` | panels A, B and D: one mutation across the clades, one clade's cloud, the shift grid |
 | `agreement_ladders` | panels C and E: both correlations against the count cutoff |
+| `dms_leaf_counts` | one clade's per-site residue tally over its own tree leaves |
+| `dms_blosum_scores` | BLOSUM62's score for every cell one assay measured |
+| `dms_leaf_scores` | the leaf frequency's score for every cell one assay measured |
+| `dms_predictor_summary` | the DMS predictor table: each predictor against the DMS, per homolog and stratum |
 | `compose_agreement` | the figure itself, laid out from those five PNGs |
 
 `snakemake dms` draws `fig:dms` the same way, from the same scored table plus
@@ -249,6 +262,30 @@ so the two now differ by exactly that -- 67,564 mutations at rung 10 against
 65,430, over the same 22 clades, at a pooled median r of 0.9662 against 0.9664.
 It is a second model pair through the same code and a diff to read when this
 filter changes again, not a live claim about upstream.
+
+`snakemake dms_predictors` builds the part of the DMS comparison that reads no
+scored table at all: the two reference predictors, and the join the published
+models will land through. BLOSUM62 asks how much of a deep mutational scan a
+general substitution matrix already explains. The leaf frequency reconstructs
+every one of a clade's tree leaves from its own root-to-tip mutation path,
+tallies residues per site, and scores a substitution by the log ratio of its
+residue's leaf count to the clade founder's at that site.
+
+**The two live at different altitudes, and the table reports both.** Pooled over
+every measured cell, the leaf predictor leads on all three homologs. But it is
+very nearly a per-site statistic — `-log(parent count + 1)` alone, which says
+nothing about which residue a substitution goes to, scores as well as the full
+thing — while BLOSUM62 carries no site information at all, so a pooled
+correlation is mostly a statement about between-site variance. Centre both the
+score and the measurement on their per-site means and the ordering reverses:
+BLOSUM62 is the better substitution-level predictor on every homolog. So the
+table carries the pooled and the within-site coefficients side by side, and
+anything written from it should say which question it is answering.
+
+**No panel is drawn from it here.** `fig:dms`'s four panels are the published
+figure's, which `rule dms` builds; this comparison has no drawn home until the
+DASM's own column lands, and that is a filter on `selection_factors.parquet`.
+What these rules produce is the table it will be drawn from.
 
 **Where the two kinds of output go.** The tables land in tracked
 `results/panels/<selection>/`, one CSV per panel holding exactly what that
