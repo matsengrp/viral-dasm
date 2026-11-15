@@ -22,7 +22,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from lib import ARTIFACT_ROOT, REPO_ROOT, TEX_FIGURE_DIR
+from lib import (
+    ARTIFACT_ROOT,
+    CORPUS_NAMES,
+    FITNESS_SUFFIX,
+    FULL_DEPTH,
+    REPO_ROOT,
+    TEX_FIGURE_DIR,
+    cap_of,
+)
 
 #: The committed era partition: which clades each era's GLM was fitted over.
 #: `workflow/corpus.smk` spells this too, for the rule that renders the map.
@@ -194,6 +202,13 @@ CANDIDATE_COLUMNS = ("clade", "mutation", "status")
 #: chosen on. In `results/` rather than `data/`, because the pipeline writes
 #: it; model-free, so not under a selection.
 BACKGROUND_CSV = REPO_ROOT / "results" / "backgrounds" / "clade_backgrounds.csv"
+
+#: Where the clade emergence dates go: one row per clade, with the sample
+#: count the date was measured over. `fig:subsampling`'s panel A colours its
+#: dots by it. In `results/` and not under a selection, for the reasons
+#: :data:`BACKGROUND_CSV` gives -- the pipeline writes it, and no model
+#: touches it.
+EMERGENCE_CSV = REPO_ROOT / "results" / "backgrounds" / "clade_emergence.csv"
 
 #: The role a background row may carry. `marker` is the clade's most abundant
 #: substitution, `cotraveller` one carried by most of the marker's branches,
@@ -383,6 +398,72 @@ def _candidate_rows() -> list[tuple[str, str, str]]:
     return out
 
 
+# ---------------------------------------------------------------------------
+# `fig:subsampling`
+# ---------------------------------------------------------------------------
+
+#: The directory `fig:subsampling`'s panels are written under -- a **directory
+#: name, not a model selection**, and deliberately absent from
+#: :data:`SELECTIONS`.
+#:
+#: `SELECTIONS` is `rule panels`' wildcard domain, so a third entry there would
+#: let the agreement rules resolve `selection=subsampling` and draw agreement
+#: panels into this figure's directory. `figure_dir` and `panel_csv_path` are
+#: plain joins and validate nothing, so the two new rules pass this string with
+#: no `{selection}` wildcard and `tests/test_panels.py` pins it out of
+#: `SELECTIONS`.
+SUBSAMPLING_SELECTION = "subsampling"
+
+#: Which panel directories hold a composition the manuscript takes. See
+#: :func:`tex_figure_dir`, which is where the distinction bites: `fidelity`
+#: is the one directory that composes a figure the paper does not publish.
+PUBLISHED_SELECTIONS: frozenset[str] = frozenset(
+    {DEFAULT_SELECTION, SUBSAMPLING_SELECTION}
+)
+
+#: The two clades panel B draws, under the names the paper uses beside the
+#: labels this pipeline keys on. `main.tex` names clades by their Pango or WHO
+#: alias and every table here is keyed by the bare Nextstrain clade: Delta is
+#: `21J` and XFG is `25C`. The tree's own metadata spells the pair -- its
+#: `Nextstrain_clade_usher` field reads `25C (XFG)` over `XFG.*` lineages --
+#: and the panel's facet titles use that form, so a reader of the paper and a
+#: reader of `results/panels/` can follow the same figure.
+ECDF_CLADES: dict[str, str] = {"21J": "21J (Delta)", "25C": "25C (XFG)"}
+
+#: The counts panel B's eCDF is evaluated at. Linear and stopping at 20: the
+#: accuracy threshold is 10, so this is the range either side of the cutoff the
+#: rest of the paper reads everything at, and a log axis would spend most of
+#: its width past the point where the curves have flattened.
+ECDF_MAX_COUNT = 20
+ECDF_POINTS = 201
+
+
+def subsampling_caps() -> tuple[int, ...]:
+    """Each thinned arm's per-clade cap, deepest first.
+
+    Read off the corpus names rather than restated -- `cap_50000_0` is a cap of
+    50,000 -- so panel A's rules cannot drift from the arms that were built.
+    Panel A draws one rule per cap, and every clade above a rule is cut back
+    *to* it, which is the whole difference between a cap arm and a fraction
+    arm.
+    """
+    return tuple(cap_of(name) for name in CORPUS_NAMES if name.startswith("cap_"))
+
+
+def aamut_grid_path(root: Path, clade: str, arm: str) -> Path:
+    """One clade's amino-acid grid at one sampling depth.
+
+    Full depth is the **top level** of `aamut_fitness_dir` and each thinned arm
+    is a subdirectory named for its corpus. Here rather than in the two callers
+    because `workflow/figures.smk` declares these files as `rule
+    subsampling_depth`'s inputs and `scripts/panels.py` opens them: a rule that
+    declared one layout while the notebook read another would be a
+    `MissingInputException` at best and a silently undeclared input at worst.
+    """
+    directory = root if arm == FULL_DEPTH.name else root / arm
+    return directory / f"{clade}{FITNESS_SUFFIX}"
+
+
 #: Panel stems, as the figure's composition reads them. Named here so a rule
 #: knows which notebook produces which panel.
 MUTATION_PANELS = (
@@ -394,6 +475,149 @@ LADDER_PANELS = (
     "panel_c_within_clade_ladder",
     "panel_e_shift_ladder",
 )
+
+#: `fig:subsampling`'s depth pair, panels A and B, which measure the tree and
+#: take no model.
+DEPTH_PANELS = (
+    "panel_a_sequences_per_clade",
+    "panel_b_count_ecdf",
+)
+
+#: `fig:subsampling`'s recovery pair, panels C and D, which do take a model.
+LADDER_ARM_PANELS = (
+    "panel_c_arm_scatter_grid",
+    "panel_d_arm_ladder",
+)
+
+#: The model panels C and D draw **at each sampling depth**: the largest one
+#: trained on that tree, since a dramatically thinned tree is fitted with a
+#: smaller model.
+#:
+#: **The comparison these panels make is unaffected.** Each column sets the
+#: DASM approach against the counts approach on one tree, and both sides of
+#: that comparison see the same tree; the model's size varies down the
+#: sampling ladder but never within a column, which is where the claim lives.
+#:
+#: Full depth is :data:`FIGURE_MODEL`, so panel C's baseline column is the
+#: model the rest of the paper publishes and `fig:agreement` panel B draws --
+#: the same clade and the same mutations, which is a comparison a reader will
+#: make whether or not the caption invites it.
+#:
+#: The thinned arms are `dasm-85k` because that is the only architecture
+#: `scripts/runs.py`'s `RUNS` trains on the cap corpora; every other one runs
+#: at full depth alone. So this mapping is not free -- adding an arm here
+#: means training it there.
+SUBSAMPLING_FULL_DEPTH_MODEL = FIGURE_MODEL
+SUBSAMPLING_THINNED_MODEL = "dasm-85k"
+
+
+def subsampling_model(arm: str) -> str:
+    """Which model panels C and D draw at ``arm``.
+
+    A function rather than a dict literal so a corpus added to `config.yaml`
+    is covered the moment it exists, and the full-depth name is spelled once.
+    """
+    return (
+        SUBSAMPLING_FULL_DEPTH_MODEL
+        if arm == FULL_DEPTH.name
+        else SUBSAMPLING_THINNED_MODEL
+    )
+
+
+#: Every model the two panels load, deduplicated and in arm order. The rules
+#: declare their scored inputs from this, so a model named above and never
+#: trained fails at the DAG rather than inside the notebook.
+SUBSAMPLING_MODELS: tuple[str, ...] = tuple(
+    dict.fromkeys(subsampling_model(arm) for arm in CORPUS_NAMES)
+)
+
+#: The clade panel C scatters, at every arm. Delta, the deepest clade: the
+#: panel's job is to show the clouds behind one row of panel D.
+SUBSAMPLING_SCATTER_CLADE = "21J"
+
+#: The clades panel D draws a line each for, deepest first. Ranked on sequence
+#: count in `mat/clade_counts.csv` -- 4,344,573 / 2,061,093 / 1,962,904 /
+#: 1,942,882 / 1,327,053 -- which is the ranking `main.tex` names. The figure
+#: re-ranks on its own `n_mutations` and asserts the same five in the same
+#: order, rather than trusting the two rankings to agree.
+#:
+#: These are also :data:`SCAN_CLADES`, which `fig:within_clade_shifts` selects
+#: by a third rule. Spelled separately rather than aliased: one name meaning
+#: three different selections is a name that cannot be changed for one of them.
+SUBSAMPLING_LADDER_CLADES: tuple[str, ...] = ("21J", "22B", "21L", "21K", "20I")
+
+#: The lower bound panels C and D clamp both axes to.
+#:
+#: **Not `CLIP_LOWER`.** The library's bound is -4.0, which is what
+#: `fig:agreement` is drawn at; this figure is drawn at -6.0, and a sibling
+#: constant of the library's name would be a trap for whoever read one and
+#: meant the other. `tests/test_panels.py` pins the two apart.
+#:
+#: The clip is a control rather than a filter: it moves where a point is drawn
+#: and leaves the row set alone, so `n_mutations` is the same with it and
+#: without.
+SUBSAMPLING_CLIP_LOWER = -6.0
+
+#: `fig:subsampling`'s stem, which is its LaTeX label: `main.tex` includes
+#: `figures/subsampling.pdf`. One spelling, so the file the manuscript
+#: includes and the file this pipeline writes cannot drift.
+SUBSAMPLING_FIGURE_STEM = "subsampling"
+
+#: Which panel stem each letter is, in the caption's order. Derived nowhere:
+#: a letter is a caption fact and a stem is a filename, and nothing in either
+#: implies the other.
+SUBSAMPLING_PANEL_LETTERS: dict[str, str] = {
+    "A": DEPTH_PANELS[0],
+    "B": DEPTH_PANELS[1],
+    "C": LADDER_ARM_PANELS[0],
+    "D": LADDER_ARM_PANELS[1],
+}
+
+#: Which panels sit on which row, left to right; a tuple inside a row is a
+#: column of panels stacked within it.
+#:
+#: **This is the published figure's arrangement, carried across unchanged.** A
+#: spans the top, because 56 clades across need the width. Below it, B sits
+#: directly over C in one column, with D -- the tall one -- beside them and its
+#: top level with B's. It is `notebooks/subsampling.py`'s ``ROWS`` in
+#: `dasm2-experiments`, `experiments/2026-09-09-viral-dasm-figure-drafts`, the
+#: notebook `main.tex`'s provenance comment names.
+#:
+#: The arrangement only works while the panels keep the shapes it was chosen
+#: for: D tall and narrow (the five clades down the page, the two statistics
+#: across) and C short and wide (the four arms across, the two approaches
+#: down). `scripts/panel_charts.py` draws them that way deliberately, and
+#: `tests/test_panels.py` pins the aspect each one has to keep.
+SUBSAMPLING_FIGURE_ROWS: tuple[tuple[str | tuple[str, ...], ...], ...] = (
+    ("A",),
+    (("B", "C"), "D"),
+)
+
+#: The box this figure has to fit inside, in inches, and the fraction of it to
+#: use -- `fig:agreement`'s box and the published figure's own scale, so the
+#: two sit at one size in the manuscript. Nine tenths of the box: the panels'
+#: type is set larger on the page than the other figures' (see
+#: :data:`SUBSAMPLING_TITLE_PX`), and the figure gives back some width so the
+#: type-to-figure ratio lands where the manuscript wants it.
+SUBSAMPLING_BOX_IN: tuple[float, float] = (7.5, 8.0)
+SUBSAMPLING_FIGURE_SCALE = 0.9
+
+#: What this figure's panel titles and axis labels measure in the Vega-Lite
+#: spec. The panel letters are sized against the title; see `figure_layout`'s
+#: header for the conversion.
+#:
+#: **This is the one figure not drawn at `PANEL_FONT_SIZE`**, and it is drawn
+#: larger for a reason that belongs to its layout rather than to its taste.
+#: `SUBSAMPLING_FIGURE_ROWS` puts two panels across the lower row, so about
+#: 1,580 Vega-Lite units of panel have to fit the page width, against roughly
+#: 1,350 for `fig:within_clade_shifts`' widest row and one panel for each row
+#: of a stacked figure. Type is sized in those same units, so the same spec
+#: size lands smaller on the page here than anywhere else: at
+#: `PANEL_FONT_SIZE` these titles compose to about 5 pt against the paper's
+#: 6.6 to 7.2 pt. The published figure's two sources both drew it at 24 px for
+#: this reason, and these are their sizes.
+SUBSAMPLING_TITLE_PX = 24
+SUBSAMPLING_LABEL_PX = 22
 
 #: `fig:within_clade_shifts`'s stems, one tuple per producing notebook.
 #: One stem per clade, not one image of both. The composed figure puts each
@@ -560,14 +784,18 @@ def tex_figure_dir(selection: str) -> Path | None:
     Re-exported from `lib` so a notebook and `workflow/figures.smk` read this
     module alone for every path in this figure.
 
-    **Only the published selection is copied.** Every selection composes to
-    `FIGURE_STEM`, so a `fidelity` composition would land on the manuscript's
-    `agreement.pdf` and replace the paper's figure with a panel set drawn from
-    two other models -- same size, same layout, different numbers, and nothing
-    downstream to notice. `snakemake figures` builds both, which is how that
-    became reachable.
+    **Only a published selection is copied.** The two agreement selections
+    compose to the same `FIGURE_STEM`, so a `fidelity` composition would land
+    on the manuscript's `agreement.pdf` and replace the paper's figure with a
+    panel set drawn from two other models -- same size, same layout, different
+    numbers, and nothing downstream to notice. `snakemake figures` builds both,
+    which is how that became reachable.
+
+    `subsampling` is not a model selection at all but this figure's own
+    directory, with one panel set and a stem of its own, so there is no second
+    composition for it to be confused with and it is copied.
     """
-    if selection != DEFAULT_SELECTION:
+    if selection not in PUBLISHED_SELECTIONS:
         return None
     return TEX_FIGURE_DIR
 

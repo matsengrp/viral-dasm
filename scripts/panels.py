@@ -63,8 +63,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 # `lib` first, so this repository's root is on `sys.path` before anything
 # imports `dasm2` and the vendored fork wins over an editable install.
 from lib import (  # noqa: F401  (`corpus` re-exported for the notebooks)
+    CORPUS_NAMES,
+    FULL_DEPTH,
     GENE,
     assert_dasm2_is_this_repo,
+    clade_roster,
     corpus,
     mat_pcp_path,
 )
@@ -77,6 +80,7 @@ assert_dasm2_is_this_repo()
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from datetime import date
 from functools import cache
 
 import numpy as np
@@ -96,9 +100,15 @@ from panel_spec import (  # noqa: F401  (re-exported for the notebooks)
     CANDIDATE_LABEL_SIDES,
     COUNT_LADDER,
     DEFAULT_SELECTION,
+    DEPTH_PANELS,
+    ECDF_CLADES,
+    ECDF_MAX_COUNT,
+    ECDF_POINTS,
+    EMERGENCE_CSV,
     FIDELITY_MODELS,
     FIGURE_DIR,
     FIGURE_MODEL,
+    LADDER_ARM_PANELS,
     LADDER_PANELS,
     LOOKUP_MUTATION,
     MUTATION_PANELS,
@@ -112,16 +122,23 @@ from panel_spec import (  # noqa: F401  (re-exported for the notebooks)
     SCATTER_CLADE,
     SELECTIONS,
     SHIFT_CLADES,
+    SUBSAMPLING_CLIP_LOWER,
+    SUBSAMPLING_LADDER_CLADES,
+    SUBSAMPLING_SCATTER_CLADE,
+    SUBSAMPLING_SELECTION,
     TABLE_COLUMNS,
+    aamut_grid_path,
     figure_candidates,
     figure_dir,
     labelled_candidates,
     panel_csv_path,
     parse_mutation,
     selection_models,
+    subsampling_caps,
+    subsampling_model,
 )
 
-from dasm2.analysis.viral import filter_merged_fitness
+from dasm2.analysis.viral import filter_merged_fitness, normalize_fitness_columns
 
 # The statistics are re-exported rather than imported again in each notebook:
 # the panels then take their filter chain and their correlations from one
@@ -684,14 +701,26 @@ def with_count_noise_interval(
 
 
 def write_panel_csv(
-    frame: pd.DataFrame, stem: str, *, selection: str, spec: FilterSpec
+    frame: pd.DataFrame, stem: str, *, selection: str, spec: FilterSpec | None
 ) -> Path:
     """Write one panel's table to tracked ``results/panels/<selection>``.
 
     The filter spec rides along as columns rather than sitting in a sidecar:
     every number in the file moves with the cutoff and the clip, and a reader
     who opens the CSV alone should not have to find out which they were.
+
+    ``spec=None`` writes the frame unchanged, for a panel that has no filter to
+    declare. ``fig:subsampling``'s panels A and B are that case: they measure
+    the tree rather than a model, so there is no cutoff, no clip and no site
+    exclusion, and spec columns there would state six choices that were never
+    made. It is required rather than defaulted, so a panel that *does* filter
+    cannot omit it by forgetting.
     """
+    if spec is None:
+        path = panel_csv_path(selection, stem)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        frame.to_csv(path, index=False)
+        return path
     columns = spec.as_row()
     collisions = sorted(set(columns) & set(frame.columns))
     if collisions:
@@ -759,3 +788,403 @@ def shift_pair_founders(clades: Sequence[str] = SHIFT_CLADES) -> dict[str, str]:
     r = 0.
     """
     return founder_aa_sequences(clades, GENE)
+
+
+# ---------------------------------------------------------------------------
+# `fig:subsampling` panels A and B: the tree's sampling depth
+# ---------------------------------------------------------------------------
+#
+# Neither reads the scored table. These two panels are a measurement of the
+# corpus rather than of a model: panel A is how unevenly the clades are
+# sampled, and panel B is what that costs a clade's mutation counts. They take
+# no checkpoint, no GPU and no `selection_factors.parquet`, which is what lets
+# them be built while the models are still training.
+
+#: Decimals a share is written with. The denominator is a clade's spike grid,
+#: about 11,371 mutations, so one mutation moves a share by 8.8e-5 and six
+#: decimals is already finer than the smallest real step. The float's own 16
+#: digits record how a pandas version chose to print it, not what the tree
+#: says, and they are what makes a tracked table a diff on noise.
+SHARE_DECIMALS = 6
+
+#: How mat-pcp's grid spells a stop. `_aa_grid` drops these, because the
+#: scored table panels C and D read has 20 amino acids per site and no stop,
+#: so a stop kept here would be a mutation only one half of the figure counts.
+STOP_AA = "*"
+
+#: The amino-acid-grid columns panel B reads. The grid is genome-wide, so
+#: `gene` restricts it to spike; the founder and mutant residues are read to
+#: drop the synonymous and nonsense rows, and the two counts are the statistic.
+AA_GRID_COLUMNS = (
+    "actual_count",
+    "expected_count",
+    "gene",
+    "clade_founder_aa",
+    "mutant_aa",
+)
+
+
+def clade_size_frame(counts_csv: Path, emergence_csv: Path) -> pd.DataFrame:
+    """Sequences per clade and when each emerged, for the clades scored.
+
+    ``clade,n_sequences,year``, descending by count. ``year`` is the
+    clade's emergence as a decimal year, which panel A colours its dots by;
+    `rule clade_emergence` measures it and
+    `scripts/clade_emergence.py` says what it means. The count is mat-pcp's own
+    ``mat/clade_counts.csv``, whose ``count`` is the line count of
+    ``mat/clades/{clade}_samples.txt`` -- the file the source panel walks --
+    so this is the cheaper route to the same heights and not a second
+    derivation of them.
+
+    **The table carries more clades than this pipeline scores**, and the extras
+    are dropped against :func:`lib.clade_roster` rather than passed through.
+    ``21A`` and ``25I`` have a count here, no founder FASTA, and no row in any
+    fitness table, so a panel drawn from the file as it stands would put two
+    bars beside 56 that every other table in the pipeline omits.
+
+    Raises:
+        ValueError: If a clade in the roster has no row in the counts table.
+            That direction is a real inconsistency rather than a known extra:
+            the roster is what gets scored, so a scored clade with no sequence
+            count means the two files describe different trees.
+    """
+    path = counts_csv
+    frame = pd.read_csv(path)
+    counts = dict(zip(frame["Nextstrain_clade_usher"], frame["count"], strict=True))
+
+    roster = clade_roster()
+    missing = sorted(clade for clade in roster if clade not in counts)
+    if missing:
+        raise ValueError(
+            f"{path}: no sequence count for {missing}, which this pipeline "
+            f"scores. The counts table and the founder roster describe "
+            f"different trees."
+        )
+
+    out = pd.DataFrame(
+        {"clade": roster, "n_sequences": [int(counts[c]) for c in roster]}
+    ).merge(_emergence_years(emergence_csv, roster), on="clade")
+    return out.sort_values("n_sequences", ascending=False, ignore_index=True)
+
+
+#: The origin the emergence date is measured from. Panel A colours on a
+#: *quantitative* scale rather than a temporal one -- see
+#: `panel_charts.clade_size_panel` on why -- so the date has to arrive as a
+#: number, and this is the conversion.
+EMERGENCE_EPOCH = date(2020, 1, 1)
+DAYS_PER_YEAR = 365.25
+
+
+def _emergence_years(emergence_csv: Path, roster: Sequence[str]) -> pd.DataFrame:
+    """``clade,year`` for ``roster``, as decimal years.
+
+    Raises:
+        ValueError: If a clade in the roster has no emergence row. That table
+            is written from the same founder roster this reads, so a gap means
+            the two were measured against different trees.
+    """
+    frame = pd.read_csv(emergence_csv)
+    missing = sorted(set(roster) - set(frame["clade"]))
+    if missing:
+        raise ValueError(
+            f"{emergence_csv}: no emergence date for {missing}, which this "
+            f"pipeline scores. Rerun `snakemake clade_emergence`."
+        )
+    epoch = EMERGENCE_EPOCH.toordinal()
+    years = [
+        None
+        if pd.isna(value)
+        else (date.fromisoformat(str(value)).toordinal() - epoch) / DAYS_PER_YEAR
+        + EMERGENCE_EPOCH.year
+        for value in frame["emergence"]
+    ]
+    return pd.DataFrame({"clade": frame["clade"], "year": years})
+
+
+def _aa_grid(
+    aamut_dir: Path, clade: str, arm: str, *, gene: str = GENE
+) -> pd.DataFrame:
+    """One clade's amino-acid grid at one sampling depth, restricted to a gene.
+
+    The layout is :func:`panel_spec.aamut_grid_path`'s, which
+    ``workflow/figures.smk`` declares this rule's inputs from, so the file a
+    rule promises and the file this opens are one spelling.
+
+    **The synonymous rows come out, and so do the stops.** The paper counts
+    "amino-acid mutations to the founder spike sequence": every row whose
+    mutant residue differs from the founder's, less the nonsense ones. A row
+    where the two agree is a synonymous codon change counted at the amino-acid
+    level and is not a mutation this figure is about.
+
+    **The stops come out because the DASM estimates nothing for them.** The
+    scored table is 20 amino acids per site with no stop, so panels C and D
+    never see one. With stops kept, 21J's panel B was drawn over 7,901
+    mutations and put 5,198 above the count threshold, while panels C and D
+    were built on 4,901 of the same clade -- 292 stops and 5 others apart. One
+    figure cannot answer "what share of this clade's mutations clear the
+    threshold" over one population and "how well is that share recovered" over
+    another.
+
+    **The unobservable founder codons come out too**, through
+    :func:`drop_unobservable_codons`, which is what panels C and D already do
+    through :func:`base_frames`. At those codons mat-pcp can attribute no
+    observation to the founder background, so the row arrives with an actual
+    count of zero against a full expectation -- for 21J, sites 142 and 950,
+    whose five surviving mutations carry 0 observed against 15 to 129
+    expected. Counting them here would put five mutations in the denominator
+    that no estimate can ever reach.
+
+    **mat-pcp's own ``exclude`` needs nothing here.** It is applied one
+    nucleotide route at a time and before any fitness effect is computed, so a
+    mutation it excluded entirely has no row in this file to begin with. Nor
+    is ``globally_masked`` filtered, here or anywhere: #36 established that the
+    nucleotide mask widened to the codon refuses mutations mat-pcp estimated
+    normally, and the module header gives the cost.
+
+    ``gene`` is a semicolon-joined list where a site falls in more than one
+    reading frame, and is null on the intergenic rows, so the membership test
+    runs on ``fillna("")`` -- a bare ``split`` raises on those.
+    """
+    frame = pd.read_csv(
+        aamut_grid_path(aamut_dir, clade, arm),
+        usecols=[*AA_GRID_COLUMNS, "aa_site"],
+    )
+    in_gene = frame["gene"].fillna("").str.split(";").apply(lambda g: gene in g)
+    kept = frame.loc[
+        in_gene
+        & (frame["mutant_aa"] != frame["clade_founder_aa"])
+        & (frame["mutant_aa"] != STOP_AA)
+    ]
+    return drop_unobservable_codons(kept, clade)
+
+
+def count_ecdf_frame(
+    aamut_dir: Path,
+    clades: Iterable[str] = tuple(ECDF_CLADES),
+    *,
+    gene: str = GENE,
+    arms: Sequence[str] | None = None,
+) -> pd.DataFrame:
+    """The share of a clade's mutations carrying at least *x* counts.
+
+    ``clade,arm,x,share``, one curve per ``(clade, arm)``. The statistic is
+    ``max(actual_count, expected_count)``, the paper's "actual or expected
+    counts", evaluated on :data:`ECDF_POINTS` points from 0 to
+    :data:`ECDF_MAX_COUNT`.
+
+    **The population is the whole amino-acid grid**, every non-synonymous
+    amino-acid mutation away from the clade founder, and not the subset that
+    clears the accuracy threshold. The subset is *defined* by a threshold on
+    these counts,
+    so its own curve would pass through 1.0 at exactly that threshold and be
+    truncated by construction -- it could not show what share of a clade's
+    mutations the threshold leaves out, which is the panel's question.
+
+    Raises:
+        ValueError: If ``arms`` does not carry full depth, which is the
+            reference every other arm's grid is checked against.
+        ValueError: If a thinned arm's grid has a different number of rows from
+            the full-depth one. The grid is enumerated from the clade founder
+            and cannot depend on sampling depth, so a changed count means the
+            founder moved -- and the two curves would then be drawn over
+            different mutations with nothing saying so.
+    """
+    arms = tuple(CORPUS_NAMES) if arms is None else tuple(arms)
+    if FULL_DEPTH.name not in arms:
+        raise ValueError(
+            f"arms={arms} carries no {FULL_DEPTH.name!r}, which every other "
+            f"arm's grid is sized against and which panel B draws as its "
+            f"reference curve."
+        )
+    grid = np.linspace(0, ECDF_MAX_COUNT, ECDF_POINTS)
+    rows = []
+    for clade in clades:
+        # Every arm read before the comparison, rather than full depth being
+        # whichever arm the loop happens to reach first: a caller passing
+        # `arms` in another order would otherwise skip the size check on every
+        # arm ahead of full depth, silently.
+        grids = {arm: _aa_grid(aamut_dir, clade, arm, gene=gene) for arm in arms}
+        n_full = len(grids[FULL_DEPTH.name])
+        for arm, frame in grids.items():
+            if len(frame) != n_full:
+                raise ValueError(
+                    f"{arm}/{clade}: the {gene} amino-acid grid has "
+                    f"{len(frame)} rows against {n_full} at full depth. The "
+                    f"grid is enumerated from the clade founder and cannot "
+                    f"depend on sampling depth, so the founder moved."
+                )
+            counts = frame[["actual_count", "expected_count"]].max(axis=1).to_numpy()
+            rows.append(
+                pd.DataFrame(
+                    {
+                        "clade": clade,
+                        "arm": arm,
+                        "x": grid,
+                        "share": [
+                            round(float((counts >= x).mean()), SHARE_DECIMALS)
+                            for x in grid
+                        ],
+                    }
+                )
+            )
+    return pd.concat(rows, ignore_index=True)
+
+
+# ---------------------------------------------------------------------------
+# `fig:subsampling` panels C and D: what thinning costs each approach
+# ---------------------------------------------------------------------------
+
+#: The two approaches panels C and D compare, in the order they are drawn.
+#: Spelled here rather than at each call site because the string is a column
+#: value in the panel CSVs and a facet title in the charts.
+LADDER_METHODS = ("counts", "DASM")
+
+#: Panel C's and D's filter choices. The clip is this figure's, not the
+#: library's; everything else is the published spec.
+SUBSAMPLING_SPEC = FilterSpec(min_count=0.0, clip_lower=SUBSAMPLING_CLIP_LOWER)
+
+
+def arm_counts_estimate(
+    aamut_dir: Path, clade: str, arm: str, *, gene: str = GENE
+) -> pd.DataFrame:
+    """One arm's own counts-based estimate, as the predictor it is here.
+
+    This is the only per-arm read the figure adds. ``rule score`` joined the
+    **full-depth** counts estimate onto every arm's rows -- that is the target
+    a thinned model is measured against -- so the thinned refits under
+    ``aamut_fitness/cap_*_0/`` are a different comparison and nothing upstream
+    reads them.
+
+    Returned under the name ``log_selection_factor`` because that is the column
+    :func:`within_clade_metrics` takes its predictor from: the counts approach
+    and the DASM are scored by one function, so neither can be scored by a
+    statistic the other is not.
+    """
+    frame = normalize_fitness_columns(
+        pd.read_csv(aamut_grid_path(aamut_dir, clade, arm))
+    )
+    in_gene = frame["gene"].fillna("").str.split(";").apply(lambda g: gene in g)
+    return (
+        frame.loc[in_gene, ["aa_mutation", "delta_fitness_ratio"]]
+        .rename(columns={"delta_fitness_ratio": "log_selection_factor"})
+        .dropna()
+    )
+
+
+def ladder_frames(
+    table_path: str | Path,
+    aamut_dir: Path,
+    *,
+    clades: Sequence[str] = SUBSAMPLING_LADDER_CLADES,
+    spec: FilterSpec = SUBSAMPLING_SPEC,
+    arms: Sequence[str] | None = None,
+) -> dict[tuple[str, str, str], pd.DataFrame]:
+    """One frame per ``(arm, clade, method)``, all on one fixed population.
+
+    **The mutation set is fixed on the full-depth arm**, and that is the point
+    of the design. Filtering each arm on its own counts would score a thinned
+    arm only over the mutations it still happened to observe -- the subset it
+    is best at -- and every curve in panels C and D would be drawn over a
+    different population. So the count filter runs once, on full depth, and
+    every arm is scored over exactly those mutations.
+
+    **The target is the same column in every frame**: the full-depth counts
+    estimate, which ``rule score`` joined onto every arm's rows. Only the
+    predictor changes -- the arm's DASM for one method, the arm's own counts
+    refit for the other.
+
+    **Each arm's DASM is the model `subsampling_model` names for it**, which
+    is the largest one trained on that tree rather than one model throughout.
+    See that function on what it means for how the panels read. The population
+    is still fixed on full depth, so the arms are compared over one mutation
+    set whatever model scored them.
+
+    Returns:
+        ``{(arm, clade, method): frame}``, each frame carrying
+        ``aa_mutation``, ``delta_fitness_ratio`` (the target) and
+        ``log_selection_factor`` (the predictor), clipped by ``spec``.
+
+    Raises:
+        ValueError: If an arm's model has no rows at that arm. A half-scored
+            campaign would otherwise draw a panel with a column missing and
+            nothing saying which.
+    """
+    arms = tuple(CORPUS_NAMES) if arms is None else tuple(arms)
+    target = spec.fitness_metric
+
+    population: dict[str, pd.DataFrame] = {}
+    # The population is a count threshold on the full-depth *counts*, which
+    # every model at that arm shares, so which model defines it is immaterial
+    # -- it is this arm's own model for the sake of reading one table.
+    full_model = subsampling_model(FULL_DEPTH.name)
+    full = read_scored_table(
+        table_path, models=[full_model], arm=FULL_DEPTH.name, clades=clades
+    )
+    for clade, frame in by_clade(
+        base_frames(full, spec=spec, models=[full_model], clades=clades),
+        full_model,
+    ).items():
+        population[clade] = apply_count_threshold(frame, PANEL_MIN_COUNT)[
+            ["aa_mutation", f"{target}_raw"]
+        ].rename(columns={f"{target}_raw": target})
+
+    frames: dict[tuple[str, str, str], pd.DataFrame] = {}
+    for arm in arms:
+        arm_model = subsampling_model(arm)
+        table = read_scored_table(
+            table_path, models=[arm_model], arm=arm, clades=clades
+        )
+        if table.empty:
+            raise ValueError(
+                f"{arm_model!r} has no rows at arm {arm!r} in {table_path}. "
+                f"Panels C and D compare the arms, so a missing one is a gap "
+                f"in the comparison rather than a column to leave out."
+            )
+        dasm = by_clade(
+            base_frames(table, spec=spec, models=[arm_model], clades=clades),
+            arm_model,
+        )
+        for clade, kept in population.items():
+            arm_dasm = dasm[clade].merge(kept[["aa_mutation"]], on="aa_mutation")
+            frames[(arm, clade, "DASM")] = arm_dasm[
+                ["aa_mutation", target, "log_selection_factor"]
+            ]
+            counts = kept.merge(
+                arm_counts_estimate(aamut_dir, clade, arm), on="aa_mutation"
+            )
+            frames[(arm, clade, "counts")] = clip_axes(counts, spec.clip_lower)[
+                ["aa_mutation", target, "log_selection_factor"]
+            ]
+    return frames
+
+
+def ladder_metrics(
+    frames: dict[tuple[str, str, str], pd.DataFrame],
+    *,
+    spec: FilterSpec = SUBSAMPLING_SPEC,
+) -> pd.DataFrame:
+    """Panel D's table: ``arm,clade,method,pearson_r,regression_slope,n_mutations``.
+
+    ``spearman_rho`` is dropped on write, as the source experiment's
+    ``sweep_count_cutoffs.py`` does: the figure reports r and the slope, and a
+    third statistic in the CSV is one a reader would look for in the panel.
+    """
+    rows = []
+    for (arm, clade, method), frame in frames.items():
+        metrics = within_clade_metrics(
+            {clade: frame},
+            fitness_col=spec.fitness_metric,
+            min_mutations=spec.min_clade_mutations,
+        )
+        for row in metrics.to_dict("records"):
+            rows.append(
+                {
+                    "arm": arm,
+                    "clade": row["clade"],
+                    "method": method,
+                    "pearson_r": row["pearson_r"],
+                    "regression_slope": row["regression_slope"],
+                    "n_mutations": row["n_mutations"],
+                }
+            )
+    return pd.DataFrame(rows).sort_values(["arm", "clade", "method"], ignore_index=True)

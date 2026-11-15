@@ -56,6 +56,25 @@ mat_pcp:
     # order differs, so a glob that swept it in would read serine rows as
     # clade-founder rows.
     aamut_fitness_pooled_file: aamut_fitness/all_aamut_fitness.csv
+    # Sequences per clade, as the tree was built: one row per Nextstrain
+    # clade, with the count `mat/clades/{clade}_samples.txt` has lines. Read by
+    # `fig:subsampling`'s panel A, which is the sampling imbalance the whole
+    # figure is about.
+    #
+    # 58 rows against this run's 56 founders: `21A` and `25I` have a count here
+    # and no founder, so nothing else in this pipeline scores them. The panel
+    # plots `lib.clade_roster()` and drops those two.
+    #
+    # NOT `mat/clade_counts_by_cutoff.csv`, whose `cutoff` column is the
+    # cutoff-date ladder (2020-09-01 .. 2025-07-01) and never this run's
+    # 2026-08-06, so a filter on it returns an empty frame rather than raising.
+    clade_counts_file: mat/clade_counts.csv
+    # One `{clade}_samples.txt` per clade, each line a sample name ending in
+    # its collection date. `scripts/clade_emergence.py` walks these for the
+    # date panel A colours each clade by, which is the one thing the counts
+    # file above cannot give. Nothing else in the pipeline reads them, and at
+    # 2.7 GB over 17 million lines they are why that is a rule of its own.
+    clades_dir: mat/clades
     # One `{clade}.fa` per clade. The clade roster is read from these files
     # rather than restated anywhere, and `scripts/check_clades.py` requires the
     # founders, the per-clade fitness tables and `censored_clades_file` to name

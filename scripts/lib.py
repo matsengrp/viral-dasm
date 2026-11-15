@@ -182,6 +182,16 @@ SCORING_INPUT_FILES = frozenset(
     }
 )
 
+#: The mat-pcp inputs a panel rule reads and no other rule does. Separate from
+#: :data:`SCORING_INPUT_FILES` because no scoring job opens them: both are
+#: measurements *of the tree*, read for `fig:subsampling`'s panel A, which
+#: takes no model and no checkpoint. `clade_counts_file` gives each clade's
+#: height; `clades_dir` holds the per-clade sample lists
+#: `scripts/clade_emergence.py` walks for the date each dot is coloured by.
+#: Panel B reads the amino-acid tables under `aamut_fitness_dir`, which the
+#: scorer already names, so it needs no entry.
+PANEL_INPUT_FILES = frozenset({"clade_counts_file", "clades_dir"})
+
 #: Suffix mat-pcp gives each per-clade amino-acid fitness table. Here rather
 #: than in the two scripts that glob for it, because ``check_clades.py``
 #: validates a roster that ``score_run.py`` then reads back by this suffix: two
@@ -199,7 +209,12 @@ def mat_pcp_path(key: str) -> Path:
             or building a neutral model from a table nobody meant.
     """
     block = CONFIG["mat_pcp"]
-    allowed = TRAINING_CONFIG_FILES | NEUTRAL_BUILD_FILES | SCORING_INPUT_FILES
+    allowed = (
+        TRAINING_CONFIG_FILES
+        | NEUTRAL_BUILD_FILES
+        | SCORING_INPUT_FILES
+        | PANEL_INPUT_FILES
+    )
     if key not in allowed:
         raise KeyError(
             f"{key!r} is not a mat-pcp file; expected one of {sorted(allowed)}"
@@ -352,6 +367,24 @@ CORPUS_NAMES = tuple(CONFIG["corpora"])
 BUILT_CORPUS_NAMES = tuple(n for n in CORPUS_NAMES if corpus(n).is_built_here)
 
 FULL_DEPTH = corpus("full_depth")
+
+
+def cap_of(corpus_name: str) -> int:
+    """The per-clade cap a thinned corpus's name records.
+
+    ``cap_50000_0`` is a cap of 50,000. Read off the name rather than restated
+    in a table, so a cap cannot drift from the arm that was built -- and in one
+    place, because panel A draws a rule per cap and panel B labels a curve per
+    cap from the same number.
+    """
+    parts = corpus_name.split("_")
+    if len(parts) != 3 or parts[0] != "cap" or not parts[1].isdigit():
+        raise ValueError(
+            f"{corpus_name!r} is not a thinned corpus: a cap arm is named "
+            f"`cap_<n>_<fold>`, as `config.yaml`'s corpora block spells them."
+        )
+    return int(parts[1])
+
 
 #: The wiring smoke's corpus, and its md5. Not a :class:`Corpus`: it records
 #: no fold sizes and no row-order digest, because no result depends on its

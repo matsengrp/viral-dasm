@@ -779,6 +779,64 @@ def test_only_the_published_selection_reaches_the_manuscript():
             )
 
 
+def test_the_subsampling_figure_reaches_the_manuscript():
+    """`fig:subsampling` is published, so its composition is copied.
+
+    The guard above keys on a *selection*, and ``SUBSAMPLING_SELECTION`` is
+    not one -- it is this figure's directory, with one panel set and a stem of
+    its own. Nothing else composes to ``subsampling.pdf``, so there is no
+    second composition for it to be confused with, and it must not be skipped.
+    """
+    import panel_spec as spec
+
+    assert spec.tex_figure_dir(spec.SUBSAMPLING_SELECTION) == spec.TEX_FIGURE_DIR
+    assert spec.SUBSAMPLING_SELECTION not in spec.SELECTIONS
+
+
+def test_the_subsampling_figure_places_every_panel_once():
+    """The rows and the letters are two spellings of one panel set.
+
+    ``rule compose_subsampling`` declares its inputs from
+    ``SUBSAMPLING_PANEL_LETTERS`` and the notebook lays out
+    ``SUBSAMPLING_FIGURE_ROWS``, so a letter in one and not the other is
+    either a panel the rule fetches and the layout drops, or a ``KeyError``
+    inside the composition -- and the two panel rules' stems are what both
+    have to name.
+    """
+    import panel_spec as spec
+
+    assert set(spec.SUBSAMPLING_PANEL_LETTERS.values()) == set(
+        spec.DEPTH_PANELS + spec.LADDER_ARM_PANELS
+    )
+    # A cell is a letter or a column of them, which is how B sits over C.
+    placed = [
+        letter
+        for row in spec.SUBSAMPLING_FIGURE_ROWS
+        for cell in row
+        for letter in ((cell,) if isinstance(cell, str) else cell)
+    ]
+    assert sorted(placed) == sorted(spec.SUBSAMPLING_PANEL_LETTERS)
+    assert len(placed) == len(set(placed)), "a panel is placed twice"
+
+
+def test_the_subsampling_panels_are_set_in_the_published_type_size():
+    """`panel_spec` states this figure's type size and `panel_charts` draws it.
+
+    Two modules have to agree because the first is stdlib-only -- it is parsed
+    on every snakemake invocation -- and the second is what the panels are
+    rendered from. `SUBSAMPLING_TITLE_PX` is also what the composition sizes
+    the panel letters against, so a drift here moves the letters as well as
+    the titles.
+    """
+    import panel_charts as charts
+    import panel_spec as spec
+
+    assert spec.SUBSAMPLING_TITLE_PX == charts.SUBSAMPLING_TITLE_PX
+    assert spec.SUBSAMPLING_LABEL_PX == charts.SUBSAMPLING_LABEL_PX
+    # The one figure not drawn at the module's own size; see either docstring.
+    assert spec.SUBSAMPLING_TITLE_PX != charts.PANEL_FONT_SIZE
+
+
 # Three ways this port drifted from the figure in the manuscript. Each drew a
 # complete, plausible panel, and the first two were only visible once the
 # whole figure was composed. They are pinned here against the notebooks
@@ -1164,3 +1222,381 @@ def test_a_background_panel_refuses_a_third_background():
             y_domain=(0.0, 1.0),
             columns=4,
         )
+
+
+# ---------------------------------------------------------------------------
+# `fig:subsampling` panels A and B
+# ---------------------------------------------------------------------------
+#
+# These read mat-pcp's count tables rather than a scored table, so they run
+# against the real tree or not at all -- there is no hand-built stand-in for
+# "how unevenly the clades are sampled". The eCDF reads eight per-clade tables,
+# so it is built once for the module.
+
+#: The counts measured from this mat-pcp run on 2026-11-14, which is what the
+#: panel claims. Pinned rather than recomputed: a changed share means the tree
+#: or the gene filter moved, and either should fail here rather than quietly
+#: redraw the paper's figure with different numbers.
+ECDF_SHARE_AT_THRESHOLD = {
+    ("21J", "full_depth"): 0.6531,
+    ("21J", "cap_50000_0"): 0.0664,
+    ("21J", "cap_20000_0"): 0.0438,
+    ("21J", "cap_5000_0"): 0.0004,
+    ("25C", "full_depth"): 0.0636,
+    ("25C", "cap_50000_0"): 0.0390,
+    ("25C", "cap_20000_0"): 0.0124,
+    ("25C", "cap_5000_0"): 0.0009,
+}
+
+#: Each clade's spike amino-acid grid: the per-clade table's spike rows, less
+#: the synonymous ones, the nonsense ones and the unobservable founder
+#: codons. This is the population the paper's
+#: "amino-acid mutations to its founder spike sequence" names, and the one
+#: panels C and D are built on -- see `panels._aa_grid` on why the stops come
+#: out.
+SPIKE_GRID_ROWS = {"21J": 7504, "25C": 7401}
+
+
+def _aamut_dir() -> Path:
+    return lib.mat_pcp_path("aamut_fitness_dir")
+
+
+@pytest.fixture(scope="module")
+def ecdf():
+    """Panel B's frame, built once: eight per-clade tables."""
+    if not _aamut_dir().exists():
+        pytest.skip(f"{_aamut_dir()} is not mounted")
+    return panels.count_ecdf_frame(_aamut_dir())
+
+
+def test_the_amino_acid_grid_does_not_move_with_sampling_depth():
+    """A thinned arm counts the same mutations, or the founder moved.
+
+    The grid is enumerated from the clade founder, so its size cannot depend on
+    how many sequences were sampled. If it does, the two curves in a panel are
+    drawn over different mutations and the panel still looks fine -- which is
+    why `count_ecdf_frame` raises rather than warns, and why the row counts are
+    pinned here as well.
+    """
+    directory = _aamut_dir()
+    if not directory.exists():
+        pytest.skip(f"{directory} is not mounted")
+    for clade, expected in SPIKE_GRID_ROWS.items():
+        sizes = {
+            arm: len(panels._aa_grid(directory, clade, arm)) for arm in lib.CORPUS_NAMES
+        }
+        assert set(sizes.values()) == {expected}, (
+            f"{clade}'s spike grid is {sizes}, not {expected} at every depth. "
+            f"The clade founder moved, so the depth curves would be drawn over "
+            f"different mutations."
+        )
+
+
+def test_the_ecdf_reproduces_the_measured_shares(ecdf):
+    """Panel B's headline, against the tree it is measured from."""
+    at_threshold = ecdf[ecdf["x"] == float(panels.PANEL_MIN_COUNT)]
+    assert not at_threshold.empty, (
+        f"the eCDF grid does not land on {panels.PANEL_MIN_COUNT}, so the "
+        f"panel's dotted threshold sits between two sampled points and the "
+        f"share a reader takes off the curve is interpolated."
+    )
+    measured = {
+        (row.clade, row.arm): row.share for row in at_threshold.itertuples(index=False)
+    }
+    assert set(measured) == set(ECDF_SHARE_AT_THRESHOLD)
+    for key, expected in ECDF_SHARE_AT_THRESHOLD.items():
+        # 1e-4 is about one mutation in a 7,901-row grid. At the 1e-3 this
+        # started at, the two cap_5000 pins -- 0.0004 and 0.0009 -- accepted
+        # zero, so an arm that silently lost every count still passed.
+        assert measured[key] == pytest.approx(expected, abs=1e-4), (
+            f"{key[0]}/{key[1]} is {measured[key]:.4f} against the {expected} "
+            f"measured from this run. Re-measure rather than re-pinning."
+        )
+
+
+def test_no_cap_sits_above_full_depth(ecdf):
+    """Thinning cannot add counts.
+
+    Checked at every sampled x rather than at the threshold alone: a sign error
+    in the arm lookup, or a cap directory read for the wrong arm, would leave
+    the threshold's ordering intact while inverting the curves either side of
+    it.
+    """
+    for clade, rows in ecdf.groupby("clade"):
+        full = rows[rows["arm"] == "full_depth"].set_index("x")["share"]
+        for arm, arm_rows in rows[rows["arm"] != "full_depth"].groupby("arm"):
+            capped = arm_rows.set_index("x")["share"]
+            above = capped[capped > full + 1e-12]
+            assert above.empty, (
+                f"{clade}/{arm} is above full depth at x={list(above.index)}, "
+                f"so thinning the tree added counts."
+            )
+
+
+def test_panel_a_plots_the_roster_and_not_the_counts_table():
+    """The two clades the counts table carries and this pipeline does not score.
+
+    `mat/clade_counts.csv` has 58 rows; `21A` and `25I` have a sequence count,
+    no founder FASTA and no row in any fitness table. A panel drawn from the
+    file as it stands would put two bars beside 56 that every other table in
+    this pipeline omits.
+    """
+    counts_csv = lib.mat_pcp_path("clade_counts_file")
+    if not counts_csv.exists():
+        pytest.skip(f"{counts_csv} is not mounted")
+    assert counts_csv.name == "clade_counts.csv", (
+        "panel A must read `clade_counts.csv`. "
+        "`clade_counts_by_cutoff.csv` sits beside it with a `cutoff` column "
+        "holding the cutoff-date ladder and never this run's cutoff, so "
+        "reading it returns an empty frame rather than raising."
+    )
+    emergence_csv = panel_spec.EMERGENCE_CSV
+    if not emergence_csv.exists():
+        pytest.skip(f"{emergence_csv} has not been built")
+    sizes = panels.clade_size_frame(counts_csv, emergence_csv)
+    # `year` is the emergence date panel A colours its dots by, as a decimal
+    # year; see `panels._emergence_years`.
+    assert list(sizes.columns) == ["clade", "n_sequences", "year"]
+    assert sorted(sizes["clade"]) == lib.clade_roster()
+    raw = pd.read_csv(counts_csv)
+    extra = sorted(set(raw["Nextstrain_clade_usher"]) - set(sizes["clade"]))
+    assert extra == ["21A", "25I"], (
+        f"the counts table's clades beyond the roster are {extra}, not the "
+        f"['21A', '25I'] measured when #24 was written. Re-measure: the "
+        f"roster and the counts table moved relative to each other."
+    )
+    assert sizes["n_sequences"].is_monotonic_decreasing
+
+
+def test_the_subsampling_directory_is_not_a_model_selection():
+    """`subsampling` names a directory, and must not name a wildcard value.
+
+    `SELECTIONS` is `rule panels`' wildcard domain. An entry there would let the
+    agreement rules resolve `selection=subsampling` and draw `fig:agreement`'s
+    panels into this figure's directory, which is a DAG that builds and a figure
+    that is wrong.
+    """
+    assert panel_spec.SUBSAMPLING_SELECTION not in panel_spec.SELECTIONS
+
+
+def test_the_subsampling_arms_are_the_corpora_the_pipeline_builds():
+    """Panel B's depth axis against the corpora, and the caps against their names.
+
+    `panel_spec` restates nothing here -- the arms *are* `lib.CORPUS_NAMES` and
+    the caps are read off those names -- so what this pins is that the reading
+    still works: a corpus renamed without `cap_<n>_<fold>` in it would drop
+    silently out of `subsampling_caps()` and take a rule off panel A.
+    """
+    assert panel_spec.subsampling_caps() == (50_000, 20_000, 5_000)
+    assert len(panel_spec.subsampling_caps()) == len(lib.CORPUS_NAMES) - 1
+    assert lib.CORPUS_NAMES[0] == lib.FULL_DEPTH.name
+    assert set(panel_spec.ECDF_CLADES) <= set(lib.clade_roster())
+
+
+# ---------------------------------------------------------------------------
+# `fig:subsampling` panels C and D
+# ---------------------------------------------------------------------------
+#
+# Built on a synthetic four-arm table rather than on the scored one: every
+# property below is a property of the construction, and a 10 GB Parquet read
+# would make the suite too slow to run on every change without testing
+# anything these frames do not.
+
+#: The clades the synthetic ladder is built over. Two, because the roster
+#: guard needs one clade that a cap thins below the floor and one that does
+#: not.
+LADDER_CLADES = ("21J", "21L")
+
+
+def fake_arm_table(seed: int = 3) -> pd.DataFrame:
+    """A scored table carrying every arm, in the shape `rule score` writes.
+
+    The full-depth counts estimate is the same on every arm's rows, which is
+    what `rule score` does and what makes it the shared target; only
+    `log_selection_factor` moves, and it moves *towards noise* as the cap
+    tightens, so a test that confuses the arms sees it.
+    """
+    rng = numpy.random.default_rng(seed)
+    rows = []
+    for clade in LADDER_CLADES:
+        for site in range(1, FAKE_SITES + 1):
+            for mutant in ("A", "G", "V"):
+                parent = "A" if site % 7 else "E"
+                target = float(rng.normal(-1.0, 1.5))
+                for arm_index, arm in enumerate(lib.CORPUS_NAMES):
+                    rows.append(
+                        {
+                            "clade": clade,
+                            "model": panel_spec.subsampling_model(arm),
+                            "arm": arm,
+                            "aa_mutation": f"{parent}{site}{mutant}",
+                            "aa_site": site,
+                            "parent_aa": parent,
+                            "mutant_aa": mutant,
+                            "is_synonymous": mutant == parent,
+                            "log_selection_factor": target
+                            + float(rng.normal(0, 0.3 * arm_index)),
+                            "actual_count": float(rng.integers(10, 80)),
+                            "predicted_count": float(rng.integers(10, 80)),
+                            "delta_fitness_ratio": target,
+                            "delta_fitness_bayesian": target,
+                            "uncertainty": 0.1,
+                            "globally_masked": False,
+                            "censored": False,
+                        }
+                    )
+    return pd.DataFrame(rows)
+
+
+def write_fake_arm_fitness(directory: Path, table: pd.DataFrame) -> Path:
+    """mat-pcp's per-arm amino-acid tables, in the layout the figure reads.
+
+    Full depth at the top level and each cap arm in a subdirectory named for
+    its corpus, which is `panel_spec.aamut_grid_path`'s layout. The full-depth
+    file carries the target itself, so the full-depth counts cell is the
+    target against itself -- r = 1 by construction, which is the panel's
+    stated baseline and the test below.
+    """
+    for arm in lib.CORPUS_NAMES:
+        root = directory if arm == lib.FULL_DEPTH.name else directory / arm
+        root.mkdir(parents=True, exist_ok=True)
+        rows = table[table["arm"] == arm]
+        for clade in LADDER_CLADES:
+            frame = rows[rows["clade"] == clade]
+            noise = numpy.random.default_rng(len(arm)).normal(
+                0, 0.4 * lib.CORPUS_NAMES.index(arm), len(frame)
+            )
+            pd.DataFrame(
+                {
+                    "gene": lib.GENE,
+                    "aa_mutation": frame["aa_mutation"].to_numpy(),
+                    "aa_site": frame["aa_site"].to_numpy(),
+                    "clade_founder_aa": frame["parent_aa"].to_numpy(),
+                    "mutant_aa": frame["mutant_aa"].to_numpy(),
+                    "actual_count": frame["actual_count"].to_numpy(),
+                    "expected_count": frame["predicted_count"].to_numpy(),
+                    "delta_fitness_ratio": frame["delta_fitness_ratio"].to_numpy()
+                    + noise,
+                }
+            ).to_csv(root / f"{clade}{lib.FITNESS_SUFFIX}", index=False)
+    return directory
+
+
+@pytest.fixture(scope="module")
+def ladder(tmp_path_factory):
+    """Panel C's frames and panel D's statistics, over the synthetic arms."""
+    directory = tmp_path_factory.mktemp("ladder")
+    frame = fake_arm_table()
+    table_path = directory / "selection_factors.parquet"
+    frame.to_parquet(table_path, index=False)
+    aamut = write_fake_arm_fitness(directory / "aamut_fitness", frame)
+    frames = panels.ladder_frames(table_path, aamut, clades=LADDER_CLADES)
+    return frames, panels.ladder_metrics(frames), table_path, aamut
+
+
+def test_the_population_is_fixed_on_the_full_depth_arm(ladder):
+    """The survivorship-bias guard, and the reason the figure is built this way.
+
+    Filtering each arm on its own counts would score a thinned arm only over
+    the mutations it still happened to observe -- the subset it is best at --
+    and every curve would be drawn over a different population. The bug it
+    produces is a plausible figure rather than an error, so what is asserted
+    is equality across arms rather than any particular count.
+    """
+    _frames, metrics, _table, _aamut = ladder
+    for (clade, method), rows in metrics.groupby(["clade", "method"]):
+        counts = set(rows["n_mutations"])
+        assert len(counts) == 1, (
+            f"{clade}/{method} is scored over {dict(zip(rows['arm'], rows['n_mutations']))}. "
+            f"Every arm must be scored over the mutations the full-depth arm "
+            f"selected, or the arms are not comparable."
+        )
+        assert counts != {0}
+
+
+def test_the_full_depth_counts_cell_is_the_target_against_itself(ladder):
+    """Panel C's baseline, which the caption calls one by construction."""
+    _frames, metrics, _table, _aamut = ladder
+    full = metrics[
+        (metrics["arm"] == lib.FULL_DEPTH.name) & (metrics["method"] == "counts")
+    ]
+    assert not full.empty
+    for row in full.itertuples(index=False):
+        assert row.pearson_r == pytest.approx(1.0, abs=1e-12)
+        assert row.regression_slope == pytest.approx(1.0, abs=1e-12)
+
+
+def test_a_clade_a_cap_thins_keeps_its_place(ladder):
+    """The roster is fixed on full depth too, one level up from the population.
+
+    A clade a cap thinned to four mutations is the ladder's question, not a
+    clade to drop, so every clade appears at every arm.
+    """
+    _frames, metrics, _table, _aamut = ladder
+    for arm in lib.CORPUS_NAMES:
+        drawn = set(metrics[metrics["arm"] == arm]["clade"])
+        assert drawn == set(LADDER_CLADES), (
+            f"arm {arm} draws {sorted(drawn)}, not {sorted(LADDER_CLADES)}."
+        )
+
+
+def test_the_clip_is_a_control_and_not_a_filter(ladder):
+    """Clipping moves where a point is drawn, never which rows are scored."""
+    _frames, metrics, table_path, aamut = ladder
+    unclipped = panels.ladder_metrics(
+        panels.ladder_frames(
+            table_path,
+            aamut,
+            clades=LADDER_CLADES,
+            spec=panels.FilterSpec(min_count=0.0, clip_lower=None),
+        )
+    )
+    merged = metrics.merge(
+        unclipped, on=["arm", "clade", "method"], suffixes=("", "_unclipped")
+    )
+    assert (merged["n_mutations"] == merged["n_mutations_unclipped"]).all(), (
+        "the clip changed the row set, so it is filtering rather than "
+        "clamping and `n_mutations` no longer means what the panel says."
+    )
+
+
+def test_the_drawn_fit_comes_from_the_reported_slope(ladder):
+    """The line and the corner label cannot disagree.
+
+    Vega's `transform_regression` fits the rows it is handed, so under a point
+    budget the drawn line would come from a sample and the label from the
+    whole cloud. `arm_fit_line` takes the reported slope and the full frame's
+    means instead, so the line is a statement about the same numbers the CSV
+    carries.
+    """
+    import panel_charts as charts
+
+    frames, metrics, _table, _aamut = ladder
+    arm, clade, method = lib.CORPUS_NAMES[-1], LADDER_CLADES[0], "DASM"
+    frame = frames[(arm, clade, method)]
+    row = metrics[
+        (metrics["arm"] == arm)
+        & (metrics["clade"] == clade)
+        & (metrics["method"] == method)
+    ].iloc[0]
+    line = charts.arm_fit_line(
+        frame,
+        x_field="delta_fitness_ratio",
+        y_field="log_selection_factor",
+        slope=float(row["regression_slope"]),
+        domain=[-6.0, 2.0],
+    )
+    drawn_slope = (
+        line["log_selection_factor"].iloc[1] - line["log_selection_factor"].iloc[0]
+    ) / (line["delta_fitness_ratio"].iloc[1] - line["delta_fitness_ratio"].iloc[0])
+    assert drawn_slope == pytest.approx(float(row["regression_slope"]), rel=1e-12)
+
+
+def test_the_subsampling_clip_is_not_the_library_clip():
+    """-6.0 here, -4.0 in the library, and a sibling of that name is a trap."""
+    from dasm2.analysis.viral_fitness_eval import CLIP_LOWER
+
+    assert panel_spec.SUBSAMPLING_CLIP_LOWER == -6.0
+    assert panel_spec.SUBSAMPLING_CLIP_LOWER != CLIP_LOWER
+    assert set(panel_spec.SUBSAMPLING_MODELS) <= set(MODELS)
+    assert panel_spec.SUBSAMPLING_SCATTER_CLADE in panel_spec.SUBSAMPLING_LADDER_CLADES

@@ -43,6 +43,10 @@ from panel_spec import (
     BACKGROUND_PANELS,
     CANDIDATE_CSV,
     DEFAULT_SELECTION,
+    DEPTH_PANELS,
+    EMERGENCE_CSV,
+    ECDF_CLADES,
+    LADDER_ARM_PANELS,
     LADDER_PANELS,
     MUTATION_PANELS,
     OUTLIER_PANELS,
@@ -57,8 +61,13 @@ from panel_spec import (
     POOL_SUMMARY,
     SELECTIONS,
     SHIFT_CLADES,
+    SUBSAMPLING_FIGURE_STEM,
+    SUBSAMPLING_LADDER_CLADES,
+    SUBSAMPLING_PANEL_LETTERS,
+    SUBSAMPLING_SELECTION,
     composed_paths,
     figure_dir,
+    aamut_grid_path,
     panel_csv_path,
 )
 
@@ -94,11 +103,233 @@ def panel_outputs(stems, selection):
     ] + [str(panel_csv_path(selection, stem)) for stem in stems]
 
 
+def ecdf_grid_files(*_):
+    """The amino-acid grids panel B's curves are drawn from.
+
+    Eight files, not the directory: two clades at four sampling depths, where
+    full depth is the directory's own level and each cap arm is a subdirectory
+    named for its corpus. Declaring the contents is how a rule declares a
+    directory `config.yaml` names, as `rule score`'s `founder_fastas` does.
+    """
+    root = mat_pcp_path("aamut_fitness_dir")
+    return [
+        str(aamut_grid_path(root, clade, arm))
+        for clade in ECDF_CLADES
+        for arm in CORPUS_NAMES
+    ]
+
+
+def ladder_arm_fitness_files(*_):
+    """The per-arm counts refits panels C and D read.
+
+    Twenty files, not the directory: five clades at four sampling depths,
+    where full depth is the directory's own level and each cap arm is a
+    subdirectory named for its corpus.
+    """
+    root = mat_pcp_path("aamut_fitness_dir")
+    return [
+        str(aamut_grid_path(root, clade, arm))
+        for clade in SUBSAMPLING_LADDER_CLADES
+        for arm in CORPUS_NAMES
+    ]
+
+
 rule panels:
     """Every panel of `fig:agreement`, for the model the paper publishes."""
     input:
         panel_outputs(MUTATION_PANELS, DEFAULT_SELECTION),
         panel_outputs(LADDER_PANELS, DEFAULT_SELECTION),
+
+
+rule subsampling:
+    """`fig:subsampling`, and so its four panels beneath it.
+
+    Three rules rather than one: A and B measure the tree and take no model,
+    C and D read the scored table for `dasm-85k` on all four corpora, and the
+    composition reads the four PNGs.
+    """
+    input:
+        composed_paths(SUBSAMPLING_SELECTION, SUBSAMPLING_FIGURE_STEM),
+
+
+rule compose_subsampling:
+    """`fig:subsampling` itself, laid out from the four panels.
+
+    No measuring, no scoring and no table: it reads PNGs, the same split the
+    other two compositions are built on. The panels cost a pass over twenty
+    amino-acid grids and over the scored table; the layout costs a second, so
+    the spacing can be nudged without re-measuring anything.
+
+    No `{selection}` wildcard. `SUBSAMPLING_SELECTION` is this figure's
+    directory rather than a choice of models, so unlike `rule
+    compose_agreement` there is nothing here to expand over.
+
+    The manuscript copy is not a declared output, for the reason
+    `rule compose_agreement` gives: `tex_figure_dir` points outside both this
+    repository and the artifact root, and snakemake deletes a job's declared
+    outputs when it fails -- so naming it would hand a failed layout the
+    power to delete the figure currently in the paper. The notebook copies it
+    and says whether it did.
+    """
+    input:
+        layout="scripts/figure_layout.py",
+        spec="scripts/panel_spec.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        notebook="notebooks/subsampling.py",
+        # The PNGs only: `compose` reads raster, and declaring the SVGs too
+        # would make this rule rerun on a vector copy it never opens.
+        panels=[
+            str(figure_dir(SUBSAMPLING_SELECTION) / f"{stem}.png")
+            for stem in SUBSAMPLING_PANEL_LETTERS.values()
+        ],
+    output:
+        html=f"{NOTEBOOK_DIR}/subsampling.html",
+        figure=[
+            str(path)
+            for path in composed_paths(SUBSAMPLING_SELECTION, SUBSAMPLING_FIGURE_STEM)
+        ],
+    log:
+        f"{ARTIFACT_ROOT}/logs/compose_subsampling.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "marimo export html {input.notebook} -o {output.html} --force"
+        " > {log} 2>&1"
+
+
+def clade_sample_files(*_):
+    """Every clade's sample list under `clades_dir`.
+
+    The contents rather than the directory, the way `clade_founder_fastas`
+    above declares its own, and keyed off those same founders: the roster is
+    what this pipeline scores, and `clade_emergence.py` raises for a clade
+    with a founder and no sample list.
+    """
+    root = mat_pcp_path("clades_dir")
+    founders = mat_pcp_path("clade_founders_dir").glob("*.fa")
+    return sorted(str(root / f"{fasta.stem}_samples.txt") for fasta in founders)
+
+
+rule clade_emergence:
+    """When each clade emerged, which panel A colours its dots by.
+
+    Its own rule rather than a cell of `rule subsampling_depth`, in the style
+    of `rule clade_backgrounds`: this walks 2.7 GB of sample names across 56
+    files, the panel beside it is redrawn often, and the answer does not
+    change unless the tree does.
+
+    No model and no wildcard. The date is a property of mat-pcp's tree, so
+    every figure that ever reads it reads the same one.
+    """
+    input:
+        script="scripts/clade_emergence.py",
+        lib="scripts/lib.py",
+        spec="scripts/panel_spec.py",
+        config="config.yaml",
+        dasm2_init="dasm2/__init__.py",
+        # The sample lists, and the founders the roster is read from.
+        samples=clade_sample_files,
+        clade_founders=clade_founder_fastas,
+    output:
+        table=str(EMERGENCE_CSV),
+    log:
+        f"{ARTIFACT_ROOT}/logs/clade_emergence.log",
+    params:
+        clades_dir=lambda *_: str(mat_pcp_path("clades_dir")),
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "python {input.script} --clades-dir {params.clades_dir}"
+        " --out {output.table} > {log} 2>&1"
+
+
+rule subsampling_depth:
+    """Panels A and B: the sampling imbalance, and what it costs the counts."""
+    input:
+        panels="scripts/panels.py",
+        spec="scripts/panel_spec.py",
+        charts="scripts/panel_charts.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        # What the notebook reaches through those modules. Spelled out per rule
+        # rather than shared through a dict, for the reason the agreement rules
+        # spell theirs out: `tests/test_rule_inputs.py` reads these blocks as
+        # source, and an input expanded from a variable is one it cannot see.
+        analysis_charts="dasm2/analysis/charts.py",
+        analysis_viral="dasm2/analysis/viral.py",
+        analysis_eval="dasm2/analysis/viral_fitness_eval.py",
+        io="dasm2/io.py",
+        conversion="dasm2/sequence/conversion.py",
+        scov2_rates="dasm2/neutral/scov2_rates.py",
+        dasm2_init="dasm2/__init__.py",
+        notebook="notebooks/subsampling_depth.py",
+        # The two mat-pcp tables these panels measure. No scored table and no
+        # audit: neither panel reads a model.
+        clade_counts=mat_pcp_path("clade_counts_file"),
+        # The dates panel A colours its dots by. `rule clade_emergence`'s
+        # table rather than the sample lists themselves: this rule is redrawn
+        # often and that walk is 2.7 GB.
+        emergence=str(EMERGENCE_CSV),
+        nt_grids=ecdf_grid_files,
+        # The roster panel A plots, which `clade_size_frame` drops the counts
+        # table's two extra clades against.
+        clade_founders=founder_fastas,
+        founder_reader="scripts/founders.py",
+        # `_aa_grid` drops each clade's unobservable founder codons, which
+        # `unobservable_founder_codons` rebuilds from these two and the
+        # founder above.
+        masked_nt_sites=str(mat_pcp_path("masked_nt_sites_file")),
+        reference=str(mat_pcp_path("reference_sequence_file")),
+    output:
+        html=f"{NOTEBOOK_DIR}/subsampling_depth.html",
+        panels=panel_outputs(DEPTH_PANELS, SUBSAMPLING_SELECTION),
+    log:
+        f"{ARTIFACT_ROOT}/logs/subsampling_depth.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "marimo export html {input.notebook} -o {output.html} --force"
+        " > {log} 2>&1"
+
+
+rule subsampling_ladder:
+    """Panels C and D: what thinning the tree costs each approach.
+
+    The per-arm amino-acid tables are declared as files rather than as the
+    directory, in the style of `rule subsampling_depth`'s grids: twenty of
+    them, five clades at four sampling depths. These are the arms' **own**
+    counts refits, which are the panel's second predictor -- the target is the
+    full-depth estimate `rule score` already joined onto every arm's rows.
+    """
+    input:
+        panels="scripts/panels.py",
+        spec="scripts/panel_spec.py",
+        charts="scripts/panel_charts.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        analysis_charts="dasm2/analysis/charts.py",
+        analysis_viral="dasm2/analysis/viral.py",
+        analysis_eval="dasm2/analysis/viral_fitness_eval.py",
+        io="dasm2/io.py",
+        conversion="dasm2/sequence/conversion.py",
+        scov2_rates="dasm2/neutral/scov2_rates.py",
+        dasm2_init="dasm2/__init__.py",
+        notebook="notebooks/subsampling_ladder.py",
+        table=SCORED_TABLE,
+        arm_fitness=ladder_arm_fitness_files,
+        founder_reader="scripts/founders.py",
+    output:
+        html=f"{NOTEBOOK_DIR}/subsampling_ladder.html",
+        panels=panel_outputs(LADDER_ARM_PANELS, SUBSAMPLING_SELECTION),
+    log:
+        f"{ARTIFACT_ROOT}/logs/subsampling_ladder.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "marimo export html {input.notebook} -o {output.html} --force"
+        " -- --table {input.table}"
+        " > {log} 2>&1"
 
 
 rule agreement_mutations:
@@ -494,6 +725,12 @@ rule figures:
         [
             str(path)
             for path in composed_paths(DEFAULT_SELECTION, SHIFT_FIGURE_STEM)
+        ],
+        # `fig:subsampling`, and so its four panels. One panel set and no
+        # selection to expand over: `SUBSAMPLING_SELECTION` is its directory.
+        [
+            str(path)
+            for path in composed_paths(SUBSAMPLING_SELECTION, SUBSAMPLING_FIGURE_STEM)
         ],
 
 
