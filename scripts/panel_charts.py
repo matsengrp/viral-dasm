@@ -758,6 +758,33 @@ DMS_STRATUM_COLORS: dict[str, str] = {
 }
 
 
+#: How many characters of y tick label each row of `fig:dms_strata` reserves.
+#:
+#: **This is what aligns the columns, and it has to happen in the chart.** The
+#: rows draw identical cells, so their only width difference is the y axis on
+#: the left -- antiGen's labels run to ``-16`` where the DASM's run to ``-5``,
+#: and Vega-Lite sizes the axis to the widest label it draws. Left justified,
+#: the narrower row's plots then sit a band left of the other's, and a column
+#: whose plots do not share an x is not a column.
+#:
+#: Padding to a common width in the *composition* fixes the composed figure and
+#: nothing else: the panel PNGs are still misaligned, and so is the notebook,
+#: which draws the rows as two charts. Reserving the width here fixes all three
+#: at once, which is why it is done here and not there.
+#:
+#: Three because that is the widest label either row draws. ``pad`` only ever
+#: adds, so a row that one day needs four would simply stop aligning rather
+#: than truncate -- `tests/test_dms_strata.py` is what notices.
+DMS_Y_LABEL_CHARS = 3
+
+#: The character the padding is made of: U+2007 FIGURE SPACE, which is defined
+#: to be the width of a digit. An ordinary space is narrower than a digit in a
+#: proportional font, so padding with one would leave the bands unequal by a
+#: fraction of a character -- small, and exactly the kind of misalignment that
+#: survives review.
+DMS_LABEL_PAD = " "
+
+
 def dms_stratum_label(stratum: str) -> list[str]:
     """One stratum's name, as the figure prints it, a line per element.
 
@@ -859,7 +886,18 @@ def dms_stratum_row(
         # carries the axis: repeating it prints this figure's longest string
         # once per stratum.
         y_axis = (
-            axis
+            alt.Axis(
+                labelFontSize=font_size,
+                titleFontSize=font_size,
+                titlePadding=6,
+                # Reserve a fixed label width, so both rows' axes are the same
+                # band and their plots start at the same x. See
+                # `DMS_Y_LABEL_CHARS`.
+                labelExpr=(
+                    f"pad(datum.label, {DMS_Y_LABEL_CHARS}, "
+                    f"'{DMS_LABEL_PAD}', 'left')"
+                ),
+            )
             if not cells
             else alt.Axis(labels=False, ticks=False, domain=True, title=None)
         )

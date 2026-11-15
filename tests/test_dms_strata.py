@@ -24,7 +24,7 @@ import lib  # noqa: F401
 
 import dasm2  # noqa: F401
 
-pytest.importorskip("pandas")
+pd = pytest.importorskip("pandas")
 
 import dms
 import panel_charts as charts
@@ -89,6 +89,66 @@ def test_the_two_panel_stems_match_the_two_models():
     assert [letter for row in panel_spec.DMS_STRATA_FIGURE_ROWS for letter in row] == (
         list(panel_spec.DMS_STRATA_PANEL_LETTERS)
     )
+
+
+def _row_spec():
+    """One row drawn over a frame small enough to build in the test."""
+    frame = pd.DataFrame(
+        {
+            "dms_cell_entry": [-6.0, -3.0, 0.0, -1.0],
+            "dasm": [-5.0, -2.0, 0.5, -1.5],
+            "stratum": [dms.SINGLE_NT, dms.SINGLE_NT, dms.MULTI_NT, dms.MULTI_NT],
+        }
+    )
+    return charts.dms_stratum_row(
+        frame,
+        score_column="dasm",
+        score_title=["DASM", "fitness effect"],
+        stratum_order=panel_spec.DMS_STRATA_COLUMNS,
+        x_domain=[-7.0, 1.0],
+    ).to_dict()
+
+
+def test_the_leftmost_cell_reserves_a_fixed_y_label_width():
+    """What makes the two rows' plots start at the same x.
+
+    Vega-Lite sizes a y axis to the widest label it draws, so rows whose
+    labels differ in length get different axis bands and their plots do not
+    line up -- antiGen's run to ``-16`` where the DASM's run to ``-5``. The
+    fix has to be in the chart: padding the images at composition time leaves
+    the panel PNGs and the notebook misaligned.
+
+    Pinned on the spec rather than on a rendered width, which would need a
+    browser. `tests/test_dms_censor.py`'s style: check the mechanism, not a
+    number that moves with the data.
+    """
+    spec = _row_spec()
+    first = spec["hconcat"][0]
+    y_axis = first["layer"][0]["encoding"]["y"]["axis"]
+    assert "labelExpr" in y_axis, (
+        "the leftmost cell draws no labelExpr, so its axis is as wide as its "
+        "own labels and the rows will not line up"
+    )
+    assert f"pad(datum.label, {charts.DMS_Y_LABEL_CHARS}" in y_axis["labelExpr"]
+    assert charts.DMS_LABEL_PAD in y_axis["labelExpr"], (
+        "padding with an ordinary space leaves the bands unequal by a "
+        "fraction of a character; see DMS_LABEL_PAD"
+    )
+
+
+def test_only_the_leftmost_cell_draws_y_labels():
+    """The other two share its scale, so repeating them is noise.
+
+    Also the reason the reserved width above is needed once per row rather
+    than once per cell.
+    """
+    spec = _row_spec()
+    rest = spec["hconcat"][1:]
+    assert rest, "a row with one cell would make this vacuous"
+    for cell in rest:
+        axis = cell["layer"][0]["encoding"]["y"]["axis"]
+        assert axis.get("labels") is False
+        assert axis.get("title") is None
 
 
 def test_the_figure_does_not_share_fig_dms_panel_stems():
