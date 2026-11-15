@@ -114,6 +114,9 @@ ENTRY_POINTS = {
     "compose_agreement": "notebooks/agreement.py",
     "within_clade_outliers": "notebooks/within_clade_outliers.py",
     "outlier_ranking": "notebooks/outlier_ranking.py",
+    # `clade_backgrounds` arrived with the frequency rule and runs a script
+    # rather than a notebook, like the producers above the panel block.
+    "clade_backgrounds": "scripts/backgrounds.py",
 }
 
 #: Rules that execute nothing. Asserted, not asserted-by-assertion: each must

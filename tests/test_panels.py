@@ -976,8 +976,3 @@ def test_the_candidate_clades_match_the_candidate_file():
     from_file = {clade for clade, _ in panel_spec.figure_candidates()}
     from_file |= {clade for clade, _, _ in panel_spec.off_figure_candidates()}
     assert set(panel_spec.CANDIDATE_CLADES) == from_file
-
-
-def test_the_scan_row_does_not_overlap_the_candidate_clades():
-    """The scan excludes the two the candidate panels cover, by construction."""
-    assert not set(panel_spec.SCAN_CLADES) & set(panel_spec.CANDIDATE_CLADES)

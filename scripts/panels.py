@@ -62,7 +62,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 # `lib` first, so this repository's root is on `sys.path` before anything
 # imports `dasm2` and the vendored fork wins over an editable install.
-from lib import GENE, assert_dasm2_is_this_repo, corpus, mat_pcp_path
+from lib import (  # noqa: F401  (`corpus` re-exported for the notebooks)
+    GENE,
+    assert_dasm2_is_this_repo,
+    corpus,
+    mat_pcp_path,
+)
 
 # Then `dasm2`, before pandas or pyarrow: `dasm2/arrow_pool.py` moves Arrow off
 # the bundled mimalloc, and can only do so if pyarrow has not been imported yet.

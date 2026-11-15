@@ -33,15 +33,30 @@ and branch-mass fractions.
 
 from __future__ import annotations
 
-from collections import defaultdict
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+# `lib` first, so this repository's root is on `sys.path` before anything
+# imports `dasm2` and the vendored fork wins over an editable install -- a
+# script run puts `scripts/` on `sys.path[0]`, never the repository root.
+from lib import assert_dasm2_is_this_repo
+
+# Then `dasm2`, before pandas or pyarrow: `dasm2/arrow_pool.py` steers Arrow
+# off the bundled mimalloc and can only do so if pyarrow has not been imported
+# yet, and pandas pulls pyarrow in.
+import dasm2  # noqa: F401  (imported first for its side effects)
+
+assert_dasm2_is_this_repo()
+
+from collections import defaultdict
 
 import numpy as np
 import pandas as pd
+from panels import PCP_CHUNK_ROWS, _founder_nt_sequence
 
 from dasm2.sequence.conversion import translate_sequence
-
-from panels import PCP_CHUNK_ROWS, _founder_nt_sequence
 
 #: Above this share of the clade's branch mass, a substitution is *fixed*: it
 #: belongs to both constructed backgrounds rather than distinguishing them.
@@ -69,7 +84,10 @@ UNKNOWN_AA = "X"
 
 
 def substitution_mass(
-    clades: list[str], pcp_path: str | Path, *, marker: dict[str, tuple[int, str]] | None = None
+    clades: list[str],
+    pcp_path: str | Path,
+    *,
+    marker: dict[str, tuple[int, str]] | None = None,
 ) -> tuple[dict[str, dict[tuple[int, str], float]], dict[str, float]]:
     """Branch mass per non-founder residue, per clade.
 
@@ -143,9 +161,7 @@ def substitution_mass(
             )
             rows, codons = np.nonzero(differs)
             for row, codon in zip(rows.tolist(), codons.tolist()):
-                residue = translate_sequence(
-                    parents[row][3 * codon : 3 * codon + 3]
-                )
+                residue = translate_sequence(parents[row][3 * codon : 3 * codon + 3])
                 if residue == founder_aa[clade][codon] or residue == UNKNOWN_AA:
                     continue
                 mass[clade][(codon + 1, residue)] += lengths[row]
