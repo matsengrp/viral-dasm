@@ -25,8 +25,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib import (
     ARTIFACT_ROOT,
     CORPUS_NAMES,
+    FITNESS_SUFFIX,
     FULL_DEPTH,
-    NTMUT_SUFFIX,
     REPO_ROOT,
     TEX_FIGURE_DIR,
     cap_of,
@@ -436,10 +436,10 @@ def subsampling_caps() -> tuple[int, ...]:
     return tuple(cap_of(name) for name in CORPUS_NAMES if name.startswith("cap_"))
 
 
-def ntmut_grid_path(root: Path, clade: str, arm: str) -> Path:
-    """One clade's nucleotide grid at one sampling depth.
+def aamut_grid_path(root: Path, clade: str, arm: str) -> Path:
+    """One clade's amino-acid grid at one sampling depth.
 
-    Full depth is the **top level** of `ntmut_fitness_dir` and each thinned arm
+    Full depth is the **top level** of `aamut_fitness_dir` and each thinned arm
     is a subdirectory named for its corpus. Here rather than in the two callers
     because `workflow/figures.smk` declares these files as `rule
     subsampling_depth`'s inputs and `scripts/panels.py` opens them: a rule that
@@ -447,7 +447,7 @@ def ntmut_grid_path(root: Path, clade: str, arm: str) -> Path:
     `MissingInputException` at best and a silently undeclared input at worst.
     """
     directory = root if arm == FULL_DEPTH.name else root / arm
-    return directory / f"{clade}{NTMUT_SUFFIX}"
+    return directory / f"{clade}{FITNESS_SUFFIX}"
 
 
 #: Panel stems, as the figure's composition reads them. Named here so a rule

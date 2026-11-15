@@ -182,16 +182,12 @@ SCORING_INPUT_FILES = frozenset(
     }
 )
 
-#: The mat-pcp inputs a panel rule reads. Separate from
-#: :data:`SCORING_INPUT_FILES` because no scoring job opens either: they are
-#: measurements *of the tree*, read by `fig:subsampling`'s panels A and B,
-#: which take no model and no checkpoint.
-PANEL_INPUT_FILES = frozenset(
-    {
-        "clade_counts_file",
-        "ntmut_fitness_dir",
-    }
-)
+#: The mat-pcp input a panel rule reads and no other rule does. Separate from
+#: :data:`SCORING_INPUT_FILES` because no scoring job opens it: it is a
+#: measurement *of the tree*, read by `fig:subsampling`'s panel A, which takes
+#: no model and no checkpoint. Panel B reads the amino-acid tables under
+#: `aamut_fitness_dir`, which the scorer already names, so it needs no entry.
+PANEL_INPUT_FILES = frozenset({"clade_counts_file"})
 
 #: Suffix mat-pcp gives each per-clade amino-acid fitness table. Here rather
 #: than in the two scripts that glob for it, because ``check_clades.py``
@@ -199,13 +195,6 @@ PANEL_INPUT_FILES = frozenset(
 #: spellings could drift and leave the guard passing while the scorer opens a
 #: file that does not exist.
 FITNESS_SUFFIX = "_aamut_fitness.csv"
-
-#: Suffix mat-pcp gives each per-clade *nucleotide* fitness table, the grid
-#: `fig:subsampling`'s panel B is measured over. Here for the same reason as
-#: :data:`FITNESS_SUFFIX`: `workflow/figures.smk` declares these files as a
-#: rule's inputs and `scripts/panels.py` opens them, so two spellings could
-#: drift and leave the rule declaring a path nothing reads.
-NTMUT_SUFFIX = "_ntmut_fitness.csv"
 
 
 def mat_pcp_path(key: str) -> Path:

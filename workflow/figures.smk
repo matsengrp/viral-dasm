@@ -62,7 +62,7 @@ from panel_spec import (
     SUBSAMPLING_SELECTION,
     composed_paths,
     figure_dir,
-    ntmut_grid_path,
+    aamut_grid_path,
     panel_csv_path,
 )
 
@@ -99,16 +99,16 @@ def panel_outputs(stems, selection):
 
 
 def ecdf_grid_files(*_):
-    """The nucleotide grids panel B's curves are drawn from.
+    """The amino-acid grids panel B's curves are drawn from.
 
     Eight files, not the directory: two clades at four sampling depths, where
     full depth is the directory's own level and each cap arm is a subdirectory
     named for its corpus. Declaring the contents is how a rule declares a
     directory `config.yaml` names, as `rule score`'s `founder_fastas` does.
     """
-    root = mat_pcp_path("ntmut_fitness_dir")
+    root = mat_pcp_path("aamut_fitness_dir")
     return [
-        str(ntmut_grid_path(root, clade, arm))
+        str(aamut_grid_path(root, clade, arm))
         for clade in ECDF_CLADES
         for arm in CORPUS_NAMES
     ]

@@ -121,10 +121,10 @@ from panel_spec import (  # noqa: F401  (re-exported for the notebooks)
     SHIFT_CLADES,
     SUBSAMPLING_SELECTION,
     TABLE_COLUMNS,
+    aamut_grid_path,
     figure_candidates,
     figure_dir,
     labelled_candidates,
-    ntmut_grid_path,
     panel_csv_path,
     parse_mutation,
     selection_models,
@@ -800,10 +800,16 @@ def shift_pair_founders(clades: Sequence[str] = SHIFT_CLADES) -> dict[str, str]:
 #: says, and they are what makes a tracked table a diff on noise.
 SHARE_DECIMALS = 6
 
-#: The nucleotide-grid columns panels B reads. The grid is genome-wide --
-#: 87,734 rows for 21J against spike's 11,371 -- so `gene` is read to restrict
-#: it and the two counts are the statistic.
-NT_GRID_COLUMNS = ("actual_count", "expected_count", "gene")
+#: The amino-acid-grid columns panel B reads. The grid is genome-wide, so
+#: `gene` restricts it to spike; the founder and mutant residues are read to
+#: drop the synonymous rows, and the two counts are the statistic.
+AA_GRID_COLUMNS = (
+    "actual_count",
+    "expected_count",
+    "gene",
+    "clade_founder_aa",
+    "mutant_aa",
+)
 
 
 def clade_size_frame(counts_csv: Path) -> pd.DataFrame:
@@ -846,28 +852,35 @@ def clade_size_frame(counts_csv: Path) -> pd.DataFrame:
     return out.sort_values("n_sequences", ascending=False, ignore_index=True)
 
 
-def _nt_grid(
-    ntmut_dir: Path, clade: str, arm: str, *, gene: str = GENE
+def _aa_grid(
+    aamut_dir: Path, clade: str, arm: str, *, gene: str = GENE
 ) -> pd.DataFrame:
-    """One clade's nucleotide grid at one sampling depth, restricted to a gene.
+    """One clade's amino-acid grid at one sampling depth, restricted to a gene.
 
-    The layout is :func:`panel_spec.ntmut_grid_path`'s, which
+    The layout is :func:`panel_spec.aamut_grid_path`'s, which
     ``workflow/figures.smk`` declares this rule's inputs from, so the file a
     rule promises and the file this opens are one spelling.
+
+    **The synonymous rows come out, and the stops stay in.** The paper counts
+    "amino-acid mutations to the founder spike sequence", which is every row
+    whose mutant residue differs from the founder's: 7,901 for 21J, against
+    9,140 rows in the file. A row where the two agree is a synonymous codon
+    change counted at the amino-acid level and is not a mutation this figure is
+    about; a stop is.
 
     ``gene`` is a semicolon-joined list where a site falls in more than one
     reading frame, and is null on the intergenic rows, so the membership test
     runs on ``fillna("")`` -- a bare ``split`` raises on those.
     """
     frame = pd.read_csv(
-        ntmut_grid_path(ntmut_dir, clade, arm), usecols=list(NT_GRID_COLUMNS)
+        aamut_grid_path(aamut_dir, clade, arm), usecols=list(AA_GRID_COLUMNS)
     )
     in_gene = frame["gene"].fillna("").str.split(";").apply(lambda g: gene in g)
-    return frame.loc[in_gene]
+    return frame.loc[in_gene & (frame["mutant_aa"] != frame["clade_founder_aa"])]
 
 
 def count_ecdf_frame(
-    ntmut_dir: Path,
+    aamut_dir: Path,
     clades: Iterable[str] = tuple(ECDF_CLADES),
     *,
     gene: str = GENE,
@@ -880,9 +893,10 @@ def count_ecdf_frame(
     counts", evaluated on :data:`ECDF_POINTS` points from 0 to
     :data:`ECDF_MAX_COUNT`.
 
-    **The population is the whole nucleotide grid**, every single-nucleotide
-    mutation away from the clade founder, and not the subset that clears the
-    accuracy threshold. The subset is *defined* by a threshold on these counts,
+    **The population is the whole amino-acid grid**, every non-synonymous
+    amino-acid mutation away from the clade founder, and not the subset that
+    clears the accuracy threshold. The subset is *defined* by a threshold on
+    these counts,
     so its own curve would pass through 1.0 at exactly that threshold and be
     truncated by construction -- it could not show what share of a clade's
     mutations the threshold leaves out, which is the panel's question.
@@ -910,12 +924,12 @@ def count_ecdf_frame(
         # whichever arm the loop happens to reach first: a caller passing
         # `arms` in another order would otherwise skip the size check on every
         # arm ahead of full depth, silently.
-        grids = {arm: _nt_grid(ntmut_dir, clade, arm, gene=gene) for arm in arms}
+        grids = {arm: _aa_grid(aamut_dir, clade, arm, gene=gene) for arm in arms}
         n_full = len(grids[FULL_DEPTH.name])
         for arm, frame in grids.items():
             if len(frame) != n_full:
                 raise ValueError(
-                    f"{arm}/{clade}: the {gene} nucleotide grid has "
+                    f"{arm}/{clade}: the {gene} amino-acid grid has "
                     f"{len(frame)} rows against {n_full} at full depth. The "
                     f"grid is enumerated from the clade founder and cannot "
                     f"depend on sampling depth, so the founder moved."

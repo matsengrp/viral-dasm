@@ -69,16 +69,6 @@ mat_pcp:
     # cutoff-date ladder (2020-09-01 .. 2025-07-01) and never this run's
     # 2026-08-06, so a filter on it returns an empty frame rather than raising.
     clade_counts_file: mat/clade_counts.csv
-    # The per-clade nucleotide grids: every single-nucleotide mutation away
-    # from the clade founder, with its actual and expected count. Panel B's
-    # eCDF is a marginal over this grid, and the three `cap_*_0/`
-    # subdirectories hold the same grid counted on each thinned tree.
-    #
-    # Separate from `aamut_fitness_dir` because it is the nucleotide grid, not
-    # the amino-acid table: the grid is the population the paper's "mutations
-    # with at least X counts" is a share *of*, and it does not depend on
-    # sampling depth, which is what makes the depth curves comparable.
-    ntmut_fitness_dir: fitness/ntmut_fitness
     # One `{clade}.fa` per clade. The clade roster is read from these files
     # rather than restated anywhere, and `scripts/check_clades.py` requires the
     # founders, the per-clade fitness tables and `censored_clades_file` to name

@@ -1177,41 +1177,43 @@ def test_the_scan_row_does_not_overlap_the_candidate_clades():
 #
 # These read mat-pcp's count tables rather than a scored table, so they run
 # against the real tree or not at all -- there is no hand-built stand-in for
-# "how unevenly the clades are sampled". The grids are eight 24 MB CSVs, so the
-# eCDF is built once for the module.
+# "how unevenly the clades are sampled". The eCDF reads eight per-clade tables,
+# so it is built once for the module.
 
-#: The counts measured from this mat-pcp run on 2026-11-10, which is what the
+#: The counts measured from this mat-pcp run on 2026-11-14, which is what the
 #: panel claims. Pinned rather than recomputed: a changed share means the tree
 #: or the gene filter moved, and either should fail here rather than quietly
 #: redraw the paper's figure with different numbers.
 ECDF_SHARE_AT_THRESHOLD = {
-    ("21J", "full_depth"): 0.6236,
-    ("21J", "cap_50000_0"): 0.0615,
-    ("21J", "cap_20000_0"): 0.0406,
-    ("21J", "cap_5000_0"): 0.0003,
-    ("25C", "full_depth"): 0.0634,
-    ("25C", "cap_50000_0"): 0.0385,
-    ("25C", "cap_20000_0"): 0.0157,
-    ("25C", "cap_5000_0"): 0.0006,
+    ("21J", "full_depth"): 0.6579,
+    ("21J", "cap_50000_0"): 0.0705,
+    ("21J", "cap_20000_0"): 0.0478,
+    ("21J", "cap_5000_0"): 0.0004,
+    ("25C", "full_depth"): 0.0680,
+    ("25C", "cap_50000_0"): 0.0416,
+    ("25C", "cap_20000_0"): 0.0148,
+    ("25C", "cap_5000_0"): 0.0009,
 }
 
-#: 21J's spike nucleotide grid, of the 87,734 the genome-wide table holds.
-SPIKE_GRID_ROWS = {"21J": 11371, "25C": 11207}
+#: Each clade's spike amino-acid grid: the non-synonymous rows of the
+#: per-clade table, 7,901 of 21J's 9,140 spike rows. This is the population the
+#: paper's "7,901 amino-acid mutations to its founder spike sequence" names.
+SPIKE_GRID_ROWS = {"21J": 7901, "25C": 7795}
 
 
-def _ntmut_dir() -> Path:
-    return lib.mat_pcp_path("ntmut_fitness_dir")
+def _aamut_dir() -> Path:
+    return lib.mat_pcp_path("aamut_fitness_dir")
 
 
 @pytest.fixture(scope="module")
 def ecdf():
-    """Panel B's frame, built once: eight CSVs at about 24 MB each."""
-    if not _ntmut_dir().exists():
-        pytest.skip(f"{_ntmut_dir()} is not mounted")
-    return panels.count_ecdf_frame(_ntmut_dir())
+    """Panel B's frame, built once: eight per-clade tables."""
+    if not _aamut_dir().exists():
+        pytest.skip(f"{_aamut_dir()} is not mounted")
+    return panels.count_ecdf_frame(_aamut_dir())
 
 
-def test_the_nucleotide_grid_does_not_move_with_sampling_depth():
+def test_the_amino_acid_grid_does_not_move_with_sampling_depth():
     """A thinned arm counts the same mutations, or the founder moved.
 
     The grid is enumerated from the clade founder, so its size cannot depend on
@@ -1220,12 +1222,12 @@ def test_the_nucleotide_grid_does_not_move_with_sampling_depth():
     why `count_ecdf_frame` raises rather than warns, and why the row counts are
     pinned here as well.
     """
-    directory = _ntmut_dir()
+    directory = _aamut_dir()
     if not directory.exists():
         pytest.skip(f"{directory} is not mounted")
     for clade, expected in SPIKE_GRID_ROWS.items():
         sizes = {
-            arm: len(panels._nt_grid(directory, clade, arm)) for arm in lib.CORPUS_NAMES
+            arm: len(panels._aa_grid(directory, clade, arm)) for arm in lib.CORPUS_NAMES
         }
         assert set(sizes.values()) == {expected}, (
             f"{clade}'s spike grid is {sizes}, not {expected} at every depth. "
@@ -1247,8 +1249,8 @@ def test_the_ecdf_reproduces_the_measured_shares(ecdf):
     }
     assert set(measured) == set(ECDF_SHARE_AT_THRESHOLD)
     for key, expected in ECDF_SHARE_AT_THRESHOLD.items():
-        # 1e-4 is about one mutation in an 11,371-row grid. At the 1e-3 this
-        # started at, the two cap_5000 pins -- 0.0003 and 0.0006 -- accepted
+        # 1e-4 is about one mutation in a 7,901-row grid. At the 1e-3 this
+        # started at, the two cap_5000 pins -- 0.0004 and 0.0009 -- accepted
         # zero, so an arm that silently lost every count still passed.
         assert measured[key] == pytest.approx(expected, abs=1e-4), (
             f"{key[0]}/{key[1]} is {measured[key]:.4f} against the {expected} "

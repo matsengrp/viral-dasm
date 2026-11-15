@@ -61,9 +61,9 @@ def _():
     # and checks the rule declares them, and a key reached only through a helper
     # is one that check cannot see.
     CLADE_COUNTS = mat_pcp_path("clade_counts_file")
-    NTMUT_DIR = mat_pcp_path("ntmut_fitness_dir")
+    AAMUT_DIR = mat_pcp_path("aamut_fitness_dir")
     SELECTION = panels.SUBSAMPLING_SELECTION
-    return CLADE_COUNTS, NTMUT_DIR, SELECTION, charts, panels
+    return CLADE_COUNTS, AAMUT_DIR, SELECTION, charts, panels
 
 
 @app.cell
@@ -127,11 +127,11 @@ def _(mo):
     expected counts. The dotted rule is the accuracy threshold of 10, so where
     a curve crosses it is the share of that clade's mutations with at least
     that many counts — an upper bound on what is estimable, since scoring also
-    drops synonymous, masked and censored mutations.
+    drops masked and censored mutations.
 
-    The population is the clade's **whole** nucleotide grid — every
-    single-nucleotide mutation away from the founder — not the subset that
-    clears the threshold. The subset is defined by a threshold on these counts,
+    The population is the clade's **whole** amino-acid grid — every
+    non-synonymous amino-acid mutation away from the founder, 7,901 of them in
+    21J — not the subset that clears the threshold. The subset is defined by a threshold on these counts,
     so its curve would reach 1.0 at exactly that threshold and could not show
     what the threshold leaves out.
     """)
@@ -139,8 +139,8 @@ def _(mo):
 
 
 @app.cell
-def _(NTMUT_DIR, SELECTION, charts, mo, panels):
-    ecdf = panels.count_ecdf_frame(NTMUT_DIR)
+def _(AAMUT_DIR, SELECTION, charts, mo, panels):
+    ecdf = panels.count_ecdf_frame(AAMUT_DIR)
 
     panel_b = charts.save_panel(
         charts.count_ecdf_panel(
