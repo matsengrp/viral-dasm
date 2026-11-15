@@ -60,7 +60,7 @@ backgrounds from branch frequencies in ``scripts/backgrounds.py``, so
 the systematic scan -- ``permutation_scan_test``, ``PermutationScan``,
 ``benjamini_hochberg`` -- which drew a figure panel this project has retired.
 
-**Three deliberate divergences from the source**, so this module does not diff
+**Four deliberate divergences from the source**, so this module does not diff
 clean against it:
 
 1. :meth:`PoolSpec.matches` translates with ``dasm2.sequence.conversion``'s

@@ -305,7 +305,13 @@ rule clade_haplotypes:
         io="dasm2/io.py",
         scov2_rates="dasm2/neutral/scov2_rates.py",
         dasm2_init="dasm2/__init__.py",
-        candidates=str(CANDIDATE_CSV),
+        # No `candidates`: this rule enumerates every parent haplotype of the
+        # three clades and never reads the candidate list, taking only
+        # `CANDIDATE_CLADES` from `panel_spec`. Declaring the CSV made adding
+        # or reclassifying a candidate re-stream the corpus here and then
+        # cascade into `score_haplotypes`, which is forty minutes, for a file
+        # the script does not open. `rule score_haplotypes` below does read
+        # it, through `candidate_cells`, and declares it.
         pcps=str(corpus(ARM).source_pcp),
         clade_founders=background_clade_founders,
     output:
