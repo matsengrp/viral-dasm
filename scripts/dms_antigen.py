@@ -100,10 +100,14 @@ def antigen_columns(alphabet: str) -> tuple[int, ...]:
 def read_parents(path: Path) -> dict[str, str]:
     """The query sequence per homolog, from the committed FASTA.
 
-    Its own reader rather than ``founders.py``'s: that one length-checks
-    against the gene's codon count and rejects a gap, and these sequences carry
-    gaps on purpose -- they are projections of a construct onto WH1 coordinates
-    and a deletion is a column, not a missing residue.
+    Its own reader, for two reasons neither of which is a flaw in the shared
+    ones. ``founders.py`` is not a candidate at all: it reads *nucleotide*
+    FASTAs and translates them, so it never sees a file like this one. And
+    ``dasm2.io.read_fasta_first_sequence`` returns only the first record, while
+    this file carries three. What is left is a multi-record amino-acid read
+    whose sequences carry ``-`` columns on purpose -- they are projections of a
+    construct onto WH1 coordinates, where a deletion is a column rather than a
+    missing residue.
     """
     sequences: dict[str, str] = {}
     name: str | None = None
@@ -235,7 +239,8 @@ def antigen_scores(homolog: str) -> tuple[pd.DataFrame, dms_models.Manifest, str
             f"{dms_dataset(homolog).clade} clade founder the other "
             f"predictors score against; scored by antiGen "
             f"{spec.checkpoint.name} (md5 {spec.checkpoint_md5}) at the time "
-            f"cutoff {spec.cutoff}, --drop-gap-stop on, on {DEVICE}; log of a "
+            f"cutoff {spec.cutoff} from the checkout at {spec.checkout}, "
+            f"--drop-gap-stop on, on {DEVICE}; log of a "
             f"whole-sequence probability over mutation events, not a selection "
             f"factor"
         ),

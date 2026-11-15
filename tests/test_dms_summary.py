@@ -22,9 +22,11 @@ for _path in (REPO_ROOT, REPO_ROOT / "scripts"):
         sys.path.insert(0, str(_path))
 
 pd = pytest.importorskip("pandas")
+pearsonr = pytest.importorskip("scipy.stats").pearsonr
 
 import dms
 import dms_summary
+from dms_summary import DMS_COLUMN
 from panel_spec import DMS_PREDICTORS
 
 #: Enough cells per stratum for `within_clade_metrics`, which refuses below three.
@@ -95,21 +97,32 @@ def test_all_is_the_union_of_the_two_strata_and_not_a_third_label():
 
 
 def test_each_predictor_is_scored_from_its_own_column():
-    """A summary that read one predictor's scores for another would still fit.
+    """A summary that read one predictor's scores under another's label.
 
     Every row is well formed under a column mixup -- the keys, the counts and
-    the column set are all unchanged -- so the only thing that can catch it is
-    the coefficients differing. This asserts they do, which is also what keeps
-    `_cells` honest: a fixture whose score columns were rescalings of one vector
-    would make the property untestable while every other test here still passed.
+    the column set are all unchanged -- so nothing structural catches it.
+
+    **Asserting only that the coefficients differ is not enough**, which is the
+    trap this test was rewritten to escape: rotating the labels permutes a set
+    of distinct values into another set of distinct values, so a distinctness
+    check passes. Each predictor's coefficient is therefore compared against one
+    computed independently from the column that bears its name.
     """
-    table = dms_summary.summarize({"BA.1": _cells()}, _manifests())
-    coefficients = table[table["stratum"] == dms.ALL].set_index("predictor")[
-        "pearson_r"
-    ]
-    assert len(coefficients) == len(DMS_PREDICTORS)
-    assert len(set(coefficients.round(6))) == len(DMS_PREDICTORS), (
-        f"predictors are not distinguishable in this fixture: {dict(coefficients)}"
+    cells = _cells()
+    table = dms_summary.summarize({"BA.1": cells}, _manifests())
+    reported = table[table["stratum"] == dms.ALL].set_index("predictor")["pearson_r"]
+
+    for predictor in DMS_PREDICTORS:
+        expected = pearsonr(cells[predictor], cells[DMS_COLUMN]).statistic
+        assert reported[predictor] == pytest.approx(expected, abs=1e-12), (
+            f"{predictor} is reported at {reported[predictor]:+.6f} but its own "
+            f"column correlates at {expected:+.6f}: the table is carrying "
+            f"another predictor's score under this label"
+        )
+    # And the fixture must keep the labels telling apart, or the loop above
+    # would hold under a rotation that happened to be the identity on values.
+    assert len(set(reported.round(9))) == len(DMS_PREDICTORS), (
+        f"the fixture no longer distinguishes predictors: {dict(reported)}"
     )
 
 

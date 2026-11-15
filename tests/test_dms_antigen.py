@@ -21,6 +21,7 @@ taken from the issue that found it.
 from __future__ import annotations
 
 import hashlib
+import os
 import sys
 from pathlib import Path
 
@@ -38,6 +39,9 @@ pd = pytest.importorskip("pandas")
 
 import dms_antigen
 import dms_models
+import dms_published
+from founders import founder_aa_sequence
+from lib import GENE
 
 #: The construct projections `config.yaml` points at, as
 #: ``dasm2-experiments`` #1962 records them: the number of deletion columns in
@@ -67,13 +71,22 @@ EXPECTED_QUERIES = {
 #: every homolog is checked on above.
 SCORED_HOMOLOG = "KP.3.1.1"
 
-#: The antiGen row at :data:`SCORED_HOMOLOG`, stratum ``all``, as issue #32's
-#: success criterion states it. Wide enough to survive a pandas or torch
-#: version bump and narrow enough that a transposed axis or a founder
-#: background -- which score around zero -- fails it.
-EXPECTED_SPEARMAN = (0.34, 0.44)
+#: The floor the antiGen row at :data:`SCORED_HOMOLOG` must clear, stratum
+#: ``all``. **One-sided, deliberately.** The defects this guards against all
+#: push the coefficient *down*: a transposed axis and a founder background
+#: score near zero, and a one-site misjoin lands around +0.24. An upper bound
+#: would guard nothing and would fail on a better model or a cleaner release,
+#: which says nothing about correctness. Measured at +0.4095 when this landed,
+#: so the floor sits well below that and well above the misjoin.
+MINIMUM_SPEARMAN = 0.30
 
 _SPEC = lib.antigen_model()
+
+#: The house convention: on the host that builds the figure a skip is itself
+#: the failure, because every check below that reaches the model or the assays
+#: is gated on one of these. Raised at collection so the reason is the missing
+#: path, not a pile of skip reasons. `tests/test_dms.py` sets the precedent.
+REQUIRE_DATA = os.environ.get("VIRAL_DASM_REQUIRE_DATA") == "1"
 
 needs_dms = pytest.mark.skipif(
     not all(lib.dms_dataset(h).path.is_file() for h in lib.dms_homologs()),
@@ -84,6 +97,21 @@ needs_antigen = pytest.mark.skipif(
     not (_SPEC.checkout / "antiGen").is_dir(),
     reason=f"the antiGen checkout is not readable at {_SPEC.checkout}",
 )
+
+
+if REQUIRE_DATA:
+    _absent = []
+    if not all(lib.dms_dataset(h).path.is_file() for h in lib.dms_homologs()):
+        _absent.append("the three DMS CSVs")
+    if not (_SPEC.checkout / "antiGen").is_dir():
+        _absent.append(f"the antiGen checkout at {_SPEC.checkout}")
+    if _absent:
+        raise RuntimeError(
+            f"VIRAL_DASM_REQUIRE_DATA=1 but {' and '.join(_absent)} "
+            f"cannot be read, so every check that reaches the model or the "
+            f"assays would skip and the suite would pass having tested none "
+            f"of them."
+        )
 
 
 @pytest.fixture(scope="module")
@@ -229,36 +257,49 @@ def test_the_zeroed_cell_at_each_position_is_the_querys_own_residue(scored):
 
 
 @needs_dms
-def test_the_model_reads_the_same_residue_the_join_reports(scored):
-    """Three independent sources agree at every scored cell, or this fails.
+def test_the_published_wildtype_column_pins_the_site_numbering():
+    """What actually holds the DMS frame to the founder's, measured both ways.
 
-    The site numbering comes from the study's published CSV, ``parent_aa`` from
-    mat-pcp's clade founder FASTA, and the scored residue from the committed
-    construct projection. Nothing in `scripts/dms_models.py`'s contract compares
-    them -- row counts, keys and the sequence hash all pass under a shifted
-    frame -- so this is the assertion that the three share one coordinate
-    system.
+    It is tempting to check this by comparing the scored query against
+    ``parent_aa``. That proves nothing: `dms_models.homolog_cells` builds
+    ``parent_aa`` as ``founder[site - 1]``, so both sides are indexed by the
+    same ``aa_site`` and a shift in the study's own numbering moves them
+    together. `test_no_measured_cell_sits_where_founder_and_construct_disagree`
+    already covers what such a comparison does establish.
 
-    **It is the check that matters most here, because the failure is quiet.**
-    Joining each score to the next site's measurement still reports a Pearson
-    correlation of about +0.24 on KP.3.1.1 rather than something obviously
-    broken, so a reader would have no reason to doubt it. Measured against the
-    real +0.436, that is a number a careless reviewer accepts.
+    The genuinely independent source is the study's own ``wildtype`` column,
+    which `dms.load_dms` checks against the clade founder and drops on
+    mismatch. This pins that check's discriminating power rather than assuming
+    it: in frame the two agree almost everywhere, and one residue either way
+    they agree at close to the background rate a random protein would give, so
+    a shifted release loses nearly every measurement and `load_dms`'s
+    accounting cannot miss it.
     """
-    parents = dms_antigen.read_parents(_SPEC.parents)
     for homolog in lib.dms_homologs():
-        cells, _ = dms_models.homolog_cells(homolog)
-        query = parents[homolog]
-        read = [query[site - 1] for site in cells["aa_site"]]
-        disagree = [
-            (site, mine, theirs)
-            for site, mine, theirs in zip(cells["aa_site"], read, cells["parent_aa"])
-            if mine != theirs
-        ]
-        assert not disagree, (
-            f"{homolog}: {len(disagree)} of {len(cells)} scored cells read a "
-            f"residue the join does not report, e.g. {disagree[:3]}"
+        dataset = lib.dms_dataset(homolog)
+        founder = founder_aa_sequence(dataset.clade, GENE)
+        published = dms_published.normalise_published(
+            pd.read_csv(dataset.path), dataset
         )
+        rates = {}
+        for shift in (-1, 0, 1):
+            pairs = [
+                (founder[site - 1 + shift], wildtype)
+                for site, wildtype in zip(published["site"], published["wildtype"])
+                if 0 <= site - 1 + shift < len(founder)
+            ]
+            rates[shift] = sum(a == b for a, b in pairs) / len(pairs)
+        assert rates[0] > 0.95, (
+            f"{homolog}: the published wildtype column agrees with the "
+            f"{dataset.clade} founder at only {rates[0]:.1%} of sites, so the "
+            f"two are not in the same frame"
+        )
+        for shift in (-1, 1):
+            assert rates[shift] < 0.25, (
+                f"{homolog}: shifting the site index by {shift:+d} still agrees "
+                f"at {rates[shift]:.1%}, so this check cannot tell a correct "
+                f"frame from a shifted one"
+            )
 
 
 @needs_antigen
@@ -280,7 +321,7 @@ def test_the_probability_map_is_normalised_before_the_log(scored):
 
 @needs_antigen
 @needs_dms
-def test_antigen_clears_the_band_the_issue_predicted(scored):
+def test_antigen_clears_the_band_the_issue_predicted():
     """The canary, on the pipeline's own cells rather than on the raw CSV.
 
     A transposed axis or a founder background both score near zero here while
@@ -288,24 +329,20 @@ def test_antigen_clears_the_band_the_issue_predicted(scored):
     assertion that holds the whole path to an answer rather than to a shape.
     """
     stats = pytest.importorskip("scipy.stats")
-    frame, manifest, query = dms_antigen.antigen_scores(SCORED_HOMOLOG)
+    frame, manifest, _ = dms_antigen.antigen_scores(SCORED_HOMOLOG)
     cells, _ = dms_models.homolog_cells(SCORED_HOMOLOG)
     merged, _ = dms_models.join_scores(cells, [(frame, manifest)])
 
     assert merged[dms_antigen.ANTIGEN].notna().all()
-    low, high = EXPECTED_SPEARMAN
     rho = stats.spearmanr(
         merged[dms_antigen.ANTIGEN], merged["dms_cell_entry"]
     ).statistic
-    assert low <= rho <= high, (
-        f"antiGen's Spearman against {SCORED_HOMOLOG} is {rho:+.4f}, outside "
-        f"[{low}, {high}]. A transposed axis or the clade founder as the "
-        f"background both land near zero; a real change in the model or the "
-        f"cells moves it by less than this band's width."
+    assert rho >= MINIMUM_SPEARMAN, (
+        f"antiGen's Spearman against {SCORED_HOMOLOG} is {rho:+.4f}, below "
+        f"{MINIMUM_SPEARMAN}. A transposed axis or the clade founder as the "
+        f"background both land near zero, and joining each score to the next "
+        f"site's measurement lands around +0.24."
     )
-    # And the manifest declares the construct, not the founder.
-    assert manifest.input_sequence_sha256 == EXPECTED_QUERIES[SCORED_HOMOLOG][1]
-    assert query.count("-") == EXPECTED_QUERIES[SCORED_HOMOLOG][0]
 
 
 @pytest.mark.parametrize("homolog", sorted(EXPECTED_QUERIES))
