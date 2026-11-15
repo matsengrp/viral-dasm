@@ -254,7 +254,12 @@ def test_masking_runs_before_the_loader_that_raises_on_a_mismatch():
     from founders import founder_aa_sequence
 
     founder = founder_aa_sequence(dataset.clade, lib.GENE)
-    raw = pd.read_csv(dataset.path)
+    # Through the published-file conversion, as `load_dms` reads it: the file
+    # carries the study's own column names, and the mask step is the only one
+    # removed here.
+    from dms_published import normalise_published
+
+    raw = normalise_published(pd.read_csv(dataset.path), dataset)
     unmasked = raw[~raw[dms.DMS_MUT_COL].isin(["*", "-"])]
 
     import tempfile
@@ -283,8 +288,14 @@ def test_the_accounting_separates_masking_from_a_construct_disagreement():
     """
     _, accounting = dms.load_dms("KP.3.1.1")
     assert accounting.mismatch_sites == (1253,)
-    assert accounting.dropped_masked_site == 947
-    assert accounting.dropped_founder_mismatch == 2
+    # Measured on the population the study's own thresholds leave, which is
+    # what `scripts/dms_published.py` applies: 8,342 converted rows, against
+    # the 11,841 of the unfiltered table this pipeline read before. One of the
+    # two rows at site 1253 survives that filter -- the other was seen once --
+    # so the mismatch is one row at one site rather than two.
+    assert accounting.raw_rows == 8342
+    assert accounting.dropped_masked_site == 865
+    assert accounting.dropped_founder_mismatch == 1
 
 
 @needs_mat_pcp

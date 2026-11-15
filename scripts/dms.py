@@ -51,6 +51,7 @@ import dasm2  # noqa: F401  (imported first for its side effects)
 assert_dasm2_is_this_repo()
 
 import pandas as pd
+from dms_published import normalise_published
 from founders import founder_aa_sequence, founder_nt_sequence
 from panel_spec import FIGURE_MODEL
 from panel_spec import TABLE_COLUMNS as BASE_TABLE_COLUMNS
@@ -228,10 +229,10 @@ def single_nt_indicator(clade: str, gene: str = GENE) -> pd.DataFrame:
 def verify_dms_md5(homolog: str) -> str:
     """Check one homolog's CSV against the digest ``config.yaml`` pins.
 
-    A gate rather than a label. These files are received, and the planned
-    repoint of KP.3.1.1 at filtered measurements replaces one of them at the
-    same path, so without this every number the figure reports would move
-    while the pipeline kept running.
+    A gate rather than a label. These files are copies of what three studies
+    released, and a study can re-release one at the same path, so without this
+    every number the figure reports would move while the pipeline kept
+    running. `data/dms/PROVENANCE.md` records which release each copy is.
 
     Raises:
         ValueError: If the file's md5 is not the pinned one.
@@ -241,9 +242,10 @@ def verify_dms_md5(homolog: str) -> str:
     if digest != dataset.md5:
         raise ValueError(
             f"{homolog}: {dataset.path} has md5 {digest}, but config.yaml pins "
-            f"{dataset.md5}. A DMS file is received rather than built, so a "
-            f"changed digest means the dataset changed: re-measure what this "
-            f"figure reports rather than repinning."
+            f"{dataset.md5}. These files are copies of what each study "
+            f"released rather than anything built here, so a changed digest "
+            f"means the copy changed: re-measure what this figure reports "
+            f"rather than repinning."
         )
     return digest
 
@@ -281,7 +283,12 @@ def load_dms(homolog: str, gene: str = GENE) -> tuple[pd.DataFrame, DmsAccountin
     founder = founder_aa_sequence(dataset.clade, gene)
     mask_sites = unreadable_sites(dataset.clade)
 
-    raw = pd.read_csv(dataset.path)
+    # The study's published file, converted to this pipeline's four columns
+    # and filtered on that study's own terms. `raw_rows` is what the
+    # conversion emits rather than what the file holds, so the accounting
+    # below measures this loader's masking rather than the study's filtering,
+    # which `data/dms/PROVENANCE.md` records instead.
+    raw = normalise_published(pd.read_csv(dataset.path), dataset)
     raw_rows = len(raw)
 
     frame = raw[~raw[DMS_MUT_COL].isin(NON_SUBSTITUTION_MUTANT_CODES)]

@@ -375,20 +375,37 @@ class DmsDataset:
     """One homolog's deep mutational scan, with what identifies it.
 
     ``md5`` is a gate rather than a label, which is the one way this differs
-    from :class:`Corpus`'s. A DMS file is received, not built, and the planned
-    repoint of KP.3.1.1 at filtered measurements replaces the file at the same
-    path -- so a digest is what makes a changed dataset fail loudly instead of
-    quietly moving every number this figure reports.
+    from :class:`Corpus`'s. These files are copies of what three studies
+    published, carried in ``data/dms/`` so that this figure can be rebuilt
+    from the checkout alone -- and a digest is what makes a replaced or
+    re-released copy fail loudly instead of quietly moving every number this
+    figure reports.
 
     ``clade`` is the Nextstrain label this pipeline keys its tables on. The
     papers name their homologs by Pango alias, and the two are not
     interchangeable in any join here.
+
+    The column names and the two thresholds are the study's own, not this
+    pipeline's: each experiment publishes its measurements in its own shape,
+    with its own filtering applied or left to the consumer, and
+    `scripts/dms_published.py` records which is which. ``min_times_seen`` and
+    ``max_effect_std`` are ``None`` for a study whose released file is already
+    filtered, so a threshold here always means "the authors apply this and the
+    file they released does not carry it".
     """
 
     homolog: str
     clade: str
     path: Path
     md5: str
+    wt_column: str = "wildtype"
+    site_column: str = "site"
+    mutant_column: str = "mutant"
+    effect_column: str = "effect"
+    times_seen_column: str = "times_seen"
+    effect_std_column: str = "effect_std"
+    min_times_seen: float | None = None
+    max_effect_std: float | None = None
 
 
 def dms_homologs() -> list[str]:
@@ -413,11 +430,30 @@ def dms_dataset(homolog: str) -> DmsDataset:
             f"{homolog!r} is not a DMS homolog; expected one of "
             f"{sorted(block['homologs'])}"
         ) from None
+    # Anchored at `REPO_ROOT` rather than joined bare: `root` is now a path
+    # inside this repository, and a relative join would resolve against the
+    # working directory -- so every rule that does not happen to run from the
+    # repository root would read nothing.
+    optional = {
+        field: entry[field]
+        for field in (
+            "wt_column",
+            "site_column",
+            "mutant_column",
+            "effect_column",
+            "times_seen_column",
+            "effect_std_column",
+            "min_times_seen",
+            "max_effect_std",
+        )
+        if field in entry
+    }
     return DmsDataset(
         homolog=homolog,
         clade=str(entry["clade"]),
-        path=Path(block["root"]) / entry["file"],
+        path=REPO_ROOT / block["root"] / entry["file"],
         md5=str(entry["md5"]),
+        **optional,
     )
 
 
