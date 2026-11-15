@@ -122,6 +122,7 @@ ENTRY_POINTS = {
     # `fig:within_clade_shifts`' producers. These run scripts rather than
     # notebooks, like the producers above the panel block.
     "clade_backgrounds": "scripts/backgrounds.py",
+    "clade_emergence": "scripts/clade_emergence.py",
     "clade_haplotypes": "scripts/clade_haplotypes.py",
     "score_haplotypes": "scripts/score_haplotypes.py",
     "pool_counts": "scripts/pool_counts.py",

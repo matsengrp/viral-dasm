@@ -1215,13 +1215,62 @@ THRESHOLD_ACCENT = "#d95f02"
 SUBSAMPLING_TITLE_PX = 24
 SUBSAMPLING_LABEL_PX = 22
 
-#: Panel A's geometry. A cap is drawn as a rule across the whole panel rather
-#: than as a per-clade mark, because what it does is set one height for every
-#: clade above it.
-CLADE_SIZE_WIDTH = 760
-CLADE_SIZE_HEIGHT = 230
-ECDF_PANEL_WIDTH = 300
-ECDF_PANEL_HEIGHT = 230
+#: Panels A and B's geometry, the published figure's. A cap is drawn as a rule
+#: across the whole of panel A rather than as a per-clade mark, because what it
+#: does is set one height for every clade above it. Panel B's width is set so
+#: that the whole panel -- plots, axes and legend -- comes out as wide as panel
+#: C, which it stacks on top of in the composed figure.
+CLADE_SIZE_WIDTH = 1190
+CLADE_SIZE_HEIGHT = 380
+ECDF_PANEL_WIDTH = 285
+ECDF_PANEL_HEIGHT = 270
+
+#: Panel A's 56 clade ticks, smaller than the rest of its type: three
+#: characters rotated 90 degrees, which collide at the label size.
+CLADE_TICK_PX = 19
+
+#: Panel A's y title, and panel B's. Wrapped by hand, because Vega-Lite does
+#: not wrap an axis title and either runs past its plot at these widths.
+CLADE_SIZE_Y_TITLE = ["number of sequences", "per clade"]
+ECDF_Y_TITLE = [
+    "fraction of mutations",
+    "with ≥ X actual or",
+    "expected counts",
+]
+
+#: Panel A's date ramp, warm to dark with time, and the stems under its dots.
+#: The five stops are `DATE_CMAP`'s own, from the published panel's notebook,
+#: given as stops rather than as a scheme name because a five-stop *temporal*
+#: scale comes back from vl-convert as a two-colour interpolation.
+DATE_STOPS: tuple[str, ...] = (
+    "#f89540",
+    "#da5a6a",
+    "#aa2395",
+    "#6600a7",
+    "#0d0887",
+)
+STEM_GREY = "#d9d8d1"
+
+#: The ink panel B's full-depth curve and panel A's arrows are drawn in, and
+#: the neutral its cap rules take. Where the caps are colour-coded, as in panel
+#: B, they keep the single-hue :data:`BLUE_ORDINAL`, so the two scales cannot
+#: be confused; on the panel that carries the dates the caps are neutral.
+INK = "#0b0b0b"
+INK_2 = "#52514e"
+
+#: The single-hue ramp panel B's cap curves are drawn on, light to dark.
+BLUE_ORDINAL: tuple[str, ...] = (
+    "#86b6ef",
+    "#6da7ec",
+    "#5598e7",
+    "#3987e5",
+    "#2a78d6",
+    "#256abf",
+    "#1c5cab",
+    "#184f95",
+    "#104281",
+    "#0d366b",
+)
 
 #: Panel A's log domain, as multiples of the smallest and largest clade. A mark
 #: sitting exactly on a bound is drawn half outside the frame and an unclipped
@@ -1238,9 +1287,11 @@ DOMAIN_TOP_PAD = 3.0
 #: Pixels, not multiples, because a head of a fixed size needs a fixed gap --
 #: and on a log axis a multiplicative offset is a different number of pixels at
 #: every height. :func:`_raised` converts.
-ARROW_HEAD_PX = 15.0
-ARROW_TAIL_PX = 29.0
-ARROW_HEAD_SIZE = 110
+#: These are the published panel's numbers: the dot's own radius is about 9 px,
+#: so a tip at 21 leaves white space between the two.
+ARROW_HEAD_PX = 21.0
+ARROW_TAIL_PX = 35.0
+ARROW_HEAD_SIZE = 165
 
 
 def check_cap_colours(caps: Sequence[object]) -> None:
@@ -1277,147 +1328,199 @@ def clade_size_panel(
     frame: pd.DataFrame,
     caps: Sequence[int],
     *,
-    title: list[str],
+    title: list[str] | None = None,
     highlight: Sequence[str] = (),
     width: int = CLADE_SIZE_WIDTH,
     height: int = CLADE_SIZE_HEIGHT,
 ) -> alt.LayerChart:
-    """Panel A: sequences per clade, with one rule per downsampling cap.
+    """Panel A: sequences per clade, coloured by when the clade emerged.
 
-    A dot per clade on a log y axis, and an arrow over each clade in
-    ``highlight`` -- panel B's two, so a reader arriving from its titles finds
-    them here without counting along 56 ticks.
+    **Ported from the published figure's own producer**, the
+    `panel_a_sequences_per_clade` cell of `notebooks/cap_arm_scatters.py` in
+    the mat-pcp run this paper is built on, which `main.tex`'s provenance
+    comment names.
+
+    A dot per clade on a log y axis, a stem down to the floor, one neutral
+    rule per downsampling cap labelled on the line, and an arrow over each
+    clade in ``highlight`` -- panel B's two, so a reader arriving from its
+    titles finds them here without counting along 56 ticks.
+
+    **The colour is the clade's emergence date**, and it is what turns a
+    ranked list of 56 counts into a picture of the pandemic: the clades with
+    millions of sequences are the early ones and the modern clades sit at the
+    bottom, which the heights alone do not say. It is encoded as a **number**,
+    the date as a decimal year, rather than as a date: a five-stop range on a
+    temporal scale comes back from vl-convert as a two-colour interpolation,
+    where on a quantitative scale the same five stops interpolate the way the
+    matplotlib colormap does, which is the point of giving them.
 
     **A log y axis**, because the clades span four orders of magnitude. On a
     linear axis every clade but the largest five is a flat line against the
-    axis, which is the opposite of the panel's point: the imbalance is the
-    finding, and a reader has to be able to see where a cap falls among the
-    clades it does *not* touch as well as the ones it cuts.
+    axis, which is the opposite of the panel's point.
 
-    The clades are ordered by size rather than by name, so each cap rule meets
-    the curve of dots at one place and the reader can count what it reaches.
+    ``title`` is accepted and unused: this panel carries no title in the
+    published figure, where the caption and the axis titles say what it is.
+
+    Raises:
+        ValueError: If ``frame`` carries no ``year`` column. The dots cannot
+            be coloured by a date the caller did not measure, and a panel that
+            silently fell back to one ink would be the pre-port drawing again.
     """
+    if "year" not in frame.columns:
+        raise ValueError(
+            "clade_size_frame must carry a `year` column -- the clade's "
+            "emergence as a decimal year, which `rule clade_emergence` "
+            "measures. Panel A colours its dots by it."
+        )
     order = list(frame["clade"])
+    smallest = float(frame["n_sequences"].min())
+    largest = float(frame["n_sequences"].max())
+    floor = smallest * DOMAIN_FLOOR_PAD
+    # The top of the domain carries the whole arrow over the tallest clade,
+    # not just its dot: at a tighter bound the head is half off the panel.
+    top = largest * DOMAIN_TOP_PAD
+    y_scale = alt.Scale(type="log", domain=[floor, top], nice=False)
+    # Pixels per decade, so the arrow can be drawn to a pixel spec -- a head of
+    # a fixed size needs a fixed gap, and a multiplicative offset would mean
+    # something different at every height.
+    px_per_decade = height / math.log10(top / floor)
+
+    # One scale and one axis object, shared by every layer: a layer that set
+    # `title=None` on the shared y would blank the axis title for all of them.
+    y_axis = alt.Axis(
+        labelFontSize=SUBSAMPLING_LABEL_PX,
+        titleFontSize=SUBSAMPLING_TITLE_PX,
+        values=[1e3, 1e4, 1e5, 1e6, 1e7],
+        format="~s",
+    )
     x_enc = alt.X(
         "clade:N",
         sort=order,
-        title="Nextstrain clade",
+        title="clade",
         axis=alt.Axis(
-            labelFontSize=PANEL_FONT_SIZE - 6,
-            titleFontSize=PANEL_FONT_SIZE,
             labelAngle=-90,
+            labelFontSize=CLADE_TICK_PX,
+            titleFontSize=SUBSAMPLING_TITLE_PX,
         ),
     )
-    # One scale object and one field name for both layers. A layered chart
-    # shares a channel's scale, so a rule encoded on its own field, or on a
-    # linear scale beside a log one, resolves to a domain that fits neither
-    # layer and draws both somewhere other than where the code reads.
-    #
-    # The domain spans the caps as well as the clades: a rule is not clipped to
-    # the plot, so a cap outside the clade range would be drawn outside the
-    # frame or not at all, with nothing raising.
-    check_cap_colours(caps)
-    bounds = [int(value) for value in frame["n_sequences"]] + [int(cap) for cap in caps]
-    floor = max(1.0, min(bounds) * DOMAIN_FLOOR_PAD)
-    ceiling = max(bounds) * DOMAIN_TOP_PAD
-    y_scale = alt.Scale(type="log", domain=[floor, ceiling], nice=False)
-    y_axis = alt.Axis(
-        labelFontSize=PANEL_FONT_SIZE,
-        titleFontSize=PANEL_FONT_SIZE,
-        format="~s",
+    y_enc = alt.Y("n_sequences:Q", scale=y_scale, title=CLADE_SIZE_Y_TITLE, axis=y_axis)
+
+    rows = frame.assign(floor=floor)
+    known = [value for value in rows["year"] if pd.notna(value)]
+    # The ramp starts at the turn of the earliest clade's year, so that year
+    # gets a tick: a tick outside the colour domain is not drawn, and rounding
+    # the domain itself up leaves the bottom of the bar unlabelled.
+    low_year = float(np.floor(min(known)))
+    high_year = float(max(known))
+    year_ticks = list(range(int(low_year), int(np.floor(high_year)) + 1))
+
+    cap_rows = pd.DataFrame({"cap": sorted(caps)})
+    cap_rows["clade"] = order[-1]
+    cap_rows["label"] = [f"{cap:,}" for cap in cap_rows["cap"]]
+
+    # The stem is a guide to the axis, not a magnitude: a log axis has no zero
+    # for a bar to stand on.
+    stems = (
+        alt.Chart(rows)
+        .mark_rule(color=STEM_GREY, strokeWidth=1)
+        .encode(
+            x=x_enc,
+            y=alt.Y("floor:Q", scale=y_scale, title=CLADE_SIZE_Y_TITLE, axis=y_axis),
+            y2="n_sequences:Q",
+        )
     )
-
-    def y_of(field: str) -> alt.Y:
-        """One field on panel A's one y scale.
-
-        Every layer repeats the scale, the title and the axis. The arrow sits
-        at its own field rather than at the clade's count, and a layer that
-        named a field without restating the domain would make Vega resolve one
-        scale across two of them.
-        """
-        return alt.Y(f"{field}:Q", title="sequences", scale=y_scale, axis=y_axis)
-
-    y_enc = y_of("n_sequences")
-    # A dot per clade, not a bar. A bar extends from its scale's zero and a log
-    # scale has none, so a bar mark here draws nothing at all while the chart
-    # still builds, saves, and satisfies every assertion about it.
     dots = (
-        alt.Chart(frame)
-        .mark_point(color=DEPTH_INK, filled=True, size=70, opacity=0.9)
+        alt.Chart(rows)
+        .mark_point(filled=True, size=255, stroke="white", strokeWidth=1.2)
         .encode(
             x=x_enc,
             y=y_enc,
-            tooltip=[
-                alt.Tooltip("clade:N", title="Clade"),
-                alt.Tooltip("n_sequences:Q", title="Sequences", format=","),
-            ],
-        )
-    )
-    cap_frame = pd.DataFrame(
-        {
-            "n_sequences": [float(cap) for cap in caps],
-            "label": [f"cap {cap:,}" for cap in caps],
-        }
-    )
-
-    rules = (
-        alt.Chart(cap_frame)
-        .mark_rule(strokeDash=[6, 4], strokeWidth=1.8)
-        .encode(
-            y=y_enc,
             color=alt.Color(
-                "label:N",
-                title="downsampling cap",
-                sort=cap_frame["label"].tolist(),
+                "year:Q",
                 scale=alt.Scale(
-                    domain=cap_frame["label"].tolist(), range=list(CAP_BLUES)
+                    domain=list(np.linspace(low_year, high_year, len(DATE_STOPS))),
+                    range=list(DATE_STOPS),
                 ),
+                # A tick per calendar year the clades span, including the
+                # first. The title runs up the side rather than across the top,
+                # which costs one line of width instead of the title's length.
                 legend=alt.Legend(
-                    labelFontSize=PANEL_FONT_SIZE, titleFontSize=PANEL_FONT_SIZE
+                    title="clade emergence date",
+                    values=year_ticks,
+                    format="d",
+                    labelFontSize=SUBSAMPLING_LABEL_PX,
+                    titleFontSize=SUBSAMPLING_TITLE_PX,
+                    titleLimit=0,
+                    titleOrient="right",
+                    # The full plot height, which is also what centres it: a
+                    # shorter bar is drawn from the top of the plotting area
+                    # down, leaving the remainder at the bottom.
+                    gradientLength=height,
                 ),
             ),
-            tooltip=[alt.Tooltip("label:N", title="Cap")],
+            tooltip=["clade", "n_sequences"],
         )
     )
-    layers = [dots, rules]
-    marked = frame[frame["clade"].isin(list(highlight))]
-    if len(marked):
-        # Pixels per decade, which is what lets the arrow be drawn to a pixel
-        # spec on a log axis.
-        per_decade = height / math.log10(ceiling / floor)
-        marked = marked.assign(
-            arrow_head=_raised(
-                marked["n_sequences"], ARROW_HEAD_PX, per_decade=per_decade
-            ),
-            arrow_tail=_raised(
-                marked["n_sequences"], ARROW_HEAD_PX, per_decade=per_decade
-            ),
-            arrow_end=_raised(
-                marked["n_sequences"], ARROW_TAIL_PX, per_decade=per_decade
-            ),
+    # The caps are reference lines, not data: neutral, and labelled on the line
+    # rather than in a legend, so the colour channel is the dates alone.
+    cap_rules = (
+        alt.Chart(cap_rows)
+        .mark_rule(strokeDash=[6, 4], color=INK_2, strokeWidth=1.2)
+        .encode(y=alt.Y("cap:Q", scale=y_scale, title=CLADE_SIZE_Y_TITLE, axis=y_axis))
+    )
+    cap_text = (
+        alt.Chart(cap_rows)
+        .mark_text(
+            align="right",
+            baseline="bottom",
+            dx=-3,
+            dy=-3,
+            fontSize=SUBSAMPLING_LABEL_PX,
+            color=INK_2,
         )
-        layers.append(
-            alt.Chart(marked)
-            .mark_rule(color=DEPTH_INK, strokeWidth=1.8)
-            .encode(x=x_enc, y=y_of("arrow_tail"), y2="arrow_end:Q")
+        .encode(
+            x=x_enc,
+            y=alt.Y("cap:Q", scale=y_scale, title=CLADE_SIZE_Y_TITLE, axis=y_axis),
+            text="label:N",
         )
-        layers.append(
-            alt.Chart(marked)
-            .mark_point(
-                shape="triangle-down",
-                filled=True,
-                size=ARROW_HEAD_SIZE,
-                color=DEPTH_INK,
-                opacity=1,
-            )
-            .encode(x=x_enc, y=y_of("arrow_head"))
+    )
+    marks = rows[rows["clade"].isin(list(highlight))].copy()
+    # Head, then staff, measured up from the dot's centre: the dot's own radius
+    # is about 9 px, so a tip at 21 leaves white space between the two. The
+    # staff starts at the head's centre, so its end is hidden under the head
+    # rather than floating above it.
+    marks["y_head"] = _raised(
+        marks["n_sequences"], ARROW_HEAD_PX, per_decade=px_per_decade
+    )
+    marks["y_tail"] = marks["y_head"]
+    marks["y_tail_end"] = _raised(
+        marks["n_sequences"], ARROW_TAIL_PX, per_decade=px_per_decade
+    )
+    staff = (
+        alt.Chart(marks)
+        .mark_rule(color=INK, strokeWidth=1.8, opacity=1)
+        .encode(
+            x=x_enc,
+            y=alt.Y("y_tail:Q", scale=y_scale, title=CLADE_SIZE_Y_TITLE, axis=y_axis),
+            y2="y_tail_end:Q",
         )
-    return alt.layer(*layers).properties(
-        width=width,
-        height=height,
-        title=alt.TitleParams(
-            title, fontSize=PANEL_FONT_SIZE, offset=4, anchor="middle"
-        ),
+    )
+    head = (
+        alt.Chart(marks)
+        .mark_point(
+            shape="triangle-down",
+            filled=True,
+            size=ARROW_HEAD_SIZE,
+            color=INK,
+            opacity=1,
+        )
+        .encode(
+            x=x_enc,
+            y=alt.Y("y_head:Q", scale=y_scale, title=CLADE_SIZE_Y_TITLE, axis=y_axis),
+        )
+    )
+    return (stems + cap_rules + dots + cap_text + staff + head).properties(
+        width=width, height=height
     )
 
 
@@ -1428,123 +1531,143 @@ def count_ecdf_panel(
     threshold: float,
     width: int = ECDF_PANEL_WIDTH,
     height: int = ECDF_PANEL_HEIGHT,
-) -> alt.HConcatChart:
+) -> alt.FacetChart:
     """Panel B: one complementary eCDF per clade, one curve per sampling depth.
+
+    **Ported from the published figure's own producer**, the
+    `panel_b_count_ecdf` cell of `notebooks/cap_arm_scatters.py` in the mat-pcp
+    run this paper is built on.
 
     Each curve is the share of a clade's mutations carrying **at least** *x*
     counts, so it falls from 1.0 rather than rising to it. A labelled rule
-    marks the accuracy threshold, and the curve's height where it crosses is
-    the share that depth still puts at or above the threshold.
+    marks the accuracy threshold, and a curve's height where it crosses is the
+    share that depth still puts at or above it.
 
-    Concatenated, so each view carries its clade's name in the paper's own
-    spelling -- `21J (Delta)`, `25C (XFG)` -- where a facet header would show
-    the bare label this pipeline keys on.
+    One frame with a ``role`` column and each layer filtering to its own role,
+    because Vega will not facet a layered chart whose layers carry their own
+    data -- the same construction panel C uses, and for the same reason.
+
+    Full depth in ink, the caps on a single-hue ramp light to dark: bigger cap,
+    more data kept, darker line. Width rides on the same field as colour, so
+    the baseline is heavier as well as darker and the two channels merge into
+    one legend whose swatches carry both.
     """
     arms = list(frame["arm"].unique())
     caps = [arm for arm in arms if arm != FULL_DEPTH.name]
     check_cap_colours(caps)
-    domain = [depth_label(FULL_DEPTH.name)] + [depth_label(arm) for arm in caps]
-    labelled = frame.assign(depth=[depth_label(arm) for arm in frame["arm"]])
-    threshold_frame = pd.DataFrame({"x": [threshold]})
+    depth_order = [depth_label(FULL_DEPTH.name)] + [depth_label(arm) for arm in caps]
+    indices = np.linspace(len(BLUE_ORDINAL) - 1, 0, len(caps)).round().astype(int)
+    colour_range = [INK] + [BLUE_ORDINAL[index] for index in indices]
 
-    # One x scale for both views and for the rule. `hconcat` leaves position
-    # scales independent, so two clades whose grids ended at different counts
-    # would be drawn over different ranges side by side; and a rule with no
-    # scale of its own resolves against whichever field shares its name.
-    x_max = float(frame["x"].max())
-    if threshold > x_max:
-        raise ValueError(
-            f"the accuracy threshold {threshold:g} is past the end of the "
-            f"count grid ({x_max:g}), so the rule a reader takes the share off "
-            f"would be drawn outside the plot."
+    parts = []
+    for clade, clade_title in clade_titles.items():
+        panel = f"clade {clade_title}"
+        rows = frame[frame["clade"] == clade]
+        parts.append(
+            pd.DataFrame(
+                {
+                    "panel": panel,
+                    "role": "curve",
+                    "depth": [depth_label(arm) for arm in rows["arm"]],
+                    "x": rows["x"].to_numpy(),
+                    "share": rows["share"].to_numpy(),
+                }
+            )
         )
-    x_scale = alt.Scale(domain=[0, x_max], nice=False)
-    x_axis = alt.Axis(
-        labelFontSize=PANEL_FONT_SIZE,
-        titleFontSize=PANEL_FONT_SIZE,
-        # The threshold among the ticks: it is the one count on this axis a
-        # reader reads a number off, and the default run skips it.
-        values=sorted({0, int(threshold), *range(4, int(x_max) + 1, 4)}),
+        parts.append(
+            pd.DataFrame(
+                {
+                    "panel": [panel],
+                    "role": ["threshold"],
+                    "depth": [depth_label(FULL_DEPTH.name)],
+                    "x": [threshold],
+                    "share": [np.nan],
+                }
+            )
+        )
+    long = pd.concat(parts, ignore_index=True)
+
+    x_enc = alt.X(
+        "x:Q",
+        scale=alt.Scale(domain=[0, float(frame["x"].max())], nice=False),
+        title="X counts",
+        axis=alt.Axis(
+            values=[0, 5, 10, 15, 20],
+            labelFontSize=SUBSAMPLING_LABEL_PX,
+            titleFontSize=SUBSAMPLING_TITLE_PX,
+        ),
     )
-
-    panels = []
-    for index, (clade, clade_title) in enumerate(clade_titles.items()):
-        rows = labelled[labelled["clade"] == clade]
-        curves = (
-            alt.Chart(rows)
-            .mark_line(strokeWidth=2.2)
-            .encode(
-                x=alt.X("x:Q", title=LADDER_X_TITLE, scale=x_scale, axis=x_axis),
-                y=alt.Y(
-                    "share:Q",
-                    # Two lines: a one-line title is taller than the plot it
-                    # labels at this panel size, and in an hconcat that pushes
-                    # the left view's plot down while its title stays at the top
-                    # of its box, leaving the two titles at different heights.
-                    title=(
-                        ["fraction of mutations", "at or above that count"]
-                        if index == 0
-                        else None
-                    ),
-                    scale=alt.Scale(domain=[0, 1], nice=False),
-                    axis=alt.Axis(
-                        labelFontSize=PANEL_FONT_SIZE,
-                        titleFontSize=PANEL_FONT_SIZE,
-                        labels=index == 0,
-                    ),
+    y_enc = alt.Y(
+        "share:Q",
+        scale=alt.Scale(domain=[0, 1.02], nice=False),
+        title=ECDF_Y_TITLE,
+        axis=alt.Axis(
+            labelFontSize=SUBSAMPLING_LABEL_PX, titleFontSize=SUBSAMPLING_TITLE_PX
+        ),
+    )
+    # One legend object for both the colour and the width channel: Vega merges
+    # two channels on the same field only when their legends agree.
+    legend = alt.Legend(
+        title="sampling depth",
+        labelFontSize=SUBSAMPLING_LABEL_PX,
+        titleFontSize=SUBSAMPLING_TITLE_PX,
+        labelLimit=0,
+        titleLimit=0,
+    )
+    base = alt.Chart()
+    layers = [
+        base.mark_line()
+        .transform_filter(alt.datum.role == "curve")
+        .encode(
+            x=x_enc,
+            y=y_enc,
+            color=alt.Color(
+                "depth:N",
+                sort=depth_order,
+                scale=alt.Scale(domain=depth_order, range=colour_range),
+                legend=legend,
+            ),
+            strokeWidth=alt.StrokeWidth(
+                "depth:N",
+                sort=depth_order,
+                scale=alt.Scale(domain=depth_order, range=[3.4] + [2.0] * len(caps)),
+                legend=legend,
+            ),
+        ),
+        base.mark_rule(strokeDash=[2, 3], color=FIT_FIREBRICK, strokeWidth=1.8)
+        .transform_filter(alt.datum.role == "threshold")
+        .encode(x=x_enc),
+        base.mark_text(
+            align="left",
+            baseline="top",
+            dx=5,
+            dy=4,
+            lineBreak="|",
+            fontSize=SUBSAMPLING_LABEL_PX,
+            color=FIT_FIREBRICK,
+        )
+        .transform_filter(alt.datum.role == "threshold")
+        .transform_calculate(note='"accuracy|threshold"')
+        .encode(x=x_enc, y=alt.value(4), text="note:N"),
+    ]
+    # Narrow views with the legend to their right. The width is set so that the
+    # whole panel -- plots, axes and legend -- comes out as wide as panel C,
+    # which it stacks on top of in the composed figure.
+    return (
+        alt.layer(*layers, data=long)
+        .properties(width=width, height=height)
+        .facet(
+            column=alt.Column(
+                "panel:N",
+                sort=[f"clade {title}" for title in clade_titles.values()],
+                title=None,
+                header=alt.Header(
+                    labelFontSize=SUBSAMPLING_TITLE_PX, labelFontWeight="bold"
                 ),
-                color=alt.Color(
-                    "depth:N",
-                    title="sampling depth",
-                    sort=domain,
-                    scale=alt.Scale(domain=domain, range=[DEPTH_INK] + list(CAP_BLUES)),
-                    legend=alt.Legend(
-                        labelFontSize=PANEL_FONT_SIZE, titleFontSize=PANEL_FONT_SIZE
-                    ),
-                ),
-                tooltip=[
-                    alt.Tooltip("depth:N", title="Depth"),
-                    alt.Tooltip("x:Q", title="Count", format=".1f"),
-                    alt.Tooltip("share:Q", title="Fraction", format=".4f"),
-                ],
-            )
+            ),
+            spacing=24,
         )
-        rule = (
-            alt.Chart(threshold_frame)
-            .mark_rule(color=THRESHOLD_ACCENT, strokeDash=[2, 3], strokeWidth=1.6)
-            .encode(x=alt.X("x:Q", scale=x_scale, axis=x_axis))
-        )
-        # The rule says nothing about itself otherwise: it takes no legend
-        # entry, so a reader who has not read the caption sees an unexplained
-        # dotted line across the one panel they read a number off.
-        rule_label = (
-            alt.Chart(threshold_frame)
-            .mark_text(
-                color=THRESHOLD_ACCENT,
-                fontSize=PANEL_FONT_SIZE - 4,
-                align="left",
-                baseline="top",
-                dx=4,
-            )
-            .encode(
-                x=alt.X("x:Q", scale=x_scale, axis=x_axis),
-                y=alt.value(0.0),
-                text=alt.value(f"threshold {threshold:g}"),
-            )
-        )
-        panels.append(
-            (curves + rule + rule_label).properties(
-                width=width,
-                height=height,
-                title=alt.TitleParams(
-                    [f"clade {clade_title}"],
-                    fontSize=PANEL_FONT_SIZE,
-                    offset=4,
-                    anchor="middle",
-                ),
-            )
-        )
-    return alt.hconcat(*panels)
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -1347,8 +1347,13 @@ def test_panel_a_plots_the_roster_and_not_the_counts_table():
         "holding the cutoff-date ladder and never this run's cutoff, so "
         "reading it returns an empty frame rather than raising."
     )
-    sizes = panels.clade_size_frame(counts_csv)
-    assert list(sizes.columns) == ["clade", "n_sequences"]
+    emergence_csv = panel_spec.EMERGENCE_CSV
+    if not emergence_csv.exists():
+        pytest.skip(f"{emergence_csv} has not been built")
+    sizes = panels.clade_size_frame(counts_csv, emergence_csv)
+    # `year` is the emergence date panel A colours its dots by, as a decimal
+    # year; see `panels._emergence_years`.
+    assert list(sizes.columns) == ["clade", "n_sequences", "year"]
     assert sorted(sizes["clade"]) == lib.clade_roster()
     raw = pd.read_csv(counts_csv)
     extra = sorted(set(raw["Nextstrain_clade_usher"]) - set(sizes["clade"]))

@@ -203,6 +203,13 @@ CANDIDATE_COLUMNS = ("clade", "mutation", "status")
 #: it; model-free, so not under a selection.
 BACKGROUND_CSV = REPO_ROOT / "results" / "backgrounds" / "clade_backgrounds.csv"
 
+#: Where the clade emergence dates go: one row per clade, with the sample
+#: count the date was measured over. `fig:subsampling`'s panel A colours its
+#: dots by it. In `results/` and not under a selection, for the reasons
+#: :data:`BACKGROUND_CSV` gives -- the pipeline writes it, and no model
+#: touches it.
+EMERGENCE_CSV = REPO_ROOT / "results" / "backgrounds" / "clade_emergence.csv"
+
 #: The role a background row may carry. `marker` is the clade's most abundant
 #: substitution, `cotraveller` one carried by most of the marker's branches,
 #: and `fixed` one carried by nearly the whole clade -- which belongs to both

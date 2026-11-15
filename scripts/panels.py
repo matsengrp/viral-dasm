@@ -80,6 +80,7 @@ assert_dasm2_is_this_repo()
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from datetime import date
 from functools import cache
 
 import numpy as np
@@ -103,6 +104,7 @@ from panel_spec import (  # noqa: F401  (re-exported for the notebooks)
     ECDF_CLADES,
     ECDF_MAX_COUNT,
     ECDF_POINTS,
+    EMERGENCE_CSV,
     FIDELITY_MODELS,
     FIGURE_DIR,
     FIGURE_MODEL,
@@ -817,10 +819,13 @@ AA_GRID_COLUMNS = (
 )
 
 
-def clade_size_frame(counts_csv: Path) -> pd.DataFrame:
-    """Sequences per clade, for the clades this pipeline scores.
+def clade_size_frame(counts_csv: Path, emergence_csv: Path) -> pd.DataFrame:
+    """Sequences per clade and when each emerged, for the clades scored.
 
-    ``clade,n_sequences``, descending. The count is mat-pcp's own
+    ``clade,n_sequences,year``, descending by count. ``year`` is the
+    clade's emergence as a decimal year, which panel A colours its dots by;
+    `rule clade_emergence` measures it and
+    `scripts/clade_emergence.py` says what it means. The count is mat-pcp's own
     ``mat/clade_counts.csv``, whose ``count`` is the line count of
     ``mat/clades/{clade}_samples.txt`` -- the file the source panel walks --
     so this is the cheaper route to the same heights and not a second
@@ -853,8 +858,42 @@ def clade_size_frame(counts_csv: Path) -> pd.DataFrame:
 
     out = pd.DataFrame(
         {"clade": roster, "n_sequences": [int(counts[c]) for c in roster]}
-    )
+    ).merge(_emergence_years(emergence_csv, roster), on="clade")
     return out.sort_values("n_sequences", ascending=False, ignore_index=True)
+
+
+#: The origin the emergence date is measured from. Panel A colours on a
+#: *quantitative* scale rather than a temporal one -- see
+#: `panel_charts.clade_size_panel` on why -- so the date has to arrive as a
+#: number, and this is the conversion.
+EMERGENCE_EPOCH = date(2020, 1, 1)
+DAYS_PER_YEAR = 365.25
+
+
+def _emergence_years(emergence_csv: Path, roster: Sequence[str]) -> pd.DataFrame:
+    """``clade,year`` for ``roster``, as decimal years.
+
+    Raises:
+        ValueError: If a clade in the roster has no emergence row. That table
+            is written from the same founder roster this reads, so a gap means
+            the two were measured against different trees.
+    """
+    frame = pd.read_csv(emergence_csv)
+    missing = sorted(set(roster) - set(frame["clade"]))
+    if missing:
+        raise ValueError(
+            f"{emergence_csv}: no emergence date for {missing}, which this "
+            f"pipeline scores. Rerun `snakemake clade_emergence`."
+        )
+    epoch = EMERGENCE_EPOCH.toordinal()
+    years = [
+        None
+        if pd.isna(value)
+        else (date.fromisoformat(str(value)).toordinal() - epoch) / DAYS_PER_YEAR
+        + EMERGENCE_EPOCH.year
+        for value in frame["emergence"]
+    ]
+    return pd.DataFrame({"clade": frame["clade"], "year": years})
 
 
 def _aa_grid(

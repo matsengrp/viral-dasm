@@ -44,6 +44,7 @@ from panel_spec import (
     CANDIDATE_CSV,
     DEFAULT_SELECTION,
     DEPTH_PANELS,
+    EMERGENCE_CSV,
     ECDF_CLADES,
     LADDER_ARM_PANELS,
     LADDER_PANELS,
@@ -197,6 +198,52 @@ rule compose_subsampling:
         " > {log} 2>&1"
 
 
+def clade_sample_files(*_):
+    """Every clade's sample list under `clades_dir`.
+
+    The contents rather than the directory, the way `clade_founder_fastas`
+    above declares its own, and keyed off those same founders: the roster is
+    what this pipeline scores, and `clade_emergence.py` raises for a clade
+    with a founder and no sample list.
+    """
+    root = mat_pcp_path("clades_dir")
+    founders = mat_pcp_path("clade_founders_dir").glob("*.fa")
+    return sorted(str(root / f"{fasta.stem}_samples.txt") for fasta in founders)
+
+
+rule clade_emergence:
+    """When each clade emerged, which panel A colours its dots by.
+
+    Its own rule rather than a cell of `rule subsampling_depth`, in the style
+    of `rule clade_backgrounds`: this walks 2.7 GB of sample names across 56
+    files, the panel beside it is redrawn often, and the answer does not
+    change unless the tree does.
+
+    No model and no wildcard. The date is a property of mat-pcp's tree, so
+    every figure that ever reads it reads the same one.
+    """
+    input:
+        script="scripts/clade_emergence.py",
+        lib="scripts/lib.py",
+        spec="scripts/panel_spec.py",
+        config="config.yaml",
+        dasm2_init="dasm2/__init__.py",
+        # The sample lists, and the founders the roster is read from.
+        samples=clade_sample_files,
+        clade_founders=clade_founder_fastas,
+    output:
+        table=str(EMERGENCE_CSV),
+    log:
+        f"{ARTIFACT_ROOT}/logs/clade_emergence.log",
+    params:
+        clades_dir=lambda *_: str(mat_pcp_path("clades_dir")),
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "python {input.script} --clades-dir {params.clades_dir}"
+        " --out {output.table} > {log} 2>&1"
+
+
 rule subsampling_depth:
     """Panels A and B: the sampling imbalance, and what it costs the counts."""
     input:
@@ -220,6 +267,10 @@ rule subsampling_depth:
         # The two mat-pcp tables these panels measure. No scored table and no
         # audit: neither panel reads a model.
         clade_counts=mat_pcp_path("clade_counts_file"),
+        # The dates panel A colours its dots by. `rule clade_emergence`'s
+        # table rather than the sample lists themselves: this rule is redrawn
+        # often and that walk is 2.7 GB.
+        emergence=str(EMERGENCE_CSV),
         nt_grids=ecdf_grid_files,
         # The roster panel A plots, which `clade_size_frame` drops the counts
         # table's two extra clades against.

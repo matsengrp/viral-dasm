@@ -62,8 +62,11 @@ def _():
     # is one that check cannot see.
     CLADE_COUNTS = mat_pcp_path("clade_counts_file")
     AAMUT_DIR = mat_pcp_path("aamut_fitness_dir")
+    # Written by `rule clade_emergence`, not by mat-pcp: the date panel A
+    # colours each dot by, measured over the per-clade sample lists.
+    EMERGENCE = panels.EMERGENCE_CSV
     SELECTION = panels.SUBSAMPLING_SELECTION
-    return CLADE_COUNTS, AAMUT_DIR, SELECTION, charts, panels
+    return CLADE_COUNTS, AAMUT_DIR, EMERGENCE, SELECTION, charts, panels
 
 
 @app.cell
@@ -81,8 +84,8 @@ def _(mo):
 
 
 @app.cell
-def _(CLADE_COUNTS, SELECTION, charts, mo, panels):
-    sizes = panels.clade_size_frame(CLADE_COUNTS)
+def _(CLADE_COUNTS, EMERGENCE, SELECTION, charts, mo, panels):
+    sizes = panels.clade_size_frame(CLADE_COUNTS, EMERGENCE)
     caps = panels.subsampling_caps()
 
     panel_a = charts.save_panel(
@@ -92,7 +95,6 @@ def _(CLADE_COUNTS, SELECTION, charts, mo, panels):
             # Panel B's own two clades, so an arrow cannot point at a clade
             # panel B does not draw.
             highlight=tuple(panels.ECDF_CLADES),
-            title=[f"Sequences per clade ({len(sizes)} clades)"],
         ),
         panels.DEPTH_PANELS[0],
         selection=SELECTION,
