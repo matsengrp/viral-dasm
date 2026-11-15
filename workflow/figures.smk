@@ -60,7 +60,9 @@ from panel_spec import (
     POOL_SUMMARY,
     SELECTIONS,
     SHIFT_CLADES,
+    SUBSAMPLING_FIGURE_STEM,
     SUBSAMPLING_LADDER_CLADES,
+    SUBSAMPLING_PANEL_LETTERS,
     SUBSAMPLING_SELECTION,
     composed_paths,
     figure_dir,
@@ -139,14 +141,60 @@ rule panels:
 
 
 rule subsampling:
-    """All four panels of `fig:subsampling`.
+    """`fig:subsampling`, and so its four panels beneath it.
 
-    Two rules rather than one: A and B measure the tree and take no model,
-    while C and D read the scored table for `dasm-85k` on all four corpora.
+    Three rules rather than one: A and B measure the tree and take no model,
+    C and D read the scored table for `dasm-85k` on all four corpora, and the
+    composition reads the four PNGs.
     """
     input:
-        panel_outputs(DEPTH_PANELS, SUBSAMPLING_SELECTION),
-        panel_outputs(LADDER_ARM_PANELS, SUBSAMPLING_SELECTION),
+        composed_paths(SUBSAMPLING_SELECTION, SUBSAMPLING_FIGURE_STEM),
+
+
+rule compose_subsampling:
+    """`fig:subsampling` itself, laid out from the four panels.
+
+    No measuring, no scoring and no table: it reads PNGs, the same split the
+    other two compositions are built on. The panels cost a pass over twenty
+    amino-acid grids and over the scored table; the layout costs a second, so
+    the spacing can be nudged without re-measuring anything.
+
+    No `{selection}` wildcard. `SUBSAMPLING_SELECTION` is this figure's
+    directory rather than a choice of models, so unlike `rule
+    compose_agreement` there is nothing here to expand over.
+
+    The manuscript copy is not a declared output, for the reason
+    `rule compose_agreement` gives: `tex_figure_dir` points outside both this
+    repository and the artifact root, and snakemake deletes a job's declared
+    outputs when it fails -- so naming it would hand a failed layout the
+    power to delete the figure currently in the paper. The notebook copies it
+    and says whether it did.
+    """
+    input:
+        layout="scripts/figure_layout.py",
+        spec="scripts/panel_spec.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        notebook="notebooks/subsampling.py",
+        # The PNGs only: `compose` reads raster, and declaring the SVGs too
+        # would make this rule rerun on a vector copy it never opens.
+        panels=[
+            str(figure_dir(SUBSAMPLING_SELECTION) / f"{stem}.png")
+            for stem in SUBSAMPLING_PANEL_LETTERS.values()
+        ],
+    output:
+        html=f"{NOTEBOOK_DIR}/subsampling.html",
+        figure=[
+            str(path)
+            for path in composed_paths(SUBSAMPLING_SELECTION, SUBSAMPLING_FIGURE_STEM)
+        ],
+    log:
+        f"{ARTIFACT_ROOT}/logs/compose_subsampling.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "marimo export html {input.notebook} -o {output.html} --force"
+        " > {log} 2>&1"
 
 
 rule subsampling_depth:
@@ -621,6 +669,12 @@ rule figures:
         [
             str(path)
             for path in composed_paths(DEFAULT_SELECTION, SHIFT_FIGURE_STEM)
+        ],
+        # `fig:subsampling`, and so its four panels. One panel set and no
+        # selection to expand over: `SUBSAMPLING_SELECTION` is its directory.
+        [
+            str(path)
+            for path in composed_paths(SUBSAMPLING_SELECTION, SUBSAMPLING_FIGURE_STEM)
         ],
 
 

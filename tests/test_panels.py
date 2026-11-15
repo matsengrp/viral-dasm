@@ -779,6 +779,40 @@ def test_only_the_published_selection_reaches_the_manuscript():
             )
 
 
+def test_the_subsampling_figure_reaches_the_manuscript():
+    """`fig:subsampling` is published, so its composition is copied.
+
+    The guard above keys on a *selection*, and ``SUBSAMPLING_SELECTION`` is
+    not one -- it is this figure's directory, with one panel set and a stem of
+    its own. Nothing else composes to ``subsampling.pdf``, so there is no
+    second composition for it to be confused with, and it must not be skipped.
+    """
+    import panel_spec as spec
+
+    assert spec.tex_figure_dir(spec.SUBSAMPLING_SELECTION) == spec.TEX_FIGURE_DIR
+    assert spec.SUBSAMPLING_SELECTION not in spec.SELECTIONS
+
+
+def test_the_subsampling_figure_places_every_panel_once():
+    """The rows and the letters are two spellings of one panel set.
+
+    ``rule compose_subsampling`` declares its inputs from
+    ``SUBSAMPLING_PANEL_LETTERS`` and the notebook lays out
+    ``SUBSAMPLING_FIGURE_ROWS``, so a letter in one and not the other is
+    either a panel the rule fetches and the layout drops, or a ``KeyError``
+    inside the composition -- and the two panel rules' stems are what both
+    have to name.
+    """
+    import panel_spec as spec
+
+    assert set(spec.SUBSAMPLING_PANEL_LETTERS.values()) == set(
+        spec.DEPTH_PANELS + spec.LADDER_ARM_PANELS
+    )
+    placed = [letter for row in spec.SUBSAMPLING_FIGURE_ROWS for letter in row]
+    assert sorted(placed) == sorted(spec.SUBSAMPLING_PANEL_LETTERS)
+    assert len(placed) == len(set(placed)), "a panel is placed twice"
+
+
 # Three ways this port drifted from the figure in the manuscript. Each drew a
 # complete, plausible panel, and the first two were only visible once the
 # whole figure was composed. They are pinned here against the notebooks

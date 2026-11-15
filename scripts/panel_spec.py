@@ -407,6 +407,13 @@ def _candidate_rows() -> list[tuple[str, str, str]]:
 #: `SELECTIONS`.
 SUBSAMPLING_SELECTION = "subsampling"
 
+#: Which panel directories hold a composition the manuscript takes. See
+#: :func:`tex_figure_dir`, which is where the distinction bites: `fidelity`
+#: is the one directory that composes a figure the paper does not publish.
+PUBLISHED_SELECTIONS: frozenset[str] = frozenset(
+    {DEFAULT_SELECTION, SUBSAMPLING_SELECTION}
+)
+
 #: The two clades panel B draws, under the names the paper uses beside the
 #: labels this pipeline keys on. `main.tex` names clades by their Pango or WHO
 #: alias and every table here is keyed by the bare Nextstrain clade: Delta is
@@ -509,6 +516,43 @@ SUBSAMPLING_LADDER_CLADES: tuple[str, ...] = ("21J", "22B", "21L", "21K", "20I")
 #: and leaves the row set alone, so `n_mutations` is the same with it and
 #: without.
 SUBSAMPLING_CLIP_LOWER = -6.0
+
+#: `fig:subsampling`'s stem, which is its LaTeX label: `main.tex` includes
+#: `figures/subsampling.pdf`. One spelling, so the file the manuscript
+#: includes and the file this pipeline writes cannot drift.
+SUBSAMPLING_FIGURE_STEM = "subsampling"
+
+#: Which panel stem each letter is, in the caption's order. Derived nowhere:
+#: a letter is a caption fact and a stem is a filename, and nothing in either
+#: implies the other.
+SUBSAMPLING_PANEL_LETTERS: dict[str, str] = {
+    "A": DEPTH_PANELS[0],
+    "B": DEPTH_PANELS[1],
+    "C": LADDER_ARM_PANELS[0],
+    "D": LADDER_ARM_PANELS[1],
+}
+
+#: Which panels sit on which row, left to right. The depth pair shares the top
+#: row and each recovery panel takes a row of its own.
+#:
+#: **This is not the published figure's arrangement.** That was
+#: ``[["A"], [["B", "C"], "D"]]`` -- A across the top, B over C in one column,
+#: and D beside them -- in `dasm2-experiments`,
+#: `experiments/2026-09-09-viral-dasm-figure-drafts`, `notebooks/subsampling.py`,
+#: the notebook `main.tex`'s provenance comment names. That arrangement is a
+#: statement about those panels' shapes rather than about the figure: it works
+#: because that campaign's panel D was the tall, narrow one (2,541 x 3,104 px,
+#: the five clades stacked down the page) and its panel C the short, wide one.
+#: This pipeline's panel D puts the clades across and the two statistics down,
+#: so C is now the tall panel and D the wide one, and the column that fit D
+#: beside B and C no longer has a tall panel to hold.
+SUBSAMPLING_FIGURE_ROWS: tuple[tuple[str, ...], ...] = (("A", "B"), ("C",), ("D",))
+
+#: The box this figure has to fit inside, in inches, and the fraction of it to
+#: use. `fig:agreement`'s box, which is what the published figure used too, so
+#: the two sit at one scale in the manuscript.
+SUBSAMPLING_BOX_IN: tuple[float, float] = (7.5, 8.0)
+SUBSAMPLING_FIGURE_SCALE = 1.0
 
 #: `fig:within_clade_shifts`'s stems, one tuple per producing notebook.
 #: One stem per clade, not one image of both. The composed figure puts each
@@ -675,14 +719,18 @@ def tex_figure_dir(selection: str) -> Path | None:
     Re-exported from `lib` so a notebook and `workflow/figures.smk` read this
     module alone for every path in this figure.
 
-    **Only the published selection is copied.** Every selection composes to
-    `FIGURE_STEM`, so a `fidelity` composition would land on the manuscript's
-    `agreement.pdf` and replace the paper's figure with a panel set drawn from
-    two other models -- same size, same layout, different numbers, and nothing
-    downstream to notice. `snakemake figures` builds both, which is how that
-    became reachable.
+    **Only a published selection is copied.** The two agreement selections
+    compose to the same `FIGURE_STEM`, so a `fidelity` composition would land
+    on the manuscript's `agreement.pdf` and replace the paper's figure with a
+    panel set drawn from two other models -- same size, same layout, different
+    numbers, and nothing downstream to notice. `snakemake figures` builds both,
+    which is how that became reachable.
+
+    `subsampling` is not a model selection at all but this figure's own
+    directory, with one panel set and a stem of its own, so there is no second
+    composition for it to be confused with and it is copied.
     """
-    if selection != DEFAULT_SELECTION:
+    if selection not in PUBLISHED_SELECTIONS:
         return None
     return TEX_FIGURE_DIR
 
