@@ -651,9 +651,8 @@ the seven runs out of date and `snakemake -n figures` schedules `train`.
 Training reads no deep mutational scan, and neither does scoring, so
 `data/functional/` was absent and `analysis/whichmut_probs.py` with it.
 `fig:dms` correlates the model's fitness effects against three published
-cell-entry assays, and its panel D sets a selection factor against the
-mutation probability built from it. Three modules came from the same source
-commit:
+cell-entry assays, at two count thresholds. Three modules came from the same
+source commit:
 
 | module | upstream | here | what was taken |
 |---|---:|---:|---|
@@ -661,6 +660,13 @@ commit:
 | `data/functional/dms_matrix.py` | 561 | 561 | every definition; two comments revised |
 | `data/functional_formats.py` | 799 | 799 | every definition; two comments revised |
 | `analysis/whichmut_probs.py` | 227 | 247 | every definition, plus one guard |
+
+**`whichmut_probs.py` is here for the analysis, not for a panel.** No rule and
+no notebook imports it: `fig:dms` draws fitness effects, and the contrast
+between a selection factor and the mutation probability `p = lambda f / Z`
+built from it is its own downstream question. It is vendored now, with its
+guard and its test, so that work starts from a module this repository has
+already recorded and checked rather than re-fetching one later.
 
 The two large files arrive whole for the reason `analysis/viral.py` did: both
 are frame-in, frame-out, their `dasm2` imports are `codon_table`,

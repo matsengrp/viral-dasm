@@ -103,9 +103,11 @@ def _(CLADES, HOMOLOGS, TABLE_PATH, dms, panel_spec, panels):
 @app.cell
 def _(HOMOLOGS, correlations, dms, mo, panel_spec):
     mo.md(
-        f"Scored with **{panel_spec.FIGURE_MODEL}**, clipped to "
-        f"[{dms.CLIP_LOWER}, {dms.CLIP_UPPER}] on every predictor and never "
-        f"on the assay. Pearson *r* against cell entry:\n\n"
+        f"Scored with **{panel_spec.FIGURE_MODEL}**, and **unclipped**: every "
+        f"predictor is plotted and correlated at the value the model or the "
+        f"tree reports, and the assay is never bounded either. The source "
+        f"experiment drew this figure inside [-8, 6]; see `dms.CLIP_LOWER`. "
+        f"Pearson *r* against cell entry:\n\n"
         + correlations.set_index(["min_count", "homolog", "method"])
         .loc[:, ["pearson", "spearman", "n"]]
         .round(3)
@@ -141,7 +143,7 @@ def _(mo):
 
 
 @app.cell
-def _(CLADES, SELECTION, charts, dms, frames, panel_spec, panels):
+def _(CLADES, SELECTION, charts, correlations, dms, frames, panel_spec, panels):
     SCATTER_HOMOLOG = panel_spec.SCATTER_HOMOLOG
     _widest = frames[(SCATTER_HOMOLOG, min(dms.MIN_COUNTS))]
     X_DOMAIN = charts.dms_group_domain(
@@ -156,6 +158,13 @@ def _(CLADES, SELECTION, charts, dms, frames, panel_spec, panels):
     scatter_panels = []
     for _stem, _min_count in zip(panel_spec.DMS_SCATTER_PANELS, dms.MIN_COUNTS):
         _frame = frames[(SCATTER_HOMOLOG, _min_count)]
+        # The `r` each panel prints, read from the frame the bars and the CSVs
+        # are drawn from rather than computed a second time inside the chart.
+        _rows = correlations[
+            (correlations["homolog"] == SCATTER_HOMOLOG)
+            & (correlations["min_count"] == _min_count)
+        ]
+        _coefficients = dict(zip(_rows["column"], _rows["pearson"]))
         scatter_panels.append(
             charts.save_panel(
                 charts.dms_scatter_row(
@@ -165,6 +174,7 @@ def _(CLADES, SELECTION, charts, dms, frames, panel_spec, panels):
                     methods=dms.METHODS,
                     x_domain=X_DOMAIN,
                     y_domain=Y_DOMAIN,
+                    coefficients=_coefficients,
                 ),
                 _stem,
                 selection=SELECTION,

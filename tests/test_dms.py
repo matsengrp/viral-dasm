@@ -15,6 +15,7 @@ when it is not readable, so the suite runs off-cluster.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -69,6 +70,13 @@ _MAT_PCP_INPUTS = (
     lib.mat_pcp_path("censored_mutations_file"),
     lib.mat_pcp_path("censored_clades_file"),
 )
+
+
+#: Set on a machine where these inputs are expected -- the cluster the figure
+#: is built on -- so that a moved or renamed file fails loudly instead of
+#: turning this file into green skips. `tests/test_panels.py` and
+#: `tests/test_clade_haplotypes.py` read the same variable.
+REQUIRE_DATA = os.environ.get("VIRAL_DASM_REQUIRE_DATA") == "1"
 
 
 def _mat_pcp_readable() -> bool:
@@ -392,6 +400,28 @@ needs_scored_table = pytest.mark.skipif(
 )
 
 
+if REQUIRE_DATA:
+    # On the host that builds the figure, a skip is the failure: every test
+    # below that checks what a panel draws -- the count floor, the clip, the
+    # join -- is gated on these three, so a moved file would leave the suite
+    # green with nothing of the figure tested. Raised at collection, so the
+    # reason is the missing path rather than a pile of skip reasons.
+    _absent = [
+        name
+        for name, present in (
+            ("mat-pcp outputs", _mat_pcp_readable()),
+            ("the DMS CSVs", _dms_readable()),
+            (str(SCORED_TABLE), SCORED_TABLE.is_file()),
+        )
+        if not present
+    ]
+    if _absent:
+        raise RuntimeError(
+            "VIRAL_DASM_REQUIRE_DATA=1 but these are not readable: "
+            + ", ".join(_absent)
+        )
+
+
 @pytest.fixture(scope="module")
 def figure_frames():
     import panels
@@ -408,26 +438,34 @@ def figure_frames():
 @needs_mat_pcp
 @needs_dms
 @needs_scored_table
-def test_the_drawn_frame_holds_only_estimated_mutations_inside_the_clip(
+def test_the_drawn_frame_holds_estimated_mutations_at_their_reported_values(
     figure_frames,
 ):
-    """What a panel draws is what the CSV beside it reports.
+    """What a panel draws is what the model reported, unbounded.
 
-    Three ways this join goes wrong without raising: a left join leaves rows
-    the tree never estimated, which a correlation then averages in as though
-    they were measurements of zero; an unclipped predictor puts the axis where
-    one outlier is; and a clip applied to `log_selection_factor` alone leaves
-    the two counts columns on a different scale from the model drawn beside
-    them.
+    Two ways this goes wrong without raising. A left join leaves rows the tree
+    never estimated, which a correlation then averages in as though they were
+    measurements of zero -- the null check below. And a clip reintroduced
+    anywhere on this path, whether through `dms_spec` or a stray `.clip` in
+    `dms_frame`, would move a point onto a bound and leave the correlation
+    unable to show it: on this run exactly one predictor value sits outside
+    the source's old [-8, 6], so a bounds check would pass while the figure
+    silently stopped reporting what the model said. Equality against the
+    ``*_raw`` columns `clip_axes` writes either way is what catches that.
     """
+    assert dms.CLIP_LOWER is None, "this figure plots unclipped values"
     for (homolog, _min_count), frame in figure_frames.items():
         assert len(frame), homolog
         for column, _label in dms.METHODS:
             assert frame[column].notna().all(), f"{homolog}: null {column}"
-            assert frame[column].min() >= dms.CLIP_LOWER
-            assert frame[column].max() <= dms.CLIP_UPPER
-        # The assay is never clipped: it has a floor of its own, and clipping
-        # it would be this figure measuring its own axis.
+            pd.testing.assert_series_equal(
+                frame[column],
+                frame[f"{column}_raw"],
+                check_names=False,
+                obj=f"{homolog}: {column} against its pre-clip original",
+            )
+        # The assay is never bounded either: it has a floor of its own, and
+        # touching it would be this figure measuring its own axis.
         assert "dms_cell_entry_raw" not in frame
 
 
@@ -439,10 +477,167 @@ def test_the_count_floor_keeps_a_subset_and_nothing_else(figure_frames):
 
     A floor applied to the wrong column -- or with `and` where mat-pcp's own
     convention is `or` -- still returns fewer rows, which is all a count check
-    would notice.
+    would notice. So the kept and the dropped sets are both checked against
+    the rule itself, on the two count columns mat-pcp fills: every survivor
+    clears the floor on at least one of them, and every mutation dropped from
+    the top row fails it on both. A floor that was never applied, read off the
+    wrong column, or applied with the wrong combinator fails one of these; so
+    does swapping the two rows, since the subset check runs in one direction.
     """
+    floor = max(dms.MIN_COUNTS)
+    assert floor > 0, "the strict row must actually restrict something"
+    counts = ["actual_count", "predicted_count"]
     for homolog in lib.dms_homologs():
-        loose = set(figure_frames[(homolog, 0)]["aa_mutation"])
-        strict = set(figure_frames[(homolog, 10)]["aa_mutation"])
+        loose_frame = figure_frames[(homolog, 0)]
+        strict_frame = figure_frames[(homolog, floor)]
+        loose = set(loose_frame["aa_mutation"])
+        strict = set(strict_frame["aa_mutation"])
         assert strict <= loose, homolog
+        assert strict < loose, f"{homolog}: the floor kept everything"
+
+        # `or`, as `COUNT_FILTER_MODE` has it: the two counts fail in opposite
+        # directions, so a mutation survives on real observations *or* on a
+        # meaningful denominator.
+        kept = strict_frame[counts].max(axis=1)
+        assert (kept >= floor).all(), f"{homolog}: a row below the floor survived"
+
+        dropped = loose_frame[~loose_frame["aa_mutation"].isin(strict)]
+        assert len(dropped), homolog
+        assert (dropped[counts].max(axis=1) < floor).all(), (
+            f"{homolog}: a row clearing the floor was dropped"
+        )
         assert strict, homolog
+
+
+def _synthetic_frame(n: int = 40, *, slope: float = 1.0) -> pd.DataFrame:
+    """A frame shaped like `dms_frame`'s output, with a correlation we choose.
+
+    Ungated on purpose: everything below it is arithmetic and chart structure,
+    which no assay, founder or scored table is needed to check.
+    """
+    x = pd.Series(range(n), dtype=float)
+    return pd.DataFrame(
+        {
+            "log_selection_factor": x,
+            "delta_fitness_ratio": -x,
+            dms.POOLED_METRIC: x,
+            dms.TARGET: slope * x,
+            "mutation": [f"A{i + 1}C" for i in range(n)],
+            "site": list(range(1, n + 1)),
+        }
+    )
+
+
+def test_a_perfect_line_comes_back_as_a_coefficient_of_one():
+    """`dms_correlations` reports the correlation of the column it names.
+
+    Each predictor is checked against a target built to a known sign: a
+    transposed column or a method read off the wrong one would come back with
+    the wrong sign rather than merely a different number, and `n` is the
+    length the pair had after the nulls were dropped, which is what the bar's
+    header prints.
+    """
+    frame = _synthetic_frame()
+    frame.loc[0, "log_selection_factor"] = float("nan")
+
+    table = dms.dms_correlations({("H", 0): frame})
+
+    assert set(table["method"]) == {label for _column, label in dms.METHODS}
+    by_column = table.set_index("column")
+    assert by_column.loc["log_selection_factor", "pearson"] == pytest.approx(1.0)
+    assert by_column.loc[dms.POOLED_METRIC, "pearson"] == pytest.approx(1.0)
+    # The one predictor built to run the other way: a sign lost here is a bar
+    # drawn in the wrong direction.
+    assert by_column.loc["delta_fitness_ratio", "pearson"] == pytest.approx(-1.0)
+    # The null row is dropped from the column that carries it, and only there.
+    assert int(by_column.loc["log_selection_factor", "n"]) == len(frame) - 1
+    assert int(by_column.loc[dms.POOLED_METRIC, "n"]) == len(frame)
+
+
+def test_a_single_point_has_no_correlation_rather_than_an_exception():
+    """One row is the degenerate rung: `nan`, not a raise and not a zero.
+
+    A bar of 0 would read as "this method does not predict", which is a claim;
+    a `nan` draws nothing, which is the truth about a subset of one.
+    """
+    table = dms.dms_correlations({("H", 10): _synthetic_frame(n=1)})
+    assert table["pearson"].isna().all()
+    assert (table["n"] == 1).all()
+
+
+def test_the_two_rows_are_drawn_on_one_pair_of_axes():
+    """Panels A and C share domains, so a point sits in the same place in both.
+
+    The rows are separate images composed side by side, so nothing in the
+    layout can align them: if the scatter row stopped forwarding the domains
+    it is handed -- or recomputed them per row, which is what Altair does
+    unasked -- the two rows would silently acquire different axes and a
+    reader would compare positions that are not comparable.
+    """
+    frame = _synthetic_frame()
+    x_domain, y_domain = [-9.0, 7.0], [-8.0, 1.0]
+    rows = {
+        min_count: panel_charts.dms_scatter_row(
+            frame,
+            min_count=min_count,
+            clade="24E",
+            methods=dms.METHODS,
+            x_domain=x_domain,
+            y_domain=y_domain,
+            coefficients={column: 0.5 for column, _label in dms.METHODS},
+        ).to_dict()
+        for min_count in dms.MIN_COUNTS
+    }
+    for min_count, spec in rows.items():
+        scatters = [
+            layer
+            for panel in spec["hconcat"]
+            for layer in panel["layer"]
+            if "circle" in str(layer.get("mark", ""))
+        ]
+        assert len(scatters) == len(dms.METHODS), min_count
+        for scatter in scatters:
+            assert scatter["encoding"]["x"]["scale"]["domain"] == x_domain
+            assert scatter["encoding"]["y"]["scale"]["domain"] == y_domain
+
+
+def test_the_corner_coefficient_is_the_one_the_bars_report():
+    """The `r` in a scatter is read from the correlations frame, not recomputed.
+
+    The frame here correlates at 1.0, so a panel that recomputed its own
+    number would print `r = 1.00` and disagree with the bar beside it and the
+    CSV beneath it, which both come from `dms_correlations`.
+    """
+    frame = _synthetic_frame()
+    spec = panel_charts.dms_scatter_row(
+        frame,
+        min_count=0,
+        clade="24E",
+        methods=dms.METHODS,
+        x_domain=[0.0, 40.0],
+        y_domain=[0.0, 40.0],
+        coefficients={column: 0.42 for column, _label in dms.METHODS},
+    ).to_dict()
+    # Altair hoists each layer's frame into a named dataset, so the text is
+    # reached through the name the layer carries rather than inline.
+    datasets = spec["datasets"]
+    labels = [
+        datum["_label"]
+        for panel in spec["hconcat"]
+        for layer in panel["layer"]
+        for datum in datasets.get(layer["data"]["name"], [])
+        if "_label" in datum
+    ]
+    assert labels == ["r = 0.42"] * len(dms.METHODS)
+
+
+def test_a_padded_domain_covers_its_data_and_survives_a_constant_column():
+    """`dms_padded_domain` is what puts a point inside the plot rather than on it."""
+    domain = panel_charts.dms_padded_domain(pd.Series([-2.0, 5.0]))
+    assert domain[0] < -2.0 and domain[1] > 5.0
+    flat = panel_charts.dms_padded_domain(pd.Series([3.0, 3.0]))
+    assert flat[0] < flat[1], "a constant column must still give a drawable axis"
+    grouped = panel_charts.dms_group_domain(
+        _synthetic_frame(), [column for column, _label in dms.METHODS]
+    )
+    assert grouped[0] < -39.0 and grouped[1] > 39.0

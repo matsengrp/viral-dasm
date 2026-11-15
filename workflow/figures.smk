@@ -264,11 +264,16 @@ rule dms_correlations:
         dms_data=dms_files,
         clade_founders=founder_fastas,
         founder_reader="scripts/founders.py",
-        # The two layers of the loader's mask. Not the figure's exclusion --
-        # that arrives as the nulls `rule score` left behind -- but what
-        # `from_multidms` needs before it will parse a masked site.
+        # The two layers of the loader's mask, in the three files they are
+        # read from. Not the figure's exclusion -- that arrives as the nulls
+        # `rule score` left behind -- but what `from_multidms` needs before it
+        # will parse a masked site. `censored_sites` calls `load_censor_table`
+        # on the mutations *and* the clades, so both are declared here: with
+        # only the first, a re-emitted clades table would leave these panels
+        # stale and snakemake would report nothing to do.
         masked_nt_sites=str(mat_pcp_path("masked_nt_sites_file")),
         censored_mutations=str(mat_pcp_path("censored_mutations_file")),
+        censored_clades=str(mat_pcp_path("censored_clades_file")),
         reference=str(mat_pcp_path("reference_sequence_file")),
     output:
         html=f"{NOTEBOOK_DIR}/dms_correlations.html",

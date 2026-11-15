@@ -17,7 +17,7 @@ pipeline runs only where ``snakemake`` is installed.
 from __future__ import annotations
 
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -562,6 +562,7 @@ def dms_scatter(
     show_y_labels: bool = True,
     point_color: str | None = None,
     point_size: int = DMS_POINT_SIZE,
+    r: float | None = None,
 ) -> alt.LayerChart:
     """One predictor against the measurement: upstream's `interactive_scatter`.
 
@@ -571,13 +572,25 @@ def dms_scatter(
     support, and the number the panel reports is the correlation, printed in
     the corner.
 
+    ``r`` is **read, not recomputed**, when the caller has it: the figure's
+    coefficient is `dms.dms_correlations`' and it is what the bars beside this
+    panel and the CSV under it report, so computing a second one here is a
+    second chance to drift -- the same reason :func:`stat_label` reads its
+    number. Recomputing is kept for a standalone call, where there is no
+    correlations frame to read from.
+
     The frame is projected to the four columns the chart and its tooltip use
     before it is handed to Altair, which serializes whatever it is given: the
     joined frame carries about twenty columns, and passing it whole is what
     made the source notebook's first scatter emit 18 MB of Arrow.
     """
     drawn = frame.dropna(subset=[x, y])[[x, y, "mutation", "site"]]
-    r = float(np.corrcoef(drawn[x], drawn[y])[0, 1]) if len(drawn) > 1 else float("nan")
+    if r is None:
+        r = (
+            float(np.corrcoef(drawn[x], drawn[y])[0, 1])
+            if len(drawn) > 1
+            else float("nan")
+        )
     xdom = list(x_domain) if x_domain is not None else dms_padded_domain(drawn[x])
     ydom = list(y_domain) if y_domain is not None else dms_padded_domain(drawn[y])
     axis = alt.Axis(
@@ -652,8 +665,14 @@ def dms_scatter_row(
     methods: Sequence[tuple[str, str]],
     x_domain: Sequence[float],
     y_domain: Sequence[float],
+    coefficients: Mapping[str, float] | None = None,
 ) -> alt.HConcatChart:
     """One row of panel A: three predictors against one homolog's assay.
+
+    ``coefficients`` is ``{column: pearson r}`` for this homolog and rung,
+    taken from the frame the bars and the CSVs are drawn from, so that the
+    number in a panel's corner is the same object as the bar beside it rather
+    than a second computation of it. Omitted, each panel computes its own.
 
     The heading names the clade the count floor was applied in -- the floor is
     on this homolog's *own* clade -- rather than leaving a reader to infer
@@ -680,6 +699,7 @@ def dms_scatter_row(
             point_color=colour,
             show_y_title=index == 0,
             show_y_labels=index == 0,
+            r=None if coefficients is None else coefficients[column],
         )
         for index, (column, label) in enumerate(methods)
     ]

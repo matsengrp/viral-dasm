@@ -30,6 +30,7 @@ import sys
 import tempfile
 from collections.abc import Iterable, Sequence
 from dataclasses import asdict, dataclass, replace
+from functools import cache
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -403,18 +404,23 @@ POOLED_METRIC = "delta_fitness_ratio_all"
 #: What this figure reads out of `selection_factors.parquet`.
 TABLE_COLUMNS: tuple[str, ...] = (*BASE_TABLE_COLUMNS, POOLED_METRIC)
 
-#: The clip the published figure was drawn at: on **both** sides, on all three
-#: predictors, and never on the measurement.
+#: **This figure does not clip.** The source experiment drew it at
+#: `dms_comparison.py`'s `DEFAULT_CLIP_MIN` / `DEFAULT_CLIP_MAX` of -8 and +6,
+#: and that is a deliberate divergence here: the other two figures clip a
+#: counts estimate against a counts estimate, where the floor is set by how
+#: deeply the clade was sampled, but here the y axis is an assay with a floor
+#: of its own and every predictor is plotted and correlated as the model
+#: reports it.
 #:
-#: Wider than `fig:agreement`'s -4 and `fig:subsampling`'s -6, and ported
-#: rather than re-chosen -- `dms_comparison.py`'s `DEFAULT_CLIP_MIN` and
-#: `DEFAULT_CLIP_MAX`. Those two figures clip a counts estimate against a
-#: counts estimate, where the floor is set by how deeply the clade was
-#: sampled. Here the y axis is an assay with a floor of its own, and clipping
-#: the model harder than the assay measures is what would move the
-#: correlation.
-CLIP_LOWER = -8.0
-CLIP_UPPER = 6.0
+#: The bound bit on one point in 5,415 on this run -- KP.3.1.1's R346T, pinned
+#: at +6 -- so what it bought was not a different picture but a hidden one:
+#: a correlation cannot see the difference, which is the reason to show the
+#: value rather than the bound.
+#:
+#: :func:`dms_spec` passes ``clip_lower=None``, which :func:`clip_axes`
+#: accepts; it writes the ``*_raw`` columns either way, so nothing downstream
+#: needs to know clipping is off.
+CLIP_LOWER = None
 
 #: The two populations the figure draws, top row then bottom.
 #:
@@ -441,13 +447,30 @@ TARGET = "dms_cell_entry"
 def dms_spec(min_count: int) -> FilterSpec:
     """The filter one row of `fig:dms` is drawn under.
 
-    The clip the spec carries is the lower bound alone, which is what
-    :func:`clip_axes` applies and what `write_panel_csv` stamps.
-    :func:`dms_frame` applies the upper bound beside it and writes it as a
-    column of its own, rather than widening :class:`FilterSpec` with a field
-    no other figure sets.
+    ``clip_lower=None`` is the whole of :data:`CLIP_LOWER`'s content: this
+    figure plots what the model reports. `write_panel_csv` stamps the field
+    either way, so the tracked table says so -- an empty ``spec_clip_lower``
+    is "no bound", beside `fig:agreement`'s -4 and `fig:subsampling`'s -6.
     """
     return replace(BASE_SPEC, min_count=float(min_count), clip_lower=CLIP_LOWER)
+
+
+@cache
+def _measured_effects(homolog: str) -> pd.DataFrame:
+    """One homolog's assay, melted and tagged, read once per process.
+
+    :func:`dms_frames` draws every homolog at two count thresholds, and the
+    assay does not move between them: the floor is on the scored table's
+    counts, not on the measurement. Without this, each homolog's CSV would be
+    read, digested, parsed by ``from_multidms``, masked against its censor
+    table and melted twice over.
+
+    A copy is returned, so a caller that adds a column to its frame cannot
+    write into the cached one.
+    """
+    dataset = dms_dataset(homolog)
+    matrix, _accounting = load_dms(homolog)
+    return melt_dms(matrix, dataset.clade)
 
 
 def dms_frame(
@@ -481,13 +504,12 @@ def dms_frame(
 
     Returns:
         One row per measured, estimated mutation, carrying ``dms_cell_entry``,
-        the three predictors clipped to ``[CLIP_LOWER, CLIP_UPPER]``, their
-        ``*_raw`` originals, and the ``mutation`` and ``site`` the scatter's
-        tooltip reads.
+        the three predictors as the model and the tree report them, the
+        ``*_raw`` columns :func:`clip_axes` writes whether or not clipping is
+        on, and the ``mutation`` and ``site`` the scatter's tooltip reads.
     """
     dataset = dms_dataset(homolog)
-    matrix, _accounting = load_dms(homolog)
-    measured = melt_dms(matrix, dataset.clade)
+    measured = _measured_effects(homolog).copy()
     frames = base_frames(
         table, spec=dms_spec(min_count), models=[model], clades=[dataset.clade]
     )
@@ -498,15 +520,13 @@ def dms_frame(
             f"{dataset.clade}, so there is nothing to set the assay against."
         )
     joined = frame.merge(measured, on=["aa_site", "mutant_aa"], how="inner")
-    # The pooled column arrives unclipped: `clip_axes` clips
-    # `log_selection_factor` and `FITNESS_METRICS`, and the pooled estimate is
-    # in neither. It is clipped here on both sides, and the two columns
-    # `clip_axes` did reach get their upper bound here, so all three
-    # predictors sit on the one scale the source figure drew them on.
+    # `clip_axes` wrote `*_raw` for `log_selection_factor` and for
+    # `FITNESS_METRICS`; the pooled estimate is in neither, so it gets its own
+    # here. With the clip off these equal their columns, and they are kept so
+    # that every predictor spells the pair the same way whoever reads it.
     for column, _label in METHODS:
         if f"{column}_raw" not in joined:
             joined[f"{column}_raw"] = joined[column]
-        joined[column] = joined[column].clip(lower=CLIP_LOWER, upper=CLIP_UPPER)
     return joined.assign(
         homolog=homolog,
         mutation=joined["aa_mutation"],
