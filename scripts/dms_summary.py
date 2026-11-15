@@ -1,8 +1,9 @@
 """Every predictor's correlation with the DMS, per homolog and per stratum.
 
-One row per ``(homolog, predictor, stratum)``, in the columns
-`scripts/panel_charts.py::homolog_correlation_panel` already reads. The
-statistic is ``within_clade_metrics``, the same one `fig:agreement` is built on,
+One row per ``(homolog, predictor, stratum)``. No chart reads this table
+yet -- the comparison has no drawn home until the DASM's own column lands -- so
+what fixes its columns is the statistic that computes them rather than a panel
+that consumes them. That statistic is ``within_clade_metrics``, the same one `fig:agreement` is built on,
 rather than a second implementation of Pearson and Spearman: that function also
 carries ``regression_slope`` and the reasoning for reading it as a comparand
 between arms rather than as a calibration, and a figure with two correlation

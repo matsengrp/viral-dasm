@@ -340,7 +340,7 @@ rule compose_dms:
 # ---------------------------------------------------------------------------
 #
 # Four rules rather than two. The leaf tally is the expensive one -- clade 21K
-# is 1.9M leaves and 1.7 GB of paths -- and it does not depend on BLOSUM62, so
+# is 1.9M leaves and 1.6 GB of paths -- and it does not depend on BLOSUM62, so
 # folding both predictors into one rule would rebuild it on every edit to the
 # substitution matrix.
 #
@@ -393,7 +393,12 @@ rule dms_leaf_counts:
 
     Every leaf's spike is reconstructed from its own root-to-tip mutation path
     applied to 19A's coding sequence, then translated and tallied. Clade 21K is
-    1.9M leaves; the three together read about 2.6 GB.
+    1.9M leaves; the three together read about 2.4 GB in roughly 3.5 minutes.
+
+    `PANEL_MEM_MB` covers it with an order of magnitude to spare, and that is a
+    measurement rather than an assumption: the tally is a fixed 20 x 1,273 and
+    the paths are streamed a leaf at a time, so peak RSS is flat in the leaf
+    count -- 0.80 GB for 24E's 124,359 leaves and 0.82 GB for 21K's 1,942,882.
     """
     wildcard_constraints:
         clade="|".join(re.escape(clade) for clade in DMS_CLADES),
@@ -441,7 +446,7 @@ rule dms_blosum_scores:
     """BLOSUM62's score for every cell one homolog's assay measured.
 
     Declares no leaf tally: it reads none, and a rule that declared one would
-    make every BLOSUM62 score wait on 2.6 GB of path files it never opens.
+    make every BLOSUM62 score wait on 2.4 GB of path files it never opens.
     """
     wildcard_constraints:
         homolog="|".join(re.escape(homolog) for homolog in dms_homologs()),

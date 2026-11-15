@@ -213,10 +213,6 @@ already did the forward passes, so a panel rule reads
 |---|---|
 | `agreement_mutations` | panels A, B and D: one mutation across the clades, one clade's cloud, the shift grid |
 | `agreement_ladders` | panels C and E: both correlations against the count cutoff |
-| `dms_leaf_counts` | one clade's per-site residue tally over its own tree leaves |
-| `dms_blosum_scores` | BLOSUM62's score for every cell one assay measured |
-| `dms_leaf_scores` | the leaf frequency's score for every cell one assay measured |
-| `dms_predictor_summary` | the DMS predictor table: each predictor against the DMS, per homolog and stratum |
 | `compose_agreement` | the figure itself, laid out from those five PNGs |
 
 `snakemake dms` draws `fig:dms` the same way, from the same scored table plus
@@ -271,6 +267,13 @@ every one of a clade's tree leaves from its own root-to-tip mutation path,
 tallies residues per site, and scores a substitution by the log ratio of its
 residue's leaf count to the clade founder's at that site.
 
+| rule | what it produces |
+|---|---|
+| `dms_leaf_counts` | one clade's per-site residue tally over its own tree leaves |
+| `dms_blosum_scores` | BLOSUM62's score for every cell one assay measured |
+| `dms_leaf_scores` | the leaf frequency's score for every cell one assay measured |
+| `dms_predictor_summary` | the DMS predictor table: each predictor against the DMS, per homolog and stratum |
+
 **The two live at different altitudes, and the table reports both.** Pooled over
 every measured cell, the leaf predictor leads on all three homologs. But it is
 very nearly a per-site statistic — `-log(parent count + 1)` alone, which says
@@ -281,6 +284,14 @@ score and the measurement on their per-site means and the ordering reverses:
 BLOSUM62 is the better substitution-level predictor on every homolog. So the
 table carries the pooled and the within-site coefficients side by side, and
 anything written from it should say which question it is answering.
+
+**These rules are in the default target.** `rule all` includes them, so a bare
+`snakemake` plans the three leaf tallies -- about 2.4 GB of path files read, and
+3.5 minutes of CPU at a peak of 0.8 GB (measured 2026-11-15: 24E 0:26, 23A 0:47,
+21K 2:16, so it is dominated by reading the files) -- the first time it is run in
+a checkout whose artifact root has none. That is deliberate: a tracked table that nothing in the
+DAG rebuilds is a table that quietly stops matching the code beside it. The work
+is CPU-only and never reaches a GPU, a training run or the scored table.
 
 **No panel is drawn from it here.** `fig:dms`'s four panels are the published
 figure's, which `rule dms` builds; this comparison has no drawn home until the

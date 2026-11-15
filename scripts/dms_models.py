@@ -1,6 +1,6 @@
 """The contract a non-DASM predictor scores the spike DMS through.
 
-`fig:dms`'s panel C sets the DASM against published models. Each of those reads
+The DMS comparison sets the DASM against published models. Each of those reads
 a different parent -- the DASM arms read the clade founder, which is the UShER
 tree's WH1-aligned frame they were trained in, while antiGen and CoVFit must
 read the construct the assay was measured on -- so a predictor declares the

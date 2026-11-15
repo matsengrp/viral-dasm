@@ -9,17 +9,18 @@ selection factor; a conventional PSSM's ``log(p_obs / p_background)`` would be
 comparable to neither.
 
 **What it measures is the site, not the substitution.** Measured on all three
-homologs: ``-log(parent + 1)`` alone -- one minus the site's deviation fraction,
-which carries no information at all about which residue the substitution goes to
--- scores Spearman +0.381 / +0.384 / +0.508 against the DMS, matching or beating
-the full score's +0.338 / +0.404 / +0.526. The mutant term adds almost nothing,
-and the pseudocount is inert over five orders of magnitude for the same reason.
-Centre both the score and the measurement on their per-site means and the leaf
-predictor falls to +0.19 / +0.17 / +0.10 while BLOSUM62 -- which knows nothing
-about the site -- rises to +0.35 / +0.27 / +0.31.
+homologs, BA.1 / XBB.1.5 / KP.3.1.1: ``-log(parent + 1)`` alone -- one minus the
+site's deviation fraction, which carries no information at all about which
+residue the substitution goes to -- scores Spearman +0.350 / +0.384 / +0.500
+against the DMS, against the full score's +0.302 / +0.404 / +0.516. It is ahead
+on BA.1 and within 0.02 on the other two, so the mutant term adds almost
+nothing, and the pseudocount is inert over five orders of magnitude for the same
+reason. Centre both the score and the measurement on their per-site means and
+the leaf predictor falls to +0.14 / +0.17 / +0.10 while BLOSUM62 -- which knows
+nothing about the site -- rises to +0.33 / +0.27 / +0.32.
 
-So this is a **per-site conservation statistic**, and the pooled correlation a
-panel would print is dominated by between-site variance. That is a real and
+So this is a **per-site conservation statistic**, and a pooled correlation over
+every measured cell is dominated by between-site variance. That is a real and
 strong signal: how variable a spike site is among sampled leaves predicts that
 site's mean DMS effect. It is not a statement about which substitution at a site
 is tolerated, and `scripts/dms_summary.py` reports the within-site correlation
@@ -56,7 +57,7 @@ import numpy as np
 import pandas as pd
 
 #: This predictor's id, as `results/panels/dms/` carries it and
-#: `scripts/panel_charts.py` maps to a label.
+#: `scripts/panel_spec.py` lists in :data:`panel_spec.DMS_PREDICTORS`.
 LEAF_LOGFREQ = "leaf_logfreq"
 
 #: The pseudocount in the log frequency ratio. **Not**

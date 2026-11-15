@@ -1,4 +1,4 @@
-"""BLOSUM62 as a predictor of the spike DMS: `fig:dms` panel C's substitution floor.
+"""BLOSUM62 as a predictor of the spike DMS: the comparison's substitution floor.
 
 How much of a deep mutational scan does a general-purpose substitution matrix
 already explain? It knows nothing about SARS-CoV-2, nothing about the site and
@@ -36,7 +36,7 @@ from Bio.Align import substitution_matrices
 from dasm2.sequence.constants import AA_STR_SORTED, AA_STR_TO_IDX
 
 #: This predictor's id, as `results/panels/dms/` carries it and
-#: `scripts/panel_charts.py` maps to a label.
+#: `scripts/panel_spec.py` lists in :data:`panel_spec.DMS_PREDICTORS`.
 BLOSUM62 = "blosum62"
 
 

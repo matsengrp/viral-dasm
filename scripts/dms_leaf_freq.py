@@ -1,7 +1,7 @@
 """Per-site residue counts over a clade's own tree leaves.
 
-Panel C asks how much of a deep mutational scan a model explains that something
-cheaper does not. One cheap answer is the clade's standing variation: a
+The DMS comparison asks how much of a deep mutational scan a model explains
+that something cheaper does not. One cheap answer is the clade's standing variation: a
 substitution the tree has never shown in this clade is probably costly, and one
 carried by a tenth of its leaves is probably not. This module measures that --
 every leaf's spike reconstructed from its own root-to-tip mutation path, tallied

@@ -45,7 +45,7 @@ from dasm2.neutral.scov2_rates import gene_nt_span
 from dasm2.sequence.constants import AA_STR_SORTED, STOP_CODONS
 from dasm2.sequence.conversion import translate_codon
 
-#: The clade panel C is drawn on, and the one the real-data checks here use. Its
+#: The clade KP.3.1.1 is matched to, and the one the real-data checks here use. Its
 #: homolog is `panel_spec.SCATTER_HOMOLOG`'s, so a repoint moves both.
 CLADE = "24E"
 
@@ -358,7 +358,7 @@ def test_the_score_is_the_log_ratio_it_claims_to_be(tally_counts):
     A swapped numerator and denominator flips its sign; a pseudocount of 0 or 5
     changes every unobserved cell; indexing the tally by ``aa_site`` rather than
     ``aa_site - 1`` returns the next site's counts. All three satisfy every row
-    count, key and hash check in this suite and reach panel C as a correlation of
+    count, key and hash check in this suite and reach the table as a correlation of
     the wrong sign or magnitude.
     """
     counts = dms_leaf_freq.read_counts(tally_counts)

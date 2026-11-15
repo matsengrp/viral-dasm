@@ -1,11 +1,9 @@
 """What a wrong predictor join would report, and what catches it.
 
-Three failure modes here produce a full-looking panel. A predictor scored
-against a sequence other than the one it declares correlates the right numbers
-against the wrong cells; a join whose key is not unique multiplies rows and
-raises every ``n`` without raising anything; and a predictor with no colour or
-no label reaches a chart that recycles a hue or prints ``leaf_logfreq`` on a
-paper figure. None of them raises on its own.
+Two failure modes here produce a full-looking table. A predictor scored against
+a sequence other than the one it declares correlates the right numbers against
+the wrong cells; and a join whose key is not unique multiplies rows and raises
+every ``n`` without raising anything. Neither raises on its own.
 
 The checks over hand-built frames run always. The ones that read this
 repository's own mat-pcp run or the three DMS CSVs skip when those are not
@@ -219,8 +217,9 @@ def test_the_predictor_ids_the_rules_resolve_are_the_ones_the_modules_score():
 # The two chart-layer tests this file carried on `28-dms-predictors` are not
 # ported: `panel_charts.predictor_label`, `DMS_PREDICTOR_COLORS` and
 # `homolog_correlation_panel` belong to the panel the port deliberately leaves
-# out, and `fig:dms`'s drawn panels are the published figure's. They come back
-# with the chart, once the DASM's own column makes the comparison worth drawing.
+# out, and `fig:dms`'s drawn panels are the published figure's. Whatever draws
+# this table will need its own colour and label coverage; that is the chart's
+# issue to carry, not a gap this file is pretending to fill.
 
 
 @needs_dms
@@ -267,7 +266,7 @@ def test_blosum62_scores_the_cell_it_says_it_does():
 
     Every other check here is a row count, a key or a hash, all of which a
     predictor that scored ``matrix[parent, parent]``, or scored the transpose, or
-    dropped the lookup entirely would satisfy. A wrong value reaches panel C as a
+    dropped the lookup entirely would satisfy. A wrong value reaches the table as a
     correlation of the wrong magnitude and nothing else notices.
     """
     from Bio.Align import substitution_matrices
