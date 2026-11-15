@@ -73,6 +73,17 @@ def _(PANEL_DIR, fl, mo, spec):
     )
 
     PANELS = fl.load_panels(PANEL_DIR, spec.DMS_STRATA_PANEL_LETTERS)
+
+    # Align the columns. The two rows draw the same three cells at the same
+    # width, so their images differ only by the width of the y axis on the
+    # left: antiGen's tick labels run to three characters where the DASM's run
+    # to two. Left justified that puts the top row's plots a band to the left
+    # of the bottom row's, and a column whose plots do not share an x is not a
+    # column. Padding the narrower row on the left moves its plots onto the
+    # other's; the rows' right margins already agree, so the right edges land
+    # together as well.
+    fl.pad_to_common_width(PANELS, list(PANELS), side="left")
+
     mo.md(
         "At the size the panel rule rendered it:\n\n"
         + "\n".join(
