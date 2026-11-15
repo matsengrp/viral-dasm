@@ -114,7 +114,7 @@ def _(HOMOLOG, charts, dms, frame, mo, panel_spec, stats):
     mo.md(
         f"**{HOMOLOG}**, {len(frame):,} measured cells: "
         + ", ".join(
-            f"{charts.dms_stratum_label(_s)} "
+            f"{' '.join(charts.dms_stratum_label(_s))} "
             f"{len(frame) if _s == dms.ALL else int((frame['stratum'] == _s).sum()):,}"
             for _s in panel_spec.DMS_STRATA_COLUMNS
         )
@@ -132,9 +132,11 @@ def _(SELECTION, charts, dms, frame, panel_spec, panels, stats):
     # that cannot be read down the page is the one thing this layout is for.
     x_domain = charts.dms_padded_domain(frame["dms_cell_entry"])
 
+    _last = len(panel_spec.DMS_STRATA_MODELS) - 1
+
     strata_panels = []
-    for _stem, (_model, _title) in zip(
-        panel_spec.DMS_STRATA_PANELS, panel_spec.DMS_STRATA_MODELS
+    for _index, (_stem, (_model, _title)) in enumerate(
+        zip(panel_spec.DMS_STRATA_PANELS, panel_spec.DMS_STRATA_MODELS)
     ):
         _row = charts.save_panel(
             charts.dms_stratum_row(
@@ -144,6 +146,11 @@ def _(SELECTION, charts, dms, frame, panel_spec, panels, stats):
                 stratum_order=panel_spec.DMS_STRATA_COLUMNS,
                 x_domain=x_domain,
                 stats=stats[stats["predictor"] == _model],
+                # The column heading and the x title belong to the column, so
+                # each is drawn once: the heading on the top row, the title on
+                # the bottom.
+                show_column_titles=_index == 0,
+                show_x_title=_index == _last,
             ),
             _stem,
             selection=SELECTION,

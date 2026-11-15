@@ -583,13 +583,19 @@ DMS_PREDICTOR_CORRELATIONS = "predictor_correlations"
 #: :data:`DMS_PREDICTORS` entries, so the figure cannot name a predictor the
 #: table does not carry; `tests/test_dms_strata.py` pins that.
 #:
-#: **The units differ and the titles say so.** `scripts/dms_antigen.py` records
-#: that antiGen's column is ``log p`` while the DASM's is ``log f``, and that
-#: nothing converts between them "because no conversion exists that does not
-#: assume a mutation model". Two lines each so both rows' titles take the same
+#: **"fitness effect", not "log selection factor"**, which is `main.tex`'s own
+#: term for this quantity and `DMS_AXIS_TITLES`' spelling of it on `fig:dms`.
+#: The two are the same column; the paper's reader meets it as a fitness
+#: effect, and a figure that renamed it would read as a second quantity.
+#:
+#: **The units still differ and the titles still say so.**
+#: `scripts/dms_antigen.py` records that antiGen's column is ``log p`` while
+#: the DASM's is ``log f``, and that nothing converts between them "because no
+#: conversion exists that does not assume a mutation model" -- which is why the
+#: rows never share a y domain. Two lines each so both titles take the same
 #: width and the cells line up.
 DMS_STRATA_MODELS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("dasm", ("DASM", "log selection factor")),
+    ("dasm", ("DASM", "fitness effect")),
     ("antigen", ("antiGen", "log probability")),
 )
 

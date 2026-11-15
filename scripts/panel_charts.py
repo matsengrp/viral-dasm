@@ -730,13 +730,16 @@ def dms_scatter_row(
 #: because the strings in that module are join keys and CSV values, and changing
 #: one to read better on a chart would change what a panel's table says.
 #:
-#: Only the long form is carried. That branch needed a short one for a facet
-#: header over a 150 px column; `fig:dms_strata`'s cells are
-#: :data:`DMS_PANEL_WIDTH` wide and titled, so the long form fits.
-DMS_STRATUM_LABELS: dict[str, str] = {
-    "single_nt": "single-nt codon mutations",
-    "multi_nt": "multi-nt codon mutations",
-    "all": "all measured mutations",
+#: **Each says "mutations", and says what kind.** The stratum is a property of
+#: amino-acid mutations and of the founder codon that reaches them, and a bare
+#: "single-nt" leaves a reader to guess whether the nucleotide or the residue
+#: is the unit being counted. Two lines because the long forms are wider than
+#: a :data:`DMS_PANEL_WIDTH` cell, and Vega-Lite neither wraps nor elides a
+#: title: adjacent ones simply overlap.
+DMS_STRATUM_LABELS: dict[str, tuple[str, ...]] = {
+    "all": ("all amino-acid", "mutations"),
+    "single_nt": ("mutations reachable by a", "single-nt codon mutation"),
+    "multi_nt": ("mutations requiring a", "multi-nt codon mutation"),
 }
 
 #: Hue by stratum, for `fig:dms_strata`. The same Okabe-Ito blue and vermillion
@@ -755,8 +758,8 @@ DMS_STRATUM_COLORS: dict[str, str] = {
 }
 
 
-def dms_stratum_label(stratum: str) -> str:
-    """One stratum's name, as the figure prints it.
+def dms_stratum_label(stratum: str) -> list[str]:
+    """One stratum's name, as the figure prints it, a line per element.
 
     Raises:
         KeyError: On a stratum with no label. Returning the raw key instead
@@ -767,7 +770,7 @@ def dms_stratum_label(stratum: str) -> str:
         raise KeyError(
             f"{stratum!r} has no label; expected one of {sorted(DMS_STRATUM_LABELS)}"
         )
-    return DMS_STRATUM_LABELS[stratum]
+    return list(DMS_STRATUM_LABELS[stratum])
 
 
 def dms_stratum_row(
@@ -778,6 +781,8 @@ def dms_stratum_row(
     stratum_order: Sequence[str],
     x_domain: Sequence[float],
     stats: pd.DataFrame | None = None,
+    show_column_titles: bool = True,
+    show_x_title: bool = True,
     width: int = DMS_PANEL_WIDTH,
     height: int = DMS_PANEL_HEIGHT,
     font_size: int = DMS_FONT_SIZE,
@@ -837,8 +842,18 @@ def dms_stratum_row(
             matching = stats[stats["stratum"] == stratum]
             row = None if matching.empty else matching.iloc[0]
 
+        # The column heading and the x title belong to the *column*, not to
+        # each cell in it: every row is the same measurement over the same
+        # domain, so printing either once per row prints this figure's two
+        # longest strings three times each. The heading goes on the top row and
+        # the title on the bottom, where a reader looks for them. Tick labels
+        # stay on both: the rows are separated by a panel break, so a cell has
+        # to be readable without tracing down the page.
         x_enc = alt.X(
-            "dms_cell_entry:Q", title=DMS_Y_TITLE, axis=axis, scale=x_scale
+            "dms_cell_entry:Q",
+            title=DMS_Y_TITLE if show_x_title else None,
+            axis=axis,
+            scale=x_scale,
         )
         # The y scale is shared across the row, so only the leftmost cell
         # carries the axis: repeating it prints this figure's longest string
@@ -876,18 +891,15 @@ def dms_stratum_row(
         labelled = alt.layer(
             *layers, _corner_label(stat_label(row, len(cell_frame)), font_size)
         )
-        cells.append(
-            labelled.properties(
-                width=width,
-                height=height,
-                title=alt.TitleParams(
-                    dms_stratum_label(stratum),
-                    fontSize=font_size,
-                    offset=3,
-                    anchor="middle",
-                ),
+        properties = {"width": width, "height": height}
+        if show_column_titles:
+            properties["title"] = alt.TitleParams(
+                dms_stratum_label(stratum),
+                fontSize=font_size,
+                offset=3,
+                anchor="middle",
             )
-        )
+        cells.append(labelled.properties(**properties))
     # Stated rather than changed: every cell was given the same explicit
     # domains above. Without it Vega-Lite resolves concatenated scales
     # independently and the shared domain becomes a coincidence of the data.
