@@ -1239,7 +1239,7 @@ def test_a_background_panel_refuses_a_third_background():
 #: redraw the paper's figure with different numbers.
 ECDF_SHARE_AT_THRESHOLD = {
     ("21J", "full_depth"): 0.6531,
-    ("21J", "cap_50000_0"): 0.0663,
+    ("21J", "cap_50000_0"): 0.0664,
     ("21J", "cap_20000_0"): 0.0438,
     ("21J", "cap_5000_0"): 0.0004,
     ("25C", "full_depth"): 0.0636,
@@ -1249,11 +1249,12 @@ ECDF_SHARE_AT_THRESHOLD = {
 }
 
 #: Each clade's spike amino-acid grid: the per-clade table's spike rows, less
-#: the synonymous and the nonsense ones. This is the population the paper's
+#: the synonymous ones, the nonsense ones and the unobservable founder
+#: codons. This is the population the paper's
 #: "amino-acid mutations to its founder spike sequence" names, and the one
 #: panels C and D are built on -- see `panels._aa_grid` on why the stops come
 #: out.
-SPIKE_GRID_ROWS = {"21J": 7512, "25C": 7405}
+SPIKE_GRID_ROWS = {"21J": 7504, "25C": 7401}
 
 
 def _aamut_dir() -> Path:

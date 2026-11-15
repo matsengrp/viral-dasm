@@ -925,19 +925,37 @@ def _aa_grid(
     threshold" over one population and "how well is that share recovered" over
     another.
 
+    **The unobservable founder codons come out too**, through
+    :func:`drop_unobservable_codons`, which is what panels C and D already do
+    through :func:`base_frames`. At those codons mat-pcp can attribute no
+    observation to the founder background, so the row arrives with an actual
+    count of zero against a full expectation -- for 21J, sites 142 and 950,
+    whose five surviving mutations carry 0 observed against 15 to 129
+    expected. Counting them here would put five mutations in the denominator
+    that no estimate can ever reach.
+
+    **mat-pcp's own ``exclude`` needs nothing here.** It is applied one
+    nucleotide route at a time and before any fitness effect is computed, so a
+    mutation it excluded entirely has no row in this file to begin with. Nor
+    is ``globally_masked`` filtered, here or anywhere: #36 established that the
+    nucleotide mask widened to the codon refuses mutations mat-pcp estimated
+    normally, and the module header gives the cost.
+
     ``gene`` is a semicolon-joined list where a site falls in more than one
     reading frame, and is null on the intergenic rows, so the membership test
     runs on ``fillna("")`` -- a bare ``split`` raises on those.
     """
     frame = pd.read_csv(
-        aamut_grid_path(aamut_dir, clade, arm), usecols=list(AA_GRID_COLUMNS)
+        aamut_grid_path(aamut_dir, clade, arm),
+        usecols=[*AA_GRID_COLUMNS, "aa_site"],
     )
     in_gene = frame["gene"].fillna("").str.split(";").apply(lambda g: gene in g)
-    return frame.loc[
+    kept = frame.loc[
         in_gene
         & (frame["mutant_aa"] != frame["clade_founder_aa"])
         & (frame["mutant_aa"] != STOP_AA)
     ]
+    return drop_unobservable_codons(kept, clade)
 
 
 def count_ecdf_frame(

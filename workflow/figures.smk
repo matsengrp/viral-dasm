@@ -276,6 +276,11 @@ rule subsampling_depth:
         # table's two extra clades against.
         clade_founders=founder_fastas,
         founder_reader="scripts/founders.py",
+        # `_aa_grid` drops each clade's unobservable founder codons, which
+        # `unobservable_founder_codons` rebuilds from these two and the
+        # founder above.
+        masked_nt_sites=str(mat_pcp_path("masked_nt_sites_file")),
+        reference=str(mat_pcp_path("reference_sequence_file")),
     output:
         html=f"{NOTEBOOK_DIR}/subsampling_depth.html",
         panels=panel_outputs(DEPTH_PANELS, SUBSAMPLING_SELECTION),
