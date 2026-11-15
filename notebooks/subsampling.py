@@ -105,19 +105,19 @@ def _(PANEL_DIR, fl, mo, spec):
 
 @app.cell
 def _(PANELS, fl, spec):
-    # All four panels are Vega-Lite from `panel_charts.save_panel`, so one
-    # title size serves them: `PANEL_TITLE_PX` is what the specs set and what
-    # the panel letters are sized against. The published figure passed 24 px
-    # here because both of its sources drew this figure's panels two points
-    # larger than the rest of that campaign's; this pipeline draws every
-    # panel of every figure at `PANEL_FONT_SIZE`, and `tests/test_panels.py`
-    # pins the two together.
+    # All four panels are Vega-Lite, so one title size serves them -- and it
+    # is `SUBSAMPLING_TITLE_PX` rather than the `PANEL_TITLE_PX` the other two
+    # compositions pass, because this is the one figure not set at
+    # `PANEL_FONT_SIZE`. See that constant for why, and `figure_layout`'s
+    # header for how a spec size becomes a size on the page. The panel letters
+    # are sized against it, so passing the wrong one shrinks the letters while
+    # leaving the titles alone.
     composed = fl.compose(
         PANELS,
         [list(_row) for _row in spec.SUBSAMPLING_FIGURE_ROWS],
         box_in=spec.SUBSAMPLING_BOX_IN,
         scale=spec.SUBSAMPLING_FIGURE_SCALE,
-        title_px_on_disk=fl.vega_title_px_on_disk(title_px=spec.PANEL_TITLE_PX),
+        title_px_on_disk=fl.vega_title_px_on_disk(title_px=spec.SUBSAMPLING_TITLE_PX),
     )
     print(composed.summary())
     composed.figure
