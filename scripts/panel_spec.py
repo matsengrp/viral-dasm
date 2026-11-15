@@ -549,20 +549,92 @@ DMS_TITLE_PX = 15
 #: `workflow/figures.smk` stays cheap to parse. `tests/test_dms_models.py` pins
 #: the two together.
 #:
-#: The two reference floors first and the published model last, which is the
-#: order a reader needs: what a substitution matrix and a per-site conservation
-#: statistic already explain, and only then the model the paper claims to beat.
-DMS_PREDICTORS: tuple[str, ...] = ("blosum62", "leaf_logfreq", "antigen")
+#: The two reference floors first, then the published model, then this paper's,
+#: which is the order a reader needs: what a substitution matrix and a per-site
+#: conservation statistic already explain, then the model the paper claims to
+#: beat, and only last the one making the claim.
+DMS_PREDICTORS: tuple[str, ...] = ("blosum62", "leaf_logfreq", "antigen", "dasm")
 
 #: Every predictor's correlation with the DMS, per homolog and per stratum.
 #:
-#: **A table, not a panel.** The four stems in :data:`DMS_PANELS` are the
-#: published figure's, reproduced by #27; the comparison this names has no drawn
-#: home until the DASM's own column lands, which needs
-#: `selection_factors.parquet`. So the stem is the CSV's and the figure is
-#: untouched -- and it is deliberately not spelled `panel_c_*`, which on this
-#: figure already means something else.
+#: **A table first, and now also a figure.** The four stems in
+#: :data:`DMS_PANELS` are the published figure's, reproduced by #27; this table
+#: had no drawn home until the DASM's own column landed, which needed
+#: `selection_factors.parquet`. #46 draws it as `fig:dms_strata` below, which
+#: reads its `r` and `n` from here rather than recomputing them. The stem is
+#: deliberately not spelled `panel_c_*`, which on `fig:dms` already means
+#: something else.
 DMS_PREDICTOR_CORRELATIONS = "predictor_correlations"
+
+
+# ---------------------------------------------------------------------------
+# `fig:dms_strata`
+# ---------------------------------------------------------------------------
+#
+# The drawn comparison #44 deferred: two models that are defined on every
+# mutation, cut by whether one nucleotide change to the founder's codon reaches
+# it. A separate figure from `fig:dms` rather than more panels on it -- the two
+# are over different populations, which the captions say, and sharing
+# `DMS_PANELS` would move `rule dms_correlations`' outputs and
+# `notebooks/dms.py`'s completeness check.
+
+#: The two models `fig:dms_strata` draws, top row then bottom, each as
+#: ``(predictor id, y axis title)``. The ids are
+#: :data:`DMS_PREDICTORS` entries, so the figure cannot name a predictor the
+#: table does not carry; `tests/test_dms_strata.py` pins that.
+#:
+#: **The units differ and the titles say so.** `scripts/dms_antigen.py` records
+#: that antiGen's column is ``log p`` while the DASM's is ``log f``, and that
+#: nothing converts between them "because no conversion exists that does not
+#: assume a mutation model". Two lines each so both rows' titles take the same
+#: width and the cells line up.
+DMS_STRATA_MODELS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("dasm", ("DASM", "log selection factor")),
+    ("antigen", ("antiGen", "log probability")),
+)
+
+#: The columns, left to right. **Not `dms.STRATA`**, which orders the two
+#: halves before their union because that is how a table is read -- the rows
+#: that partition, then the total. A figure is read the other way: the whole
+#: population first, then what it splits into, so a reader meets the cloud
+#: before being shown the cut through it. Spelled as literals for the reason
+#: `DMS_PREDICTORS` is, and `tests/test_dms_strata.py` pins that it is a
+#: permutation of `dms.STRATA` rather than a different set.
+DMS_STRATA_COLUMNS: tuple[str, ...] = ("all", "single_nt", "multi_nt")
+
+#: One image per model row, three cells concatenated inside it. `DMS_PANELS`'
+#: own precedent: each of those stems is one image of three scatters taking one
+#: letter. A cell per image would move the shared y domain and the single y axis
+#: out of the chart and into the layout, which cannot express either.
+DMS_STRATA_PANELS: tuple[str, ...] = tuple(
+    f"panel_{letter}_{model}_strata"
+    for letter, (model, _) in zip("ab", DMS_STRATA_MODELS)
+)
+
+#: The composed figure's stem, which is its LaTeX label: `main.tex` includes
+#: `figures/dms_strata.pdf` and refers to `\\autoref{fig:dms_strata}`.
+DMS_STRATA_FIGURE_STEM = "dms_strata"
+
+#: Which stem each letter is, reading down: one row per model.
+DMS_STRATA_PANEL_LETTERS: dict[str, str] = {
+    chr(ord("A") + index): stem for index, stem in enumerate(DMS_STRATA_PANELS)
+}
+
+#: One panel a row, stacked. Reading down a column answers the figure's
+#: question -- the same mutations under two models -- which is why the
+#: measurement is on x and shared across both rows.
+DMS_STRATA_FIGURE_ROWS: tuple[tuple[str, ...], ...] = tuple(
+    (letter,) for letter in DMS_STRATA_PANEL_LETTERS
+)
+
+#: `fig:dms`'s box. Two rows of three cells each, so the width binds and there
+#: is no reason to overhang the text block.
+DMS_STRATA_BOX_IN: tuple[float, float] = (7.5, 8.0)
+DMS_STRATA_FIGURE_SCALE = 1.0
+
+#: The type the panels are drawn at, which is `panel_charts.DMS_FONT_SIZE`.
+#: Named here as well so the panel letters follow the panels when it changes.
+DMS_STRATA_TITLE_PX = 15
 
 #: Where `fig:dms`'s predictor intermediates go: under the artifact root, not in
 #: the tree. One narrow Parquet per `(predictor, homolog)`.
