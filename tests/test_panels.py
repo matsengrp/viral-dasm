@@ -1330,3 +1330,219 @@ def test_the_subsampling_arms_are_the_corpora_the_pipeline_builds():
     assert len(panel_spec.subsampling_caps()) == len(lib.CORPUS_NAMES) - 1
     assert lib.CORPUS_NAMES[0] == lib.FULL_DEPTH.name
     assert set(panel_spec.ECDF_CLADES) <= set(lib.clade_roster())
+
+
+# ---------------------------------------------------------------------------
+# `fig:subsampling` panels C and D
+# ---------------------------------------------------------------------------
+#
+# Built on a synthetic four-arm table rather than on the scored one: every
+# property below is a property of the construction, and a 10 GB Parquet read
+# would make the suite too slow to run on every change without testing
+# anything these frames do not.
+
+#: The clades the synthetic ladder is built over. Two, because the roster
+#: guard needs one clade that a cap thins below the floor and one that does
+#: not.
+LADDER_CLADES = ("21J", "21L")
+
+
+def fake_arm_table(seed: int = 3) -> pd.DataFrame:
+    """A scored table carrying every arm, in the shape `rule score` writes.
+
+    The full-depth counts estimate is the same on every arm's rows, which is
+    what `rule score` does and what makes it the shared target; only
+    `log_selection_factor` moves, and it moves *towards noise* as the cap
+    tightens, so a test that confuses the arms sees it.
+    """
+    rng = numpy.random.default_rng(seed)
+    rows = []
+    for clade in LADDER_CLADES:
+        for site in range(1, FAKE_SITES + 1):
+            for mutant in ("A", "G", "V"):
+                parent = "A" if site % 7 else "E"
+                target = float(rng.normal(-1.0, 1.5))
+                for arm_index, arm in enumerate(lib.CORPUS_NAMES):
+                    rows.append(
+                        {
+                            "clade": clade,
+                            "model": panel_spec.SUBSAMPLING_MODEL,
+                            "arm": arm,
+                            "aa_mutation": f"{parent}{site}{mutant}",
+                            "aa_site": site,
+                            "parent_aa": parent,
+                            "mutant_aa": mutant,
+                            "is_synonymous": mutant == parent,
+                            "log_selection_factor": target
+                            + float(rng.normal(0, 0.3 * arm_index)),
+                            "actual_count": float(rng.integers(10, 80)),
+                            "predicted_count": float(rng.integers(10, 80)),
+                            "delta_fitness_ratio": target,
+                            "delta_fitness_bayesian": target,
+                            "uncertainty": 0.1,
+                            "globally_masked": False,
+                            "censored": False,
+                        }
+                    )
+    return pd.DataFrame(rows)
+
+
+def write_fake_arm_fitness(directory: Path, table: pd.DataFrame) -> Path:
+    """mat-pcp's per-arm amino-acid tables, in the layout the figure reads.
+
+    Full depth at the top level and each cap arm in a subdirectory named for
+    its corpus, which is `panel_spec.aamut_grid_path`'s layout. The full-depth
+    file carries the target itself, so the full-depth counts cell is the
+    target against itself -- r = 1 by construction, which is the panel's
+    stated baseline and the test below.
+    """
+    for arm in lib.CORPUS_NAMES:
+        root = directory if arm == lib.FULL_DEPTH.name else directory / arm
+        root.mkdir(parents=True, exist_ok=True)
+        rows = table[table["arm"] == arm]
+        for clade in LADDER_CLADES:
+            frame = rows[rows["clade"] == clade]
+            noise = numpy.random.default_rng(len(arm)).normal(
+                0, 0.4 * lib.CORPUS_NAMES.index(arm), len(frame)
+            )
+            pd.DataFrame(
+                {
+                    "gene": lib.GENE,
+                    "aa_mutation": frame["aa_mutation"].to_numpy(),
+                    "aa_site": frame["aa_site"].to_numpy(),
+                    "clade_founder_aa": frame["parent_aa"].to_numpy(),
+                    "mutant_aa": frame["mutant_aa"].to_numpy(),
+                    "actual_count": frame["actual_count"].to_numpy(),
+                    "expected_count": frame["predicted_count"].to_numpy(),
+                    "delta_fitness_ratio": frame["delta_fitness_ratio"].to_numpy()
+                    + noise,
+                }
+            ).to_csv(root / f"{clade}{lib.FITNESS_SUFFIX}", index=False)
+    return directory
+
+
+@pytest.fixture(scope="module")
+def ladder(tmp_path_factory):
+    """Panel C's frames and panel D's statistics, over the synthetic arms."""
+    directory = tmp_path_factory.mktemp("ladder")
+    frame = fake_arm_table()
+    table_path = directory / "selection_factors.parquet"
+    frame.to_parquet(table_path, index=False)
+    aamut = write_fake_arm_fitness(directory / "aamut_fitness", frame)
+    reverting = {clade: set() for clade in LADDER_CLADES}
+    frames = panels.ladder_frames(
+        table_path,
+        aamut,
+        reverting_by_clade=reverting,
+        clades=LADDER_CLADES,
+    )
+    return frames, panels.ladder_metrics(frames), table_path, aamut
+
+
+def test_the_population_is_fixed_on_the_full_depth_arm(ladder):
+    """The survivorship-bias guard, and the reason the figure is built this way.
+
+    Filtering each arm on its own counts would score a thinned arm only over
+    the mutations it still happened to observe -- the subset it is best at --
+    and every curve would be drawn over a different population. The bug it
+    produces is a plausible figure rather than an error, so what is asserted
+    is equality across arms rather than any particular count.
+    """
+    _frames, metrics, _table, _aamut = ladder
+    for (clade, method), rows in metrics.groupby(["clade", "method"]):
+        counts = set(rows["n_mutations"])
+        assert len(counts) == 1, (
+            f"{clade}/{method} is scored over {dict(zip(rows['arm'], rows['n_mutations']))}. "
+            f"Every arm must be scored over the mutations the full-depth arm "
+            f"selected, or the arms are not comparable."
+        )
+        assert counts != {0}
+
+
+def test_the_full_depth_counts_cell_is_the_target_against_itself(ladder):
+    """Panel C's baseline, which the caption calls one by construction."""
+    _frames, metrics, _table, _aamut = ladder
+    full = metrics[
+        (metrics["arm"] == lib.FULL_DEPTH.name) & (metrics["method"] == "counts")
+    ]
+    assert not full.empty
+    for row in full.itertuples(index=False):
+        assert row.pearson_r == pytest.approx(1.0, abs=1e-12)
+        assert row.regression_slope == pytest.approx(1.0, abs=1e-12)
+
+
+def test_a_clade_a_cap_thins_keeps_its_place(ladder):
+    """The roster is fixed on full depth too, one level up from the population.
+
+    A clade a cap thinned to four mutations is the ladder's question, not a
+    clade to drop, so every clade appears at every arm.
+    """
+    _frames, metrics, _table, _aamut = ladder
+    for arm in lib.CORPUS_NAMES:
+        drawn = set(metrics[metrics["arm"] == arm]["clade"])
+        assert drawn == set(LADDER_CLADES), (
+            f"arm {arm} draws {sorted(drawn)}, not {sorted(LADDER_CLADES)}."
+        )
+
+
+def test_the_clip_is_a_control_and_not_a_filter(ladder):
+    """Clipping moves where a point is drawn, never which rows are scored."""
+    _frames, metrics, table_path, aamut = ladder
+    unclipped = panels.ladder_metrics(
+        panels.ladder_frames(
+            table_path,
+            aamut,
+            reverting_by_clade={clade: set() for clade in LADDER_CLADES},
+            clades=LADDER_CLADES,
+            spec=panels.FilterSpec(min_count=0.0, clip_lower=None),
+        )
+    )
+    merged = metrics.merge(
+        unclipped, on=["arm", "clade", "method"], suffixes=("", "_unclipped")
+    )
+    assert (merged["n_mutations"] == merged["n_mutations_unclipped"]).all(), (
+        "the clip changed the row set, so it is filtering rather than "
+        "clamping and `n_mutations` no longer means what the panel says."
+    )
+
+
+def test_the_drawn_fit_comes_from_the_reported_slope(ladder):
+    """The line and the corner label cannot disagree.
+
+    Vega's `transform_regression` fits the rows it is handed, so under a point
+    budget the drawn line would come from a sample and the label from the
+    whole cloud. `arm_fit_line` takes the reported slope and the full frame's
+    means instead, so the line is a statement about the same numbers the CSV
+    carries.
+    """
+    import panel_charts as charts
+
+    frames, metrics, _table, _aamut = ladder
+    arm, clade, method = lib.CORPUS_NAMES[-1], LADDER_CLADES[0], "DASM"
+    frame = frames[(arm, clade, method)]
+    row = metrics[
+        (metrics["arm"] == arm)
+        & (metrics["clade"] == clade)
+        & (metrics["method"] == method)
+    ].iloc[0]
+    line = charts.arm_fit_line(
+        frame,
+        x_field="delta_fitness_ratio",
+        y_field="log_selection_factor",
+        slope=float(row["regression_slope"]),
+        domain=[-6.0, 2.0],
+    )
+    drawn_slope = (
+        line["log_selection_factor"].iloc[1] - line["log_selection_factor"].iloc[0]
+    ) / (line["delta_fitness_ratio"].iloc[1] - line["delta_fitness_ratio"].iloc[0])
+    assert drawn_slope == pytest.approx(float(row["regression_slope"]), rel=1e-12)
+
+
+def test_the_subsampling_clip_is_not_the_library_clip():
+    """-6.0 here, -4.0 in the library, and a sibling of that name is a trap."""
+    from dasm2.analysis.viral_fitness_eval import CLIP_LOWER
+
+    assert panel_spec.SUBSAMPLING_CLIP_LOWER == -6.0
+    assert panel_spec.SUBSAMPLING_CLIP_LOWER != CLIP_LOWER
+    assert panel_spec.SUBSAMPLING_MODEL in MODELS
+    assert panel_spec.SUBSAMPLING_SCATTER_CLADE in panel_spec.SUBSAMPLING_LADDER_CLADES

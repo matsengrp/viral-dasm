@@ -463,12 +463,52 @@ LADDER_PANELS = (
 )
 
 #: `fig:subsampling`'s depth pair, panels A and B, which measure the tree and
-#: take no model. Panels C and D are added here when the rule that draws them
-#: exists.
+#: take no model.
 DEPTH_PANELS = (
     "panel_a_sequences_per_clade",
     "panel_b_count_ecdf",
 )
+
+#: `fig:subsampling`'s recovery pair, panels C and D, which do take a model.
+LADDER_ARM_PANELS = (
+    "panel_c_arm_scatter_grid",
+    "panel_d_arm_ladder",
+)
+
+#: The model panels C and D draw, and the one documented exception to
+#: :data:`FIGURE_MODEL`. `scripts/runs.py`'s `RUNS` trains `dasm-85k` on all
+#: four corpora and every other architecture on `full_depth` alone, because
+#: this is the architecture the sampling-depth ladder trained at every depth.
+#: A figure about what thinning costs can only be drawn for a model that was
+#: trained thinned.
+SUBSAMPLING_MODEL = "dasm-85k"
+
+#: The clade panel C scatters, at every arm. Delta, the deepest clade: the
+#: panel's job is to show the clouds behind one row of panel D.
+SUBSAMPLING_SCATTER_CLADE = "21J"
+
+#: The clades panel D draws a line each for, deepest first. Ranked on sequence
+#: count in `mat/clade_counts.csv` -- 4,344,573 / 2,061,093 / 1,962,904 /
+#: 1,942,882 / 1,327,053 -- which is the ranking `main.tex` names. The figure
+#: re-ranks on its own `n_mutations` and asserts the same five in the same
+#: order, rather than trusting the two rankings to agree.
+#:
+#: These are also :data:`SCAN_CLADES`, which `fig:within_clade_shifts` selects
+#: by a third rule. Spelled separately rather than aliased: one name meaning
+#: three different selections is a name that cannot be changed for one of them.
+SUBSAMPLING_LADDER_CLADES: tuple[str, ...] = ("21J", "22B", "21L", "21K", "20I")
+
+#: The lower bound panels C and D clamp both axes to.
+#:
+#: **Not `CLIP_LOWER`.** The library's bound is -4.0, which is what
+#: `fig:agreement` is drawn at; this figure is drawn at -6.0, and a sibling
+#: constant of the library's name would be a trap for whoever read one and
+#: meant the other. `tests/test_panels.py` pins the two apart.
+#:
+#: The clip is a control rather than a filter: it moves where a point is drawn
+#: and leaves the row set alone, so `n_mutations` is the same with it and
+#: without.
+SUBSAMPLING_CLIP_LOWER = -6.0
 
 #: `fig:within_clade_shifts`'s stems, one tuple per producing notebook.
 #: One stem per clade, not one image of both. The composed figure puts each

@@ -45,6 +45,7 @@ from panel_spec import (
     DEFAULT_SELECTION,
     DEPTH_PANELS,
     ECDF_CLADES,
+    LADDER_ARM_PANELS,
     LADDER_PANELS,
     MUTATION_PANELS,
     OUTLIER_PANELS,
@@ -59,6 +60,7 @@ from panel_spec import (
     POOL_SUMMARY,
     SELECTIONS,
     SHIFT_CLADES,
+    SUBSAMPLING_LADDER_CLADES,
     SUBSAMPLING_SELECTION,
     composed_paths,
     figure_dir,
@@ -114,6 +116,21 @@ def ecdf_grid_files(*_):
     ]
 
 
+def ladder_arm_fitness_files(*_):
+    """The per-arm counts refits panels C and D read.
+
+    Twenty files, not the directory: five clades at four sampling depths,
+    where full depth is the directory's own level and each cap arm is a
+    subdirectory named for its corpus.
+    """
+    root = mat_pcp_path("aamut_fitness_dir")
+    return [
+        str(aamut_grid_path(root, clade, arm))
+        for clade in SUBSAMPLING_LADDER_CLADES
+        for arm in CORPUS_NAMES
+    ]
+
+
 rule panels:
     """Every panel of `fig:agreement`, for the model the paper publishes."""
     input:
@@ -122,14 +139,14 @@ rule panels:
 
 
 rule subsampling:
-    """`fig:subsampling`'s panels, as far as this stage of the port builds them.
+    """All four panels of `fig:subsampling`.
 
-    Panels A and B only. C and D need `rule score`'s table for `dasm-85k` on
-    all four corpora, so they are a separate rule once those runs land -- and a
-    target that demanded them now would be red for the whole gap.
+    Two rules rather than one: A and B measure the tree and take no model,
+    while C and D read the scored table for `dasm-85k` on all four corpora.
     """
     input:
         panel_outputs(DEPTH_PANELS, SUBSAMPLING_SELECTION),
+        panel_outputs(LADDER_ARM_PANELS, SUBSAMPLING_SELECTION),
 
 
 rule subsampling_depth:
@@ -169,6 +186,46 @@ rule subsampling_depth:
         mem_mb=PANEL_MEM_MB,
     shell:
         "marimo export html {input.notebook} -o {output.html} --force"
+        " > {log} 2>&1"
+
+
+rule subsampling_ladder:
+    """Panels C and D: what thinning the tree costs each approach.
+
+    The per-arm amino-acid tables are declared as files rather than as the
+    directory, in the style of `rule subsampling_depth`'s grids: twenty of
+    them, five clades at four sampling depths. These are the arms' **own**
+    counts refits, which are the panel's second predictor -- the target is the
+    full-depth estimate `rule score` already joined onto every arm's rows.
+    """
+    input:
+        panels="scripts/panels.py",
+        spec="scripts/panel_spec.py",
+        charts="scripts/panel_charts.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        analysis_charts="dasm2/analysis/charts.py",
+        analysis_viral="dasm2/analysis/viral.py",
+        analysis_eval="dasm2/analysis/viral_fitness_eval.py",
+        io="dasm2/io.py",
+        conversion="dasm2/sequence/conversion.py",
+        scov2_rates="dasm2/neutral/scov2_rates.py",
+        dasm2_init="dasm2/__init__.py",
+        notebook="notebooks/subsampling_ladder.py",
+        table=SCORED_TABLE,
+        audit=AUDIT_JSON,
+        arm_fitness=ladder_arm_fitness_files,
+        founder_reader="scripts/founders.py",
+    output:
+        html=f"{NOTEBOOK_DIR}/subsampling_ladder.html",
+        panels=panel_outputs(LADDER_ARM_PANELS, SUBSAMPLING_SELECTION),
+    log:
+        f"{ARTIFACT_ROOT}/logs/subsampling_ladder.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "marimo export html {input.notebook} -o {output.html} --force"
+        " -- --table {input.table} --audit {input.audit}"
         " > {log} 2>&1"
 
 

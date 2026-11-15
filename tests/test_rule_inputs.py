@@ -117,6 +117,7 @@ ENTRY_POINTS = {
     "background_effects": "notebooks/background_effects.py",
     "compose_within_clade_shifts": "notebooks/within_clade_shifts.py",
     "subsampling_depth": "notebooks/subsampling_depth.py",
+    "subsampling_ladder": "notebooks/subsampling_ladder.py",
     # `fig:within_clade_shifts`' producers. These run scripts rather than
     # notebooks, like the producers above the panel block.
     "clade_backgrounds": "scripts/backgrounds.py",

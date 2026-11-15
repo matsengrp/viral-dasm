@@ -106,6 +106,7 @@ from panel_spec import (  # noqa: F401  (re-exported for the notebooks)
     FIDELITY_MODELS,
     FIGURE_DIR,
     FIGURE_MODEL,
+    LADDER_ARM_PANELS,
     LADDER_PANELS,
     LOOKUP_MUTATION,
     MUTATION_PANELS,
@@ -119,6 +120,10 @@ from panel_spec import (  # noqa: F401  (re-exported for the notebooks)
     SCATTER_CLADE,
     SELECTIONS,
     SHIFT_CLADES,
+    SUBSAMPLING_CLIP_LOWER,
+    SUBSAMPLING_LADDER_CLADES,
+    SUBSAMPLING_MODEL,
+    SUBSAMPLING_SCATTER_CLADE,
     SUBSAMPLING_SELECTION,
     TABLE_COLUMNS,
     aamut_grid_path,
@@ -131,7 +136,7 @@ from panel_spec import (  # noqa: F401  (re-exported for the notebooks)
     subsampling_caps,
 )
 
-from dasm2.analysis.viral import filter_merged_fitness
+from dasm2.analysis.viral import filter_merged_fitness, normalize_fitness_columns
 
 # The statistics are re-exported rather than imported again in each notebook:
 # the panels then take their filter chain and their correlations from one
@@ -949,3 +954,164 @@ def count_ecdf_frame(
                 )
             )
     return pd.concat(rows, ignore_index=True)
+
+
+# ---------------------------------------------------------------------------
+# `fig:subsampling` panels C and D: what thinning costs each approach
+# ---------------------------------------------------------------------------
+
+#: The two approaches panels C and D compare, in the order they are drawn.
+#: Spelled here rather than at each call site because the string is a column
+#: value in the panel CSVs and a facet title in the charts.
+LADDER_METHODS = ("counts", "DASM")
+
+#: Panel C's and D's filter choices. The clip is this figure's, not the
+#: library's; everything else is the published spec.
+SUBSAMPLING_SPEC = FilterSpec(min_count=0.0, clip_lower=SUBSAMPLING_CLIP_LOWER)
+
+
+def arm_counts_estimate(
+    aamut_dir: Path, clade: str, arm: str, *, gene: str = GENE
+) -> pd.DataFrame:
+    """One arm's own counts-based estimate, as the predictor it is here.
+
+    This is the only per-arm read the figure adds. ``rule score`` joined the
+    **full-depth** counts estimate onto every arm's rows -- that is the target
+    a thinned model is measured against -- so the thinned refits under
+    ``aamut_fitness/cap_*_0/`` are a different comparison and nothing upstream
+    reads them.
+
+    Returned under the name ``log_selection_factor`` because that is the column
+    :func:`within_clade_metrics` takes its predictor from: the counts approach
+    and the DASM are scored by one function, so neither can be scored by a
+    statistic the other is not.
+    """
+    frame = normalize_fitness_columns(
+        pd.read_csv(aamut_grid_path(aamut_dir, clade, arm))
+    )
+    in_gene = frame["gene"].fillna("").str.split(";").apply(lambda g: gene in g)
+    return (
+        frame.loc[in_gene, ["aa_mutation", "delta_fitness_ratio"]]
+        .rename(columns={"delta_fitness_ratio": "log_selection_factor"})
+        .dropna()
+    )
+
+
+def ladder_frames(
+    table_path: str | Path,
+    aamut_dir: Path,
+    *,
+    reverting_by_clade: dict[str, set[int]],
+    clades: Sequence[str] = SUBSAMPLING_LADDER_CLADES,
+    model: str = SUBSAMPLING_MODEL,
+    spec: FilterSpec = SUBSAMPLING_SPEC,
+    arms: Sequence[str] | None = None,
+) -> dict[tuple[str, str, str], pd.DataFrame]:
+    """One frame per ``(arm, clade, method)``, all on one fixed population.
+
+    **The mutation set is fixed on the full-depth arm**, and that is the point
+    of the design. Filtering each arm on its own counts would score a thinned
+    arm only over the mutations it still happened to observe -- the subset it
+    is best at -- and every curve in panels C and D would be drawn over a
+    different population. So the count filter runs once, on full depth, and
+    every arm is scored over exactly those mutations.
+
+    **The target is the same column in every frame**: the full-depth counts
+    estimate, which ``rule score`` joined onto every arm's rows. Only the
+    predictor changes -- the arm's DASM for one method, the arm's own counts
+    refit for the other.
+
+    Returns:
+        ``{(arm, clade, method): frame}``, each frame carrying
+        ``aa_mutation``, ``delta_fitness_ratio`` (the target) and
+        ``log_selection_factor`` (the predictor), clipped by ``spec``.
+
+    Raises:
+        ValueError: If ``model`` has no rows at some arm. A half-scored
+            campaign would otherwise draw a panel with a column missing and
+            nothing saying which.
+    """
+    arms = tuple(CORPUS_NAMES) if arms is None else tuple(arms)
+    target = spec.fitness_metric
+
+    population: dict[str, pd.DataFrame] = {}
+    full = read_scored_table(
+        table_path, models=[model], arm=FULL_DEPTH.name, clades=clades
+    )
+    for clade, frame in by_clade(
+        base_frames(
+            full,
+            spec=spec,
+            reverting_by_clade=reverting_by_clade,
+            models=[model],
+            clades=clades,
+        ),
+        model,
+    ).items():
+        population[clade] = apply_count_threshold(frame, PANEL_MIN_COUNT)[
+            ["aa_mutation", f"{target}_raw"]
+        ].rename(columns={f"{target}_raw": target})
+
+    frames: dict[tuple[str, str, str], pd.DataFrame] = {}
+    for arm in arms:
+        table = read_scored_table(table_path, models=[model], arm=arm, clades=clades)
+        if table.empty:
+            raise ValueError(
+                f"{model!r} has no rows at arm {arm!r} in {table_path}. Panels "
+                f"C and D compare the arms, so a missing one is a gap in the "
+                f"comparison rather than a column to leave out."
+            )
+        dasm = by_clade(
+            base_frames(
+                table,
+                spec=spec,
+                reverting_by_clade=reverting_by_clade,
+                models=[model],
+                clades=clades,
+            ),
+            model,
+        )
+        for clade, kept in population.items():
+            arm_dasm = dasm[clade].merge(kept[["aa_mutation"]], on="aa_mutation")
+            frames[(arm, clade, "DASM")] = arm_dasm[
+                ["aa_mutation", target, "log_selection_factor"]
+            ]
+            counts = kept.merge(
+                arm_counts_estimate(aamut_dir, clade, arm), on="aa_mutation"
+            )
+            frames[(arm, clade, "counts")] = clip_axes(counts, spec.clip_lower)[
+                ["aa_mutation", target, "log_selection_factor"]
+            ]
+    return frames
+
+
+def ladder_metrics(
+    frames: dict[tuple[str, str, str], pd.DataFrame],
+    *,
+    spec: FilterSpec = SUBSAMPLING_SPEC,
+) -> pd.DataFrame:
+    """Panel D's table: ``arm,clade,method,pearson_r,regression_slope,n_mutations``.
+
+    ``spearman_rho`` is dropped on write, as the source experiment's
+    ``sweep_count_cutoffs.py`` does: the figure reports r and the slope, and a
+    third statistic in the CSV is one a reader would look for in the panel.
+    """
+    rows = []
+    for (arm, clade, method), frame in frames.items():
+        metrics = within_clade_metrics(
+            {clade: frame},
+            fitness_col=spec.fitness_metric,
+            min_mutations=spec.min_clade_mutations,
+        )
+        for row in metrics.to_dict("records"):
+            rows.append(
+                {
+                    "arm": arm,
+                    "clade": row["clade"],
+                    "method": method,
+                    "pearson_r": row["pearson_r"],
+                    "regression_slope": row["regression_slope"],
+                    "n_mutations": row["n_mutations"],
+                }
+            )
+    return pd.DataFrame(rows).sort_values(["arm", "clade", "method"], ignore_index=True)
