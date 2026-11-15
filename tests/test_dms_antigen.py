@@ -193,6 +193,75 @@ def test_no_measured_cell_sits_where_founder_and_construct_disagree():
 
 
 @needs_antigen
+def test_the_zeroed_cell_at_each_position_is_the_querys_own_residue(scored):
+    """The model's own output traces the query, which fixes the row axis.
+
+    ``score_batch`` zeroes the wild-type cell at every position. So the pattern
+    of zeros in the map *is* the query sequence, read out of the checkpoint's
+    own forward pass rather than asserted against the string that was fed in.
+    That makes this the check for an off-by-one in the row index and for a
+    mis-ordered alphabet at the same time: shift the rows by one, or permute
+    the columns, and the zeroed residue stops matching the query almost
+    everywhere.
+
+    The gap columns are excluded because `DROP_GAP_STOP` zeroes ``*`` and ``-``
+    at every position, so at a deletion column there is no wild-type zero to
+    find -- which is itself asserted, as the alternative.
+    """
+    probs, alphabet, query = scored
+    for position, residue in enumerate(query):
+        zeroed = {
+            alphabet[column]
+            for column in range(len(alphabet))
+            if probs[position, column] == 0.0
+        } - {"*", "-"}
+        if residue == "-":
+            assert not zeroed, (
+                f"position {position + 1} is a deletion in the query but the "
+                f"map zeroes {sorted(zeroed)} there"
+            )
+        else:
+            assert zeroed == {residue}, (
+                f"position {position + 1}: the map zeroes {sorted(zeroed)} but "
+                f"the query carries {residue!r}. The row axis and the query "
+                f"have come apart, which no row count or hash would catch."
+            )
+
+
+@needs_dms
+def test_the_model_reads_the_same_residue_the_join_reports(scored):
+    """Three independent sources agree at every scored cell, or this fails.
+
+    The site numbering comes from the study's published CSV, ``parent_aa`` from
+    mat-pcp's clade founder FASTA, and the scored residue from the committed
+    construct projection. Nothing in `scripts/dms_models.py`'s contract compares
+    them -- row counts, keys and the sequence hash all pass under a shifted
+    frame -- so this is the assertion that the three share one coordinate
+    system.
+
+    **It is the check that matters most here, because the failure is quiet.**
+    Joining each score to the next site's measurement still reports a Pearson
+    correlation of about +0.24 on KP.3.1.1 rather than something obviously
+    broken, so a reader would have no reason to doubt it. Measured against the
+    real +0.436, that is a number a careless reviewer accepts.
+    """
+    parents = dms_antigen.read_parents(_SPEC.parents)
+    for homolog in lib.dms_homologs():
+        cells, _ = dms_models.homolog_cells(homolog)
+        query = parents[homolog]
+        read = [query[site - 1] for site in cells["aa_site"]]
+        disagree = [
+            (site, mine, theirs)
+            for site, mine, theirs in zip(cells["aa_site"], read, cells["parent_aa"])
+            if mine != theirs
+        ]
+        assert not disagree, (
+            f"{homolog}: {len(disagree)} of {len(cells)} scored cells read a "
+            f"residue the join does not report, e.g. {disagree[:3]}"
+        )
+
+
+@needs_antigen
 def test_the_probability_map_is_normalised_before_the_log(scored):
     """An un-normalised map shifts every ``log p`` by a constant.
 
