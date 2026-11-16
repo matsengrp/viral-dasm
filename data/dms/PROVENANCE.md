@@ -28,11 +28,12 @@ missing is read from that study rather than borrowed from the other two.
 ### BA.1 — not filtered by its study, so its threshold is applied here
 
 `results/muteffects_functional/muteffects_observed.csv` is the per-mutation
-effect on spike-mediated entry that experiment publishes, the median over its
-three libraries, on the observed phenotype scale. It is released over every
-mutation the pipeline fit — it still carries `times_seen`, `effect_std` and
-`n_libraries` — so this pipeline applies the threshold that repository
-declares:
+effect on spike-mediated entry that experiment publishes, on the observed
+phenotype scale: the median over its four functional selections (Lib-1 in two
+replicates, plus Lib-2 and Lib-3), per `muteffects_avg_method: median`. It is
+released over every mutation the pipeline fit — it still carries `times_seen`,
+`effect_std` and `n_libraries` — so this pipeline applies the threshold that
+repository declares:
 
 - `config.yaml`, `muteffects_plot_kwargs`: `addtl_slider_stats: {times_seen: 3}`.
 
@@ -53,6 +54,13 @@ muteffects = (
 
 The first two queries are what `scripts/dms_published.py` and `scripts/dms.py`
 already do for all three homologs; the third is `min_times_seen: 3`.
+
+**`times_seen` here is a mean, not a count.** `dms-vep-pipeline`'s
+`avg_muteffects.ipynb` aggregates it as `s.sum() / n_selections` over all four
+selections, so a mutation seen in one selection and not the other three is
+reported at a quarter of its count — which is why values such as 0.25 appear.
+Threshold 3 therefore means "seen in three variants per selection on
+average", and that is how the manuscript states it.
 
 **No `effect_std` bound is set, because that study declares none.** Its
 largest value on this file is 3.54, so borrowing KP.3.1.1's 2.5 would drop

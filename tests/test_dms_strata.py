@@ -251,3 +251,61 @@ def test_the_figure_does_not_share_fig_dms_panel_stems():
     for slug in EXPECTED_SLUGS.values():
         assert not set(panel_spec.dms_strata_panels(slug)) & set(panel_spec.DMS_PANELS)
         assert panel_spec.dms_strata_figure_stem(slug) != panel_spec.DMS_FIGURE_STEM
+
+
+def test_scores_reach_the_notebook_as_one_flag_each():
+    """The form `rule dms_strata_panels` shipped broken in #47 and #54.
+
+    ``mo.cli_args().get_all("scores")`` counts *occurrences of the flag*, so
+    one ``--scores`` carrying every path space-separated arrives as a single
+    entry naming all of them at once, and the notebook opens a file by that
+    name. The rule had never run -- both PRs' panels were produced by invoking
+    the notebook by hand -- so nothing caught it until the rule was executed.
+    """
+    paths = ["a/dasm_BA.1.parquet", "b/antigen_XBB.1.5.parquet"]
+    assert panel_spec.scores_flags(paths) == (
+        "--scores a/dasm_BA.1.parquet --scores b/antigen_XBB.1.5.parquet"
+    )
+    assert panel_spec.scores_flags(["only.parquet"]) == "--scores only.parquet"
+    assert panel_spec.scores_flags([]) == ""
+
+    # The flag count is the contract, not the string: one per path, always.
+    many = [f"p{index}.parquet" for index in range(18)]
+    assert panel_spec.scores_flags(many).count("--scores ") == len(many)
+
+
+def test_a_path_with_whitespace_is_refused_rather_than_split():
+    """The one input this unquoted form cannot carry.
+
+    Two paths joined by a space is exactly the bug above; a single path
+    *containing* a space would reproduce it from the other direction, and
+    silently, since the notebook would see two entries where the rule declared
+    one input.
+    """
+    with pytest.raises(ValueError, match="whitespace"):
+        panel_spec.scores_flags(["has a space.parquet"])
+
+
+def test_no_marimo_rule_still_passes_the_space_separated_form():
+    """A text check, because the defect is the spelling on the command line.
+
+    `tests/test_rule_inputs.py` passes on the broken rule: the inputs are
+    declared correctly and only their expansion into the shell is wrong, so
+    there is no object to assert on and this reads the workflow.
+
+    **Scoped to the marimo rules, because the form is only wrong for them.**
+    `rule dms_predictor_summary` passes the same paths to
+    `scripts/dms_summary.py`, whose ``argparse`` ``nargs="+"`` reads
+    space-separated values correctly; forbidding the spelling everywhere would
+    fail on a rule that has no bug.
+    """
+    workflow = (REPO_ROOT / "workflow" / "figures.smk").read_text()
+    offenders = [
+        block.splitlines()[0].rstrip(":")
+        for block in workflow.split("\nrule ")
+        if "marimo export html" in block and "--scores {input.scores}" in block
+    ]
+    assert not offenders, (
+        f"{offenders} expand every score path into one `--scores` occurrence, "
+        f"which marimo reads as a single path; see panel_spec.scores_flags"
+    )

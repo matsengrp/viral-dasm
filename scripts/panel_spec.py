@@ -1218,3 +1218,38 @@ def figure_dir(selection: str) -> Path:
 def panel_csv_path(selection: str, stem: str) -> Path:
     """Where one selection's panel table goes, in the tracked tree."""
     return PANEL_CSV_DIR / selection / f"{stem}.csv"
+
+
+def scores_flags(paths: Iterable[str | Path]) -> str:
+    """``--scores`` once per path, which is the only form marimo reads.
+
+    ``mo.cli_args().get_all("scores")`` returns one entry per *occurrence of
+    the flag*, so a notebook given ``--scores a b c`` sees a single entry,
+    ``"a b c"``, and opens a file named after all three at once. Snakemake
+    expands ``{input.scores}`` to exactly that, space-separated, which is how
+    `rule dms_strata_panels` shipped in #47 and #54 without ever running.
+
+    It is a parsing bug rather than a quoting one, so no escaping in the shell
+    string fixes it; the flag has to be repeated. Verified against marimo
+    0.23.15: ``--scores p1 p2 p3`` yields ``['p1 p2 p3']`` and
+    ``--scores p1 --scores p2 --scores p3`` yields ``['p1', 'p2', 'p3']``.
+
+    Here rather than in `workflow/figures.smk` so that it can be tested: a
+    `.smk` is not importable, and `tests/test_rule_inputs.py` cannot see this
+    because the inputs are *declared* correctly and only their spelling on the
+    command line is wrong.
+
+    Raises:
+        ValueError: On a path containing whitespace, which this form cannot
+            express and which would silently merge two paths into one.
+    """
+    flags = []
+    for path in paths:
+        text = str(path)
+        if not text or any(character.isspace() for character in text):
+            raise ValueError(
+                f"{text!r} has whitespace in it, so `--scores` cannot carry "
+                f"it unquoted and marimo would read it as two paths."
+            )
+        flags.append(f"--scores {text}")
+    return " ".join(flags)
