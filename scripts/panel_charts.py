@@ -2858,14 +2858,16 @@ def arm_ladder_grid(
 #: survive every common form of colour blindness.
 OKABE_ITO_BLUISH_GREEN = "#009E73"
 
-#: Each arm's bar colour. `dasm` blue and `dasm_prob` vermillion keep the
-#: assignment the upstream two-bar version used, so a reader who has seen that
-#: figure reads this one the same way.
-PROBABILITIES_ARM_COLORS: dict[str, str] = {
-    "dasm": OKABE_ITO_BLUE,
-    "dasm_prob": OKABE_ITO_VERMILLION,
-    "antigen": OKABE_ITO_BLUISH_GREEN,
-}
+#: One colour per DMS experiment, taken in group order. **Not one per arm**:
+#: the arms are already named under every bar, so colouring by arm spends the
+#: channel on a distinction the labels carry, while colouring by experiment
+#: makes each group read as one dataset and keeps the three groups apart at a
+#: glance. The Okabe-Ito hues, in `DMS_ROW_COLORS`' order.
+PROBABILITIES_HOMOLOG_COLORS: tuple[str, ...] = (
+    OKABE_ITO_BLUE,
+    OKABE_ITO_VERMILLION,
+    OKABE_ITO_BLUISH_GREEN,
+)
 
 #: How each arm is named under its bar. Short, because they are set vertically.
 PROBABILITIES_ARM_LABELS: dict[str, str] = {
@@ -2952,6 +2954,12 @@ def probability_against_fitness(
     residual and ``log lambda`` is exactly 1, so the iso-colour contours *are*
     the slope-1 lines.
 
+    **No guide line.** An earlier draft drew a dashed slope-1 reference through
+    the median residual. The colour gradient already carries the structure, and
+    the line read as a fit rather than as the reference it was. The equal-span
+    domains below stay for the same reason they were introduced: they are what
+    makes the cloud's own 45-degree orientation readable.
+
     The panel is therefore tautological -- it cannot come out otherwise. It
     earns its place by making an identity legible, not by testing one.
 
@@ -2965,10 +2973,6 @@ def probability_against_fitness(
         side: The square's side in pixels.
     """
     domains = probabilities_equal_span_domains(frame, x, y)
-    # The guide's slope is asserted by theory; only its intercept comes from
-    # the data, and the median puts half the cloud each side of it.
-    offset = float((frame[y] - frame[x]).median())
-    guide = pd.DataFrame({x: domains[x], y: [value + offset for value in domains[x]]})
 
     def _axis(title: list[str]) -> alt.Axis:
         return alt.Axis(
@@ -2985,18 +2989,18 @@ def probability_against_fitness(
             x=alt.X(
                 f"{x}:Q",
                 scale=alt.Scale(domain=domains[x], zero=False, nice=False),
-                axis=_axis(["DASM fitness effect", "(log selection factor)"]),
+                axis=_axis(["DASM fitness effect"]),
             ),
             y=alt.Y(
                 f"{y}:Q",
                 scale=alt.Scale(domain=domains[y], zero=False, nice=False),
-                axis=_axis(["DASM mutation probability", "(log p)"]),
+                axis=_axis(["log10 DASM mutation probability"]),
             ),
             color=alt.Color(
                 f"{colour}:Q",
                 scale=alt.Scale(scheme="viridis"),
                 legend=alt.Legend(
-                    title=["log neutral", "rate"],
+                    title=["log10 neutral", "mutation rate"],
                     titleFontSize=DMS_FONT_SIZE,
                     labelFontSize=DMS_FONT_SIZE,
                     # Vega labels a gradient's ends only by default, which
@@ -3008,24 +3012,30 @@ def probability_against_fitness(
                 ),
             ),
             tooltip=[
-                alt.Tooltip(f"{x}:Q", title="log f", format=".2f"),
-                alt.Tooltip(f"{y}:Q", title="log p", format=".2f"),
-                alt.Tooltip(f"{colour}:Q", title="log lambda", format=".2f"),
+                alt.Tooltip(f"{x}:Q", title="log10 f", format=".2f"),
+                alt.Tooltip(f"{y}:Q", title="log10 p", format=".2f"),
+                alt.Tooltip(f"{colour}:Q", title="log10 lambda", format=".2f"),
             ],
         )
     )
-    rule = (
-        alt.Chart(guide)
-        .mark_line(strokeDash=[4, 4], color="black", opacity=0.6)
-        .encode(x=f"{x}:Q", y=f"{y}:Q")
-    )
+    # `r` over `n`, in the corner the paper's other scatters use. `r` is the
+    # correlation of the two drawn quantities rather than either against an
+    # assay -- this panel has no assay on it -- so it is computed here instead
+    # of read from `predictor_correlations.csv`, which holds only DMS
+    # correlations. It is invariant to the log base, so it does not move with
+    # the axes.
+    _r = float(frame[x].corr(frame[y]))
     label = (
-        alt.Chart(pd.DataFrame({"_label": [f"n = {len(frame):,}"]}))
+        alt.Chart(pd.DataFrame({"_i": [0]}))
         .mark_text(align="left", baseline="top", dx=6, dy=6, fontSize=DMS_FONT_SIZE)
-        .encode(x=alt.value(0), y=alt.value(0), text="_label:N")
+        .encode(
+            x=alt.value(0),
+            y=alt.value(0),
+            text=alt.value([f"r = {_r:{DMS_R_FORMAT}}", f"n = {len(frame):,}"]),
+        )
     )
     return (
-        alt.layer(points, rule, label)
+        alt.layer(points, label)
         .properties(
             width=side,
             height=side,
@@ -3068,7 +3078,7 @@ def dms_correlation_bars(
     """
     top = float(frame["pearson_r"].max()) * PROBABILITIES_BAR_HEADROOM
     order = [PROBABILITIES_ARM_LABELS[arm] for arm in arms]
-    colours = [PROBABILITIES_ARM_COLORS[arm] for arm in arms]
+    hues = dict(zip(homologs, PROBABILITIES_HOMOLOG_COLORS))
 
     def group(homolog: str, first: bool) -> alt.Chart:
         one = frame[frame["homolog"] == homolog].copy()
@@ -3118,13 +3128,9 @@ def dms_correlation_bars(
                 ),
             ),
         )
-        bars = base.mark_bar().encode(
-            color=alt.Color(
-                "_arm:N",
-                sort=order,
-                scale=alt.Scale(domain=order, range=colours),
-                legend=None,
-            ),
+        # One flat colour for the group: the arms are distinguished by their
+        # labels, so the channel says which experiment this is.
+        bars = base.mark_bar(color=hues[homolog]).encode(
             tooltip=[
                 alt.Tooltip("homolog:N", title="homolog"),
                 alt.Tooltip("_arm:N", title="arm"),

@@ -76,6 +76,7 @@ def _(mo):
     import lib
     import panel_charts as charts
     import panel_spec
+    import numpy as np
     import pandas as pd
     import altair as alt
 
@@ -93,6 +94,7 @@ def _(mo):
         charts,
         dms_summary,
         lib,
+        np,
         pd,
         panel_spec,
         panels,
@@ -100,7 +102,7 @@ def _(mo):
 
 
 @app.cell
-def _(HOMOLOG, SCORE_PATHS, SELECTION, dms_summary, pd, panel_spec):
+def _(HOMOLOG, SCORE_PATHS, SELECTION, dms_summary, np, pd, panel_spec):
     # The same join the correlation table is computed from, called rather than
     # respelled: two spellings of it would be two populations. Panel A's three
     # columns all arrive here, so there is no bespoke join across score files.
@@ -110,7 +112,21 @@ def _(HOMOLOG, SCORE_PATHS, SELECTION, dms_summary, pd, panel_spec):
     # that is the stratum its manifest declares. Dropping on it is therefore
     # the stratum filter, taken from the predictor's own coverage rather than
     # re-derived from the `stratum` column.
-    scatter = _merged[HOMOLOG].dropna(subset=["dasm", "dasm_prob", "neutral_rate"])
+    _cells = _merged[HOMOLOG].dropna(subset=["dasm", "dasm_prob", "neutral_rate"])
+
+    # **Drawn in log10, stored in log10.** The predictors are written as natural
+    # logs, which is this pipeline's convention, but a probability and a rate
+    # are read as orders of magnitude. All three convert together rather than
+    # just the two on the axes: the identity `log p = log f + log lambda -
+    # log Z` holds in any single base and in no mixed one, so converting y and
+    # the colour while leaving x would turn the slope-1 guide into a 0.434 one
+    # and quietly cost the panel its 45-degree reading.
+    scatter = _cells.assign(
+        **{
+            f"log10_{_column}": _cells[_column] / np.log(10)
+            for _column in ("dasm", "dasm_prob", "neutral_rate")
+        }
+    )
 
     _all_stats = pd.read_csv(
         panel_spec.panel_csv_path(SELECTION, panel_spec.DMS_PREDICTOR_CORRELATIONS)
@@ -124,10 +140,14 @@ def _(HOMOLOG, SCORE_PATHS, SELECTION, dms_summary, pd, panel_spec):
 
 @app.cell
 def _(HOMOLOG, bars, mo, scatter):
-    _residual = scatter["dasm_prob"] - scatter["dasm"] - scatter["neutral_rate"]
+    _residual = (
+        scatter["log10_dasm_prob"]
+        - scatter["log10_dasm"]
+        - scatter["log10_neutral_rate"]
+    )
     mo.md(
         f"**Panel A**, {HOMOLOG}: {len(scatter):,} single-nucleotide cells. "
-        f"`log p - log f - log lambda` is constant at {_residual.mean():.6f} "
+        f"`log10 p - log10 f - log10 lambda` is constant at {_residual.mean():.6f} "
         f"over a range of {_residual.max() - _residual.min():.2g}, which is "
         f"`-log Z` and float noise. The correlation between the vertical "
         f"residual and `log lambda` is "
@@ -144,9 +164,9 @@ def _(HOMOLOG, SELECTION, charts, panel_spec, panels, scatter):
     panel_a = charts.save_panel(
         charts.probability_against_fitness(
             scatter,
-            x="dasm",
-            y="dasm_prob",
-            colour="neutral_rate",
+            x="log10_dasm",
+            y="log10_dasm_prob",
+            colour="log10_neutral_rate",
             homolog=HOMOLOG,
         ),
         _stem_a,
@@ -164,6 +184,9 @@ def _(HOMOLOG, SELECTION, charts, panel_spec, panels, scatter):
                 "dasm",
                 "dasm_prob",
                 "neutral_rate",
+                "log10_dasm",
+                "log10_dasm_prob",
+                "log10_neutral_rate",
             ]
         ],
         _stem_a,
@@ -182,7 +205,7 @@ def _(SELECTION, bars, charts, lib, panel_a, panel_spec, panels):
     # written PNGs at the 300 ppi `save_panel` writes, and must be re-measured
     # whenever either panel's geometry changes;
     # `notebooks/probabilities_figure.py` raises if they stop matching.
-    BAR_HEIGHT = 141
+    BAR_HEIGHT = 105
 
     _stem_b = panel_spec.PROBABILITIES_PANELS[1]
     panel_b = charts.save_panel(

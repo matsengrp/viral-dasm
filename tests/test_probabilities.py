@@ -98,6 +98,12 @@ def test_panel_a_draws_the_identity_it_claims(scatter: pd.DataFrame):
     residual = scatter["dasm_prob"] - scatter["dasm"] - scatter["neutral_rate"]
     assert np.ptp(residual) < 1e-5
 
+    # And in the base the panel is actually drawn in. Converting all three
+    # together is what keeps the guide a 45-degree line: a mixed-base panel
+    # would have slope 1/ln(10), and nothing on the picture would say so.
+    log10 = residual / np.log(10)
+    assert np.ptp(log10) < 1e-5
+
     # A real `-log Z` and not zero, which is what a column accidentally written
     # as `log f + log lambda` with no normalizer would give.
     assert abs(residual.mean()) > 1.0
@@ -213,17 +219,20 @@ def test_the_figure_does_not_share_fig_dms_panel_stems():
     )
 
 
-def test_the_three_arms_have_three_distinct_colours():
-    """Three arms need three hues, and the repository shipped with two."""
-    colours = [
-        charts.PROBABILITIES_ARM_COLORS[arm]
-        for arm in panel_spec.PROBABILITIES_BAR_ARMS
-    ]
-    assert len(set(colours)) == len(colours)
-    assert (
-        set(panel_spec.PROBABILITIES_BAR_ARMS)
-        == set(charts.PROBABILITIES_ARM_COLORS)
-        == set(charts.PROBABILITIES_ARM_LABELS)
+def test_each_experiment_has_its_own_colour_and_each_arm_its_own_label():
+    """Colour carries the experiment; the labels carry the arm.
+
+    Panel B groups by DMS experiment and names the three arms under every bar,
+    so the colour channel is spent on the grouping rather than repeating a
+    distinction the labels already make. That needs one hue per homolog, and
+    one label per arm.
+    """
+    assert len(set(charts.PROBABILITIES_HOMOLOG_COLORS)) == len(
+        charts.PROBABILITIES_HOMOLOG_COLORS
+    )
+    assert len(charts.PROBABILITIES_HOMOLOG_COLORS) >= len(lib.dms_homologs())
+    assert set(panel_spec.PROBABILITIES_BAR_ARMS) == set(
+        charts.PROBABILITIES_ARM_LABELS
     )
 
 
