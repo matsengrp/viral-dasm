@@ -959,6 +959,32 @@ def dms_stratum_row(
     )
 
 
+def _dms_bar_group_header(title: str, n: int) -> alt.Chart:
+    """The ``n =`` strip above one group of bars, with the group's name on it.
+
+    Shared by `fig:dms`'s bar row and `fig:probabilities`' bars: both stack a
+    header over a bar chart and the geometry has to match, or the two figures
+    set the same furniture at different sizes. Extracted when the second
+    caller arrived rather than copied a third time.
+    """
+    return (
+        alt.Chart(pd.DataFrame({"_label": [f"n = {n:,}"]}))
+        .mark_text(fontSize=DMS_FONT_SIZE, align="center")
+        .encode(x=alt.value(DMS_BAR_WIDTH / 2), y=alt.value(10), text="_label:N")
+        .properties(
+            width=DMS_BAR_WIDTH,
+            height=24,
+            view=alt.ViewBackground(stroke=None),
+            title=alt.TitleParams(
+                text=title,
+                fontSize=DMS_FONT_SIZE,
+                fontWeight="bold",
+                anchor="middle",
+            ),
+        )
+    )
+
+
 def dms_bar_row(
     correlations: pd.DataFrame,
     *,
@@ -985,21 +1011,8 @@ def dms_bar_row(
 
     def panel(homolog: str, first: bool) -> alt.VConcatChart:
         one = rows[rows["homolog"] == homolog]
-        header = (
-            alt.Chart(pd.DataFrame({"_label": [f"n = {int(one['n'].iloc[0]):,}"]}))
-            .mark_text(fontSize=DMS_FONT_SIZE, align="center")
-            .encode(x=alt.value(DMS_BAR_WIDTH / 2), y=alt.value(10), text="_label:N")
-            .properties(
-                width=DMS_BAR_WIDTH,
-                height=24,
-                view=alt.ViewBackground(stroke=None),
-                title=alt.TitleParams(
-                    text=f"{homolog} ({clades[homolog]})",
-                    fontSize=DMS_FONT_SIZE,
-                    fontWeight="bold",
-                    anchor="middle",
-                ),
-            )
+        header = _dms_bar_group_header(
+            f"{homolog} ({clades[homolog]})", int(one["n"].iloc[0])
         )
         bar = (
             alt.Chart(one)
@@ -2844,4 +2857,300 @@ def arm_ladder_grid(
         .configure_legend(
             labelFontSize=SUBSAMPLING_LABEL_PX, titleFontSize=SUBSAMPLING_LABEL_PX
         )
+    )
+
+
+# ---------------------------------------------------------------------------
+# `fig:probabilities`
+# ---------------------------------------------------------------------------
+
+#: Okabe-Ito bluish-green, the third categorical hue: `fig:dms_strata` needed
+#: only two because it draws two populations, and panel B's groups are three.
+OKABE_ITO_BLUISH_GREEN = "#009E73"
+
+#: One colour per DMS experiment, taken in group order. **Not one per arm**:
+#: the arms are already named under every bar, so colouring by arm spends the
+#: channel on a distinction the labels carry, while colouring by experiment
+#: makes each group read as one dataset.
+PROBABILITIES_HOMOLOG_COLORS: tuple[str, ...] = (
+    OKABE_ITO_BLUE,
+    OKABE_ITO_VERMILLION,
+    OKABE_ITO_BLUISH_GREEN,
+)
+
+#: How each arm is named under its bar. Short, because they are set vertically.
+PROBABILITIES_ARM_LABELS: dict[str, str] = {
+    "dasm": "DASM fitness effect",
+    "dasm_prob": "DASM probability",
+    "antigen": "antiGen probability",
+}
+
+#: The scatter's side. Square, and that is the whole point: one nat on x is one
+#: nat on y, so the cloud's slope-1 structure reads at 45 degrees and the
+#: iso-colour contours run parallel to the diagonal. An aspect ratio that
+#: distorted the slope would make that claim unreadable.
+PROBABILITIES_SCATTER_SIDE = 235
+
+#: How a bar's value is printed above it, which is `r`'s format everywhere
+#: else in these figures. Two significant figures while ``0.1 <= r < 1``, which
+#: `tests/test_probabilities.py` asserts the drawn values stay inside: the
+#: differences this figure is about are in the second decimal, and more digits
+#: would imply a precision these correlations do not carry.
+PROBABILITIES_BAR_FORMAT = DMS_R_FORMAT
+
+#: The padding the equal-span domains carry, as a multiple of the wider span.
+PROBABILITIES_DOMAIN_PAD = 1.08
+
+
+def probabilities_equal_span_domains(
+    frame: pd.DataFrame, x: str, y: str
+) -> dict[str, list[float]]:
+    """Domains of equal width on both axes, each centred on its own column.
+
+    Equal data-units-per-pixel is what makes the slope readable, and the panel
+    is already square, so the two domains need only equal *spans*. Each is
+    centred on its own midrange rather than shared, because ``log p`` runs near
+    -11 while ``log f`` runs near 0: a shared domain would put one cloud off
+    the panel entirely.
+
+    **Not** :func:`dms_padded_domain`, which pads each axis independently by
+    5% and therefore returns unequal spans by construction. That helper is the
+    repository's usual one and is the wrong one here.
+
+    Returns:
+        ``{x: [low, high], y: [low, high]}``, the two spans equal.
+    """
+    spans = [float(frame[column].max() - frame[column].min()) for column in (x, y)]
+    half = max(spans) * PROBABILITIES_DOMAIN_PAD / 2
+    out: dict[str, list[float]] = {}
+    for column in (x, y):
+        midrange = (float(frame[column].max()) + float(frame[column].min())) / 2
+        out[column] = [midrange - half, midrange + half]
+    return out
+
+
+#: Panel A's tick step, in nats, on both axes.
+PROBABILITIES_TICK_STEP = 2
+
+#: Panel B's tick step on the `r` axis. The domain is rounded up to a multiple
+#: of it, so the axis always ends on a labelled tick rather than a bare rule:
+#: at `DMS_BAR_HEADROOM` the tallest bar leaves the top of the scale just shy
+#: of one, and an axis that stopped at 0.6 would read as if nothing went
+#: higher.
+PROBABILITIES_BAR_TICK_STEP = 0.2
+
+
+def _even_ticks(domain: Sequence[float], step: float) -> list[float]:
+    """Multiples of ``step`` inside ``domain``, which is what a reader counts.
+
+    Rounded at each tick rather than accumulated, because a fractional step
+    otherwise drifts: ten additions of 0.2 do not land on 2.0.
+    """
+    low, high = float(domain[0]), float(domain[1])
+    first = math.ceil(low / step) * step
+    count = math.floor((high - first) / step + 1e-9) + 1
+    return [round(first + index * step, 6) for index in range(count)]
+
+
+def probability_against_fitness(
+    frame: pd.DataFrame,
+    x: str,
+    y: str,
+    colour: str,
+    homolog: str,
+    r: float,
+) -> alt.Chart:
+    """Panel A: the probability as the fitness effect, displaced by the rate.
+
+    ``log p = log f + log lambda - log Z`` with ``log Z`` one number per
+    founder, so every point sits on a line of slope 1 through its own
+    ``log f``, displaced vertically by its own ``log lambda``. Colouring by
+    that rate makes the structure visible: the correlation between the vertical
+    residual and ``log lambda`` is exactly 1, so the iso-colour contours *are*
+    the slope-1 lines.
+
+    The panel is therefore tautological -- it cannot come out otherwise. It
+    earns its place by making an identity legible, not by testing one.
+
+    ``nice=False`` is load-bearing. Without it Vega re-rounds the domains, the
+    two spans stop being equal, and the 45-degree reading becomes false.
+
+    Args:
+        frame: One founder's cells, carrying ``x``, ``y`` and ``colour``.
+        x, y, colour: The fitness, probability and neutral-rate columns.
+        homolog: Named in the panel title.
+        side: The square's side in pixels.
+    """
+    domains = probabilities_equal_span_domains(frame, x, y)
+
+    def _axis(title: list[str], domain: list[float]) -> alt.Axis:
+        return alt.Axis(
+            title=title,
+            titleFontSize=DMS_FONT_SIZE,
+            labelFontSize=DMS_FONT_SIZE,
+            # Every two nats, stated rather than left to Vega's tick count: the
+            # two axes carry the same quantity in the same units, so a reader
+            # checking the cloud's slope against the diagonal needs the two
+            # grids to have the same step. A `tickCount` gives Vega licence to
+            # pick a different one per axis as the domains move.
+            values=_even_ticks(domain, PROBABILITIES_TICK_STEP),
+        )
+
+    points = (
+        alt.Chart(frame)
+        .mark_circle(size=DMS_POINT_SIZE, opacity=DMS_POINT_OPACITY)
+        .encode(
+            x=alt.X(
+                f"{x}:Q",
+                scale=alt.Scale(domain=domains[x], zero=False, nice=False),
+                axis=_axis(["DASM fitness effect"], domains[x]),
+            ),
+            y=alt.Y(
+                f"{y}:Q",
+                scale=alt.Scale(domain=domains[y], zero=False, nice=False),
+                axis=_axis(["log DASM mutation probability"], domains[y]),
+            ),
+            color=alt.Color(
+                f"{colour}:Q",
+                scale=alt.Scale(scheme="viridis"),
+                legend=alt.Legend(
+                    title=["log neutral", "mutation rate"],
+                    titleFontSize=DMS_FONT_SIZE,
+                    labelFontSize=DMS_FONT_SIZE,
+                    # Vega labels a gradient's ends only by default, which
+                    # gives two numbers and no sense of where the middle of the
+                    # scale sits on the cloud.
+                    tickCount=4,
+                    gradientLength=PROBABILITIES_SCATTER_SIDE * 0.6,
+                    offset=4,
+                ),
+            ),
+            tooltip=[
+                alt.Tooltip(f"{x}:Q", title="log f", format=".2f"),
+                alt.Tooltip(f"{y}:Q", title="log p", format=".2f"),
+                alt.Tooltip(f"{colour}:Q", title="log lambda", format=".2f"),
+            ],
+        )
+    )
+    # This `r` is the two drawn quantities against each other, not either
+    # against an assay -- unlike every other `r` these figures print in this
+    # corner. The caption carries that; the panel just says `r`.
+    label = _corner_label(
+        f"r = {r:{DMS_R_FORMAT}}\nn = {len(frame):,}", font_size=DMS_FONT_SIZE
+    )
+    return (
+        alt.layer(points, label)
+        .properties(
+            width=PROBABILITIES_SCATTER_SIDE,
+            height=PROBABILITIES_SCATTER_SIDE,
+            title=alt.TitleParams(
+                text=homolog,
+                fontSize=DMS_FONT_SIZE,
+                fontWeight="bold",
+                anchor="middle",
+            ),
+        )
+        .resolve_scale(color="shared")
+    )
+
+
+def dms_correlation_bars(
+    frame: pd.DataFrame,
+    homologs: Sequence[str],
+    arms: Sequence[str],
+    bar_height: int,
+) -> alt.Chart:
+    """Panel B: each arm's agreement with the assay, per dataset.
+
+    Grouped by homolog, three bars a group, every bar carrying its value to
+    two significant figures. A reader comparing three arms across three
+    datasets should not have to measure against an axis -- and one pair here
+    differs by 0.011, which is exactly where eye-matching fails.
+
+    **Anchored at zero, with one domain across all three groups.** Bars encode
+    length, so a nonzero baseline misstates every ratio; and a shared domain is
+    what makes a bar in one dataset comparable to the bar beside it in another.
+    The axis is drawn on the leftmost group only, as `fig:dms`'s bars do, so
+    the groups sit a character apart rather than a whole axis apart.
+
+    Args:
+        frame: Rows of ``(homolog, predictor, pearson_r, n_mutations)``.
+        homologs: Group order, left to right.
+        arms: Bar order within a group.
+        bar_height: Measured so the panel comes out level with panel A; see
+            `notebooks/probabilities.py`.
+    """
+    headroom = float(frame["pearson_r"].max()) * DMS_BAR_HEADROOM
+    top = (
+        math.ceil(headroom / PROBABILITIES_BAR_TICK_STEP) * PROBABILITIES_BAR_TICK_STEP
+    )
+    ticks = _even_ticks([0.0, top], PROBABILITIES_BAR_TICK_STEP)
+    order = [PROBABILITIES_ARM_LABELS[arm] for arm in arms]
+    if len(homologs) > len(PROBABILITIES_HOMOLOG_COLORS):
+        raise ValueError(
+            f"{len(homologs)} homologs but only "
+            f"{len(PROBABILITIES_HOMOLOG_COLORS)} colours; `zip` would drop the "
+            f"last group silently. Add a hue to PROBABILITIES_HOMOLOG_COLORS."
+        )
+    hues = dict(zip(homologs, PROBABILITIES_HOMOLOG_COLORS))
+
+    def group(homolog: str, first: bool) -> alt.Chart:
+        one = frame[frame["homolog"] == homolog].copy()
+        one["_arm"] = [PROBABILITIES_ARM_LABELS[a] for a in one["predictor"]]
+        one["_value"] = [f"{r:{PROBABILITIES_BAR_FORMAT}}" for r in one["pearson_r"]]
+        header = _dms_bar_group_header(homolog, int(one["n_mutations"].iloc[0]))
+        base = alt.Chart(one).encode(
+            x=alt.X(
+                "_arm:N",
+                title=None,
+                sort=order,
+                axis=alt.Axis(labelAngle=-90, labelFontSize=DMS_FONT_SIZE),
+            ),
+            y=alt.Y(
+                "pearson_r:Q",
+                title="Pearson r" if first else None,
+                scale=alt.Scale(domain=[0.0, top]),
+                # **Laid out on every group, drawn on the first.** Setting
+                # `labels=False` on the others removes the label boxes from
+                # their layout, so the leftmost group alone reserves room for
+                # a tick label's overhang and its baseline lands ~20px lower
+                # than the rest -- which breaks exactly the eye comparison the
+                # shared domain exists to allow. Zero opacity keeps every
+                # group's geometry identical and hides the repetition.
+                axis=alt.Axis(
+                    titleFontSize=DMS_FONT_SIZE,
+                    labelFontSize=DMS_FONT_SIZE,
+                    values=ticks,
+                    labelOpacity=1.0 if first else 0.0,
+                    tickOpacity=1.0 if first else 0.0,
+                    domainOpacity=1.0 if first else 0.0,
+                ),
+            ),
+        )
+        # One flat colour for the group: the arms are distinguished by their
+        # labels, so the channel says which experiment this is.
+        bars = base.mark_bar(color=hues[homolog]).encode(
+            tooltip=[
+                alt.Tooltip("homolog:N", title="homolog"),
+                alt.Tooltip("_arm:N", title="arm"),
+                alt.Tooltip("pearson_r:Q", title="Pearson r", format=".4f"),
+                alt.Tooltip("n_mutations:Q", title="n", format=","),
+            ],
+        )
+        # `dy` sits the value just clear of the bar it belongs to. Small:
+        # these panels render at `VEGA_WRITE_PPI`, so a chart-unit offset is
+        # multiplied by about four on the written PNG, and -6 left a visible
+        # band of white between every bar and its number.
+        values = base.mark_text(
+            dy=-2, fontSize=DMS_FONT_SIZE, baseline="bottom"
+        ).encode(text="_value:N")
+        return alt.vconcat(
+            header,
+            alt.layer(bars, values).properties(width=DMS_BAR_WIDTH, height=bar_height),
+            spacing=2,
+        )
+
+    return alt.hconcat(
+        *[group(homolog, homolog == homologs[0]) for homolog in homologs],
+        spacing=DMS_ROW_SPACING,
     )

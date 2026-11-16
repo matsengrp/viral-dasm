@@ -132,6 +132,8 @@ ENTRY_POINTS = {
     "dms_prob_scores": "scripts/dms_prob.py",
     "dms_strata_panels": "notebooks/dms_strata.py",
     "compose_dms_strata": "notebooks/dms_strata_figure.py",
+    "probabilities_panels": "notebooks/probabilities.py",
+    "compose_probabilities": "notebooks/probabilities_figure.py",
     "dms_predictor_summary": "scripts/dms_summary.py",
     # `fig:within_clade_shifts`' producers. These run scripts rather than
     # notebooks, like the producers above the panel block.
@@ -156,6 +158,7 @@ AGGREGATORS = (
     "dms",
     "dms_strata",
     "dms_predictors",
+    "probabilities",
 )
 
 
