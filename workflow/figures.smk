@@ -56,6 +56,9 @@ from panel_spec import (
     DMS_STRATA_FIGURE_STEM,
     DMS_STRATA_PANEL_LETTERS,
     DMS_STRATA_PANELS,
+    PROBABILITIES_FIGURE_STEM,
+    PROBABILITIES_PANEL_LETTERS,
+    PROBABILITIES_PANELS,
     BACKGROUND_CSV,
     BACKGROUND_PANELS,
     CANDIDATE_CSV,
@@ -863,6 +866,102 @@ rule compose_dms_strata:
         " > {log} 2>&1"
 
 
+rule probabilities:
+    """`fig:probabilities`, and so its two panels beneath it."""
+    input:
+        composed_paths(DMS_SELECTION, PROBABILITIES_FIGURE_STEM),
+
+
+rule probabilities_panels:
+    """The displacement, and what it costs: `fig:probabilities`' two panels.
+
+    One rule for both, like `rule dms_strata_panels`: panel A reads the join
+    and panel B the correlation table, and both arrive from the same
+    `merged_frames` call, so splitting them would build it twice.
+
+    **Declares the correlation table**, for `rule dms_strata_panels`' reason:
+    panel B's bars are read from it rather than recomputed, which is what keeps
+    the picture and the CSV beside it from drifting. So this rule waits on
+    `rule dms_predictor_summary` rather than on the scores alone.
+
+    No GPU and no checkpoint: `rule dms_prob_scores` already wrote the
+    probabilities, and this reads them.
+    """
+    input:
+        notebook="notebooks/probabilities.py",
+        summary="scripts/dms_summary.py",
+        models="scripts/dms_models.py",
+        censor="scripts/dms_censor.py",
+        dms="scripts/dms.py",
+        published="scripts/dms_published.py",
+        panels="scripts/panels.py",
+        spec="scripts/panel_spec.py",
+        charts="scripts/panel_charts.py",
+        founder_reader="scripts/founders.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        analysis_eval="dasm2/analysis/viral_fitness_eval.py",
+        codon_table="dasm2/codon_table.py",
+        constants="dasm2/sequence/constants.py",
+        conversion="dasm2/sequence/conversion.py",
+        masking="dasm2/sequence/masking.py",
+        scov2_rates="dasm2/neutral/scov2_rates.py",
+        parquet_backend="dasm2/data/parquet_backend.py",
+        dasm2_init="dasm2/__init__.py",
+        dms_data=dms_files,
+        clade_founders=clade_founder_fastas,
+        censored=str(mat_pcp_path("censored_mutations_file")),
+        clades=str(mat_pcp_path("censored_clades_file")),
+        masked=str(mat_pcp_path("masked_nt_sites_file")),
+        reference=str(mat_pcp_path("reference_sequence_file")),
+        scores=dms_all_scores,
+        table=str(panel_csv_path(DMS_SELECTION, DMS_PREDICTOR_CORRELATIONS)),
+    output:
+        html=f"{NOTEBOOK_DIR}/probabilities.html",
+        panels=panel_outputs(PROBABILITIES_PANELS, DMS_SELECTION),
+    log:
+        f"{ARTIFACT_ROOT}/logs/probabilities.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "marimo export html {input.notebook} -o {output.html} --force"
+        " -- --scores {input.scores}"
+        " > {log} 2>&1"
+
+
+rule compose_probabilities:
+    """`fig:probabilities` itself, laid out from its two panels.
+
+    No scoring, no assay and no table: it reads PNGs, the split every
+    composition here is built on. The manuscript copy is not a declared
+    output, for the reason `rule compose_agreement` gives.
+    """
+    input:
+        layout="scripts/figure_layout.py",
+        spec="scripts/panel_spec.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        charts="scripts/panel_charts.py",
+        notebook="notebooks/probabilities_figure.py",
+        panels=[
+            str(figure_dir(DMS_SELECTION) / f"{stem}.png")
+            for stem in PROBABILITIES_PANEL_LETTERS.values()
+        ],
+    output:
+        html=f"{NOTEBOOK_DIR}/probabilities_figure.html",
+        figure=[
+            str(path)
+            for path in composed_paths(DMS_SELECTION, PROBABILITIES_FIGURE_STEM)
+        ],
+    log:
+        f"{ARTIFACT_ROOT}/logs/compose_probabilities.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "marimo export html {input.notebook} -o {output.html} --force"
+        " > {log} 2>&1"
+
+
 def clade_sample_files(*_):
     """Every clade's sample list under `clades_dir`.
 
@@ -1404,6 +1503,10 @@ rule figures:
         [
             str(path)
             for path in composed_paths(DMS_SELECTION, DMS_STRATA_FIGURE_STEM)
+        ],
+        [
+            str(path)
+            for path in composed_paths(DMS_SELECTION, PROBABILITIES_FIGURE_STEM)
         ],
 
 

@@ -657,6 +657,68 @@ DMS_STRATA_FIGURE_SCALE = 1.0
 #: `panel_charts.DMS_FONT_SIZE`, so a change there has to move both.
 DMS_STRATA_TITLE_PX = DMS_TITLE_PX
 
+
+# ---------------------------------------------------------------------------
+# `fig:probabilities`
+# ---------------------------------------------------------------------------
+#
+# What a mutation probability is, and what scoring one costs. Panel A draws the
+# identity `log p = log f + log lambda - log Z` as a displacement; panel B draws
+# what that displacement does to agreement with an assay, beside the published
+# model that also reports a probability.
+#
+# Both panels read what `scripts/dms_prob.py` writes, so neither needs a
+# producer of its own -- which is why this figure is a separate change from the
+# one that added those predictors.
+
+#: The founder panel A's scatter is drawn on. One founder, because a scatter
+#: can only show one; this one, because it is the dataset the paper leads with
+#: and `fig:dms_strata` already does. Upstream drew BA.1 on the different
+#: criterion of where the probability's penalty is largest -- see the issue,
+#: which records the override. The identity panel A draws is exact on every
+#: founder, so the choice costs the panel nothing.
+PROBABILITIES_SCATTER_HOMOLOG = "KP.3.1.1"
+
+#: The three arms of panel B, in bar order: the model's own two readings, then
+#: the published model's. `dasm` first because it is the reading the rest of the
+#: paper uses, and `antigen` last because it is the comparison rather than the
+#: subject.
+PROBABILITIES_BAR_ARMS: tuple[str, ...] = ("dasm", "dasm_prob", "antigen")
+
+#: One image per panel. Panel A is a single scatter and panel B a single row of
+#: grouped bars, so unlike `DMS_STRATA_PANELS` there is nothing concatenated
+#: inside either.
+PROBABILITIES_PANELS: tuple[str, ...] = (
+    f"panel_a_probability_vs_fitness_{PROBABILITIES_SCATTER_HOMOLOG}",
+    "panel_b_dms_correlation_bars",
+)
+
+#: The composed figure's stem, which is its LaTeX label: `main.tex` would
+#: include `figures/probabilities.pdf` and refer to `\\autoref{fig:probabilities}`.
+PROBABILITIES_FIGURE_STEM = "probabilities"
+
+#: Which stem each letter is, reading left to right.
+PROBABILITIES_PANEL_LETTERS: dict[str, str] = {
+    chr(ord("A") + index): stem for index, stem in enumerate(PROBABILITIES_PANELS)
+}
+
+#: One row of two panels, side by side. The figure is a single row, so the two
+#: images must be level in **height** -- which is the mirror of the width
+#: levelling `DMS_STRATA_FIGURE_ROWS` needs, and is why
+#: `notebooks/probabilities_figure.py` checks heights rather than widths.
+PROBABILITIES_FIGURE_ROWS: tuple[tuple[str, ...], ...] = (
+    tuple(PROBABILITIES_PANEL_LETTERS),
+)
+
+#: Wider than tall: one square scatter beside a short bar row.
+PROBABILITIES_BOX_IN: tuple[float, float] = (7.5, 3.4)
+PROBABILITIES_FIGURE_SCALE = 1.0
+
+#: The type the panels are drawn at, taken from `fig:dms` for
+#: `DMS_STRATA_TITLE_PX`'s reason: all three are Vega-Lite at
+#: `panel_charts.DMS_FONT_SIZE`, so a change there has to move all of them.
+PROBABILITIES_TITLE_PX = DMS_TITLE_PX
+
 #: Where `fig:dms`'s predictor intermediates go: under the artifact root, not in
 #: the tree. One narrow Parquet per `(predictor, homolog)`.
 DMS_SCORE_DIR = ARTIFACT_ROOT / "dms" / "scores"
