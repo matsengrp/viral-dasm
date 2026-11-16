@@ -107,7 +107,11 @@ load is refused unless the only globals are numpy's. That walk is most of the
 
 ## Status
 
-`ISSUE-DRAFT.md` is an **unfiled** draft of the M5d arm, written before the
-measurements above and reviewed but not updated against them. Read it for the
-design and the traps; read this file for the numbers. On the evidence here the
-arm was not obviously worth building, and the decision was left open.
+Filed as **matsengrp/viral-dasm#52**, which carries the measurements above, the
+design and traps an implementation would need, and the three open decisions —
+chiefly whether to build the arm at all. The pre-measurement draft that
+preceded it has been dropped from this directory; the issue supersedes it.
+
+On the evidence here the recommendation is **not** to build the arm, and to
+spend the finding instead: DNMS ranks by mutational accessibility rather than
+by tolerance, which is the distinction `fig:probabilities` draws.
