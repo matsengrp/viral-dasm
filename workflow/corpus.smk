@@ -62,14 +62,31 @@ VALIDATION_DIR = f"{ARTIFACT_ROOT}/validation"
 ERA_TEMPLATE = f"{workflow.basedir}/data/eras-pre-omicron-omicron.yaml"
 ERA_MAP = f"{ERA_MAP_DIR}/{GENE}.yaml"
 
-#: The three archives ``build_neutral`` writes, named exactly as
-#: ``build_era_neutral_models.archive_name`` spells them. Declared as concrete
-#: paths rather than a pattern so a rename there breaks the DAG rather than
-#: leaving the rule writing files nothing consumes.
-NEUTRAL_ZIPS = [
-    f"{NEUTRAL_DIR}/TabularRates-SCoV2-gisaid-public-{GENE}-{CUTOFF}-{VERSION}-{v}.zip"
-    for v in ("pre_omicron", "omicron", "pooled")
-]
+#: Each archive ``build_neutral`` writes, keyed by the era it was fitted over,
+#: and named exactly as ``build_era_neutral_models.archive_name`` spells them.
+#: Declared as concrete paths rather than a pattern so a rename there breaks the
+#: DAG rather than leaving the rule writing files nothing consumes.
+#:
+#: **Keyed, because ``dms_prob_scores`` needs one era's archive by name.** The
+#: two alternatives are worse: a second f-string in `workflow/figures.smk` would
+#: be a second spelling of a path this file owns, and importing ``archive_name``
+#: from `scripts/build_era_neutral_models.py` would drag `dasm2` and torch into
+#: every dry run and every ``--lint`` -- the cost `workflow/figures.smk`'s header
+#: and `scripts/panel_spec.py`'s inline ``yaml`` import exist to avoid. A
+#: mapping rather than a helper function keeps this file free of top-level
+#: functions, which ``snakemake --lint`` flags.
+#:
+#: An era with no archive is a ``KeyError`` naming it, which is what should
+#: happen: the alternative is a rule waiting on a path nothing writes.
+NEUTRAL_ZIP = {
+    variant: (
+        f"{NEUTRAL_DIR}/TabularRates-SCoV2-gisaid-public-"
+        f"{GENE}-{CUTOFF}-{VERSION}-{variant}.zip"
+    )
+    for variant in ("pre_omicron", "omicron", "pooled")
+}
+
+NEUTRAL_ZIPS = list(NEUTRAL_ZIP.values())
 
 
 wildcard_constraints:

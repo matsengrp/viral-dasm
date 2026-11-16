@@ -24,6 +24,14 @@ records that antiGen's column is ``log p`` while this one is ``log f``, and that
 nothing converts between them "because no conversion exists that does not assume
 a mutation model". The two are predictors of the same measurement on different
 scales, so they are never put on a shared axis.
+
+``scripts/dms_prob`` is the third reading: the DASM's *own* ``log p``, which is
+this module's ``log f`` weighted by how often the neutral process offers the
+mutation. That one does convert from this one -- it is built by exponentiating
+:func:`selection_factor_grid`'s rows -- but only on the single-nucleotide
+stratum, where the neutral rate is non-zero. So there are two ``log p`` columns
+in the table and they are not the same quantity: ``antigen``'s is another
+model's, ``dasm_prob``'s is this model's.
 """
 
 from __future__ import annotations
@@ -78,6 +86,28 @@ SCORE_TABLE_COLUMNS: tuple[str, ...] = (
 )
 
 
+def selection_factor_grid(clade: str, table_path: str | Path) -> pd.DataFrame:
+    """:data:`FIGURE_MODEL`'s whole ``[L, 20]`` grid for one clade, long.
+
+    One function rather than two spellings of the same read, because
+    `scripts/dms_prob.py` needs these rows too: it exponentiates this grid to
+    recover the linear selection factors whichmut's probability is defined
+    against. A second copy would also be a second copy of
+    :data:`SCORE_TABLE_COLUMNS`, carrying the ``parent_aa`` requirement
+    documented above as a trap for whoever trimmed it.
+
+    The grid comes back whole -- every site and every residue, the cells no
+    assay measured included -- because a partition function sums over the
+    whole sequence. Filtering to measured cells is a caller's step.
+    """
+    return panels.read_scored_table(
+        table_path,
+        models=[FIGURE_MODEL],
+        clades=[clade],
+        columns=SCORE_TABLE_COLUMNS,
+    )
+
+
 def dasm_scores(
     homolog: str, table_path: str | Path
 ) -> tuple[pd.DataFrame, dms_models.Manifest, str]:
@@ -92,12 +122,7 @@ def dasm_scores(
     """
     cells, founder = dms_models.homolog_cells(homolog)
     clade = dms_dataset(homolog).clade
-    table = panels.read_scored_table(
-        table_path,
-        models=[FIGURE_MODEL],
-        clades=[clade],
-        columns=SCORE_TABLE_COLUMNS,
-    )
+    table = selection_factor_grid(clade, table_path)
 
     scores = table[["aa_site", "mutant_aa", SCORE_COLUMN]].drop_duplicates(
         subset=list(dms_models.JOIN_KEY)

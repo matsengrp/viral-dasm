@@ -83,6 +83,7 @@ from panel_spec import (
     SUBSAMPLING_PANEL_LETTERS,
     SUBSAMPLING_SELECTION,
     composed_paths,
+    era_of_clade,
     figure_dir,
     aamut_grid_path,
     dms_leaf_count_path,
@@ -496,6 +497,80 @@ rule dms_dasm_scores:
         " --homolog {wildcards.homolog}"
         " --table {input.table}"
         " --output {output.scores}"
+        " > {log} 2>&1"
+
+
+rule dms_prob_scores:
+    """The DASM's mutation probability, and the neutral rate behind it.
+
+    **Two outputs, one pass.** `scripts/dms_prob.py` writes one score file per
+    predictor because the contract is one `Manifest` per model, but the archive
+    load and the partition function are shared, so splitting this into two rules
+    would do the expensive half twice for the same founder.
+
+    Reads `selection_factors.parquet` through `dms_dasm.selection_factor_grid`,
+    which is why `scripts/dms_dasm.py` is declared here: the linear selection
+    factors a probability is defined against are that table's own column,
+    exponentiated. Like `dms_dasm_scores` it claims no GPU and loads no
+    checkpoint.
+
+    **The archive is resolved here rather than in the script**, so the path
+    `workflow/corpus.smk` owns has one spelling and so the rule can declare it.
+    `NEUTRAL_ZIP` is that file's mapping for exactly this; importing
+    `build_era_neutral_models.archive_name` instead would pull `dasm2` and torch
+    into every dry run.
+
+    Declares no leaf tally, for `dms_blosum_scores`' reason.
+    """
+    wildcard_constraints:
+        homolog="|".join(re.escape(homolog) for homolog in dms_homologs()),
+    input:
+        script="scripts/dms_prob.py",
+        dasm="scripts/dms_dasm.py",
+        models="scripts/dms_models.py",
+        dms="scripts/dms.py",
+        published="scripts/dms_published.py",
+        censor="scripts/dms_censor.py",
+        panels="scripts/panels.py",
+        spec="scripts/panel_spec.py",
+        founder_reader="scripts/founders.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        whichmut_probs="dasm2/analysis/whichmut_probs.py",
+        whichmut_loss="dasm2/losses/whichmut_loss.py",
+        codon_neutral_rates="dasm2/molevol/codon_neutral_rates.py",
+        neutral_base="dasm2/neutral/base.py",
+        tabular_rates="dasm2/neutral/tabular_rates.py",
+        zip_io="dasm2/serialization/zip_io.py",
+        scov2_rates="dasm2/neutral/scov2_rates.py",
+        constants="dasm2/sequence/constants.py",
+        conversion="dasm2/sequence/conversion.py",
+        masking="dasm2/sequence/masking.py",
+        codon_table="dasm2/codon_table.py",
+        parquet_backend="dasm2/data/parquet_backend.py",
+        dasm2_init="dasm2/__init__.py",
+        dms_csv=lambda w: str(dms_dataset(w.homolog).path),
+        clade_founders=clade_founder_fastas,
+        censored=str(mat_pcp_path("censored_mutations_file")),
+        clades=str(mat_pcp_path("censored_clades_file")),
+        masked=str(mat_pcp_path("masked_nt_sites_file")),
+        reference=str(mat_pcp_path("reference_sequence_file")),
+        archive=lambda w: NEUTRAL_ZIP[era_of_clade(dms_dataset(w.homolog).clade)],
+        table=SCORED_TABLE,
+    output:
+        scores=str(dms_score_path("dasm_prob", "{homolog}")),
+        neutral=str(dms_score_path("neutral_rate", "{homolog}")),
+    log:
+        f"{ARTIFACT_ROOT}/logs/dms_scores_dasm_prob_{{homolog}}.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "python {input.script}"
+        " --homolog {wildcards.homolog}"
+        " --table {input.table}"
+        " --neutral-archive {input.archive}"
+        " --output {output.scores}"
+        " --neutral-output {output.neutral}"
         " > {log} 2>&1"
 
 

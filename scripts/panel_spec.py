@@ -553,7 +553,21 @@ DMS_TITLE_PX = 15
 #: which is the order a reader needs: what a substitution matrix and a per-site
 #: conservation statistic already explain, then the model the paper claims to
 #: beat, and only last the one making the claim.
-DMS_PREDICTORS: tuple[str, ...] = ("blosum62", "leaf_logfreq", "antigen", "dasm")
+#:
+#: The last two are that same model read a different way, which is why they come
+#: after it rather than among the other arms: `scripts/dms_prob.py` scores the
+#: DASM's mutation *probability*, and the neutral rate by which that differs
+#: from the selection factor. Both are defined on the single-nucleotide stratum
+#: alone, so their `multi_nt` rows carry `n = 0` by declaration rather than by
+#: accident -- see `dms_models.Manifest`.
+DMS_PREDICTORS: tuple[str, ...] = (
+    "blosum62",
+    "leaf_logfreq",
+    "antigen",
+    "dasm",
+    "dasm_prob",
+    "neutral_rate",
+)
 
 #: Every predictor's correlation with the DMS, per homolog and per stratum.
 #:
