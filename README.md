@@ -266,9 +266,12 @@ so the two now differ by exactly that -- 67,564 mutations at rung 10 against
 It is a second model pair through the same code and a diff to read when this
 filter changes again, not a live claim about upstream.
 
-`snakemake dms_predictors` builds the part of the DMS comparison that reads no
-scored table at all: two reference predictors, the published model they put in
-context, and the join all three land through. BLOSUM62 asks how much of a deep mutational scan a
+`snakemake dms_predictors` builds the DMS comparison table: two reference
+predictors, the published model they put in context, the DASM itself, and the
+DASM read as a mutation probability beside the neutral rate that reading adds
+— all through one join. The last three read `selection_factors.parquet`, so
+this target is no longer model-free; dry-run before building it.
+BLOSUM62 asks how much of a deep mutational scan a
 general substitution matrix already explains. The leaf frequency reconstructs
 every one of a clade's tree leaves from its own root-to-tip mutation path,
 tallies residues per site, and scores a substitution by the log ratio of its

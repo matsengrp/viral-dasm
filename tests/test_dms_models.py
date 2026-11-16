@@ -32,6 +32,7 @@ import dms_blosum
 import dms_dasm
 import dms_leaf_scores
 import dms_models
+import dms_prob
 import founders
 import panel_spec
 
@@ -224,6 +225,8 @@ def test_the_predictor_ids_the_rules_resolve_are_the_ones_the_modules_score():
         dms_leaf_scores.LEAF_LOGFREQ,
         dms_antigen.ANTIGEN,
         dms_dasm.DASM,
+        dms_prob.DASM_PROB,
+        dms_prob.NEUTRAL_RATE,
     )
 
 

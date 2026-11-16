@@ -129,6 +129,7 @@ ENTRY_POINTS = {
     "dms_antigen_scores": "scripts/dms_antigen.py",
     "dms_leaf_scores": "scripts/dms_leaf_scores.py",
     "dms_dasm_scores": "scripts/dms_dasm.py",
+    "dms_prob_scores": "scripts/dms_prob.py",
     "dms_strata_panels": "notebooks/dms_strata.py",
     "compose_dms_strata": "notebooks/dms_strata_figure.py",
     "dms_predictor_summary": "scripts/dms_summary.py",
