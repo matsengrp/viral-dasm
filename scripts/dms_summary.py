@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -175,6 +176,48 @@ def summarize(
     return table[list(SUMMARY_COLUMNS)].reset_index(drop=True)
 
 
+def merged_frames(
+    score_paths: Sequence[Path],
+) -> tuple[dict[str, pd.DataFrame], dict[str, dict[str, dict]]]:
+    """Every predictor's score joined onto every homolog's cells.
+
+    One frame per homolog, each carrying one column per predictor beside
+    ``dms_cell_entry`` and ``stratum`` -- the shape both this module's
+    correlations and `fig:dms_strata`' scatters read.
+
+    A function rather than inline in :func:`main` because the figure needs the
+    same join: a second spelling of it in a notebook would be a second
+    population, and the whole point of joining onto
+    ``dms_models.homolog_cells`` is that there is only one.
+
+    Raises:
+        ValueError: If a homolog is missing a predictor. Skipping one would
+            shorten the table rather than fail the rule. A ``ValueError``
+            rather than the ``SystemExit`` this used to raise inline, because
+            `notebooks/dms_strata.py` calls it too and a ``SystemExit`` in a
+            notebook cell kills the kernel instead of reporting.
+    """
+    loaded = [dms_models.read_scores(path) for path in score_paths]
+
+    merged: dict[str, pd.DataFrame] = {}
+    manifests: dict[str, dict[str, dict]] = {}
+    for homolog in dms_homologs():
+        cells, _ = dms_models.homolog_cells(homolog)
+        for_homolog = [
+            (frame[frame["homolog"] == homolog], manifest)
+            for frame, manifest in loaded
+            if homolog in set(frame["homolog"].unique())
+        ]
+        if len(for_homolog) != len(DMS_PREDICTORS):
+            raise ValueError(
+                f"{homolog}: {len(for_homolog)} of {len(DMS_PREDICTORS)} "
+                f"predictors passed. Skipping one would shorten the table rather "
+                f"than fail the rule."
+            )
+        merged[homolog], manifests[homolog] = dms_models.join_scores(cells, for_homolog)
+    return merged, manifests
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -187,25 +230,7 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args()
 
-    loaded = [dms_models.read_scores(path) for path in args.scores]
-
-    merged: dict[str, pd.DataFrame] = {}
-    manifests: dict[str, dict[str, dict]] = {}
-    for homolog in dms_homologs():
-        cells, _ = dms_models.homolog_cells(homolog)
-        for_homolog = [
-            (frame[frame["homolog"] == homolog], manifest)
-            for frame, manifest in loaded
-            if homolog in set(frame["homolog"].unique())
-        ]
-        if len(for_homolog) != len(DMS_PREDICTORS):
-            raise SystemExit(
-                f"{homolog}: {len(for_homolog)} of {len(DMS_PREDICTORS)} "
-                f"predictors passed. Skipping one would shorten the table rather "
-                f"than fail the rule."
-            )
-        merged[homolog], manifests[homolog] = dms_models.join_scores(cells, for_homolog)
-
+    merged, manifests = merged_frames(args.scores)
     table = summarize(merged, manifests)
     output = args.output or panel_csv_path(DMS_SELECTION, DMS_PREDICTOR_CORRELATIONS)
     output.parent.mkdir(parents=True, exist_ok=True)

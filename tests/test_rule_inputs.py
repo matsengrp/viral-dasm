@@ -128,6 +128,9 @@ ENTRY_POINTS = {
     "dms_blosum_scores": "scripts/dms_blosum.py",
     "dms_antigen_scores": "scripts/dms_antigen.py",
     "dms_leaf_scores": "scripts/dms_leaf_scores.py",
+    "dms_dasm_scores": "scripts/dms_dasm.py",
+    "dms_strata_panels": "notebooks/dms_strata.py",
+    "compose_dms_strata": "notebooks/dms_strata_figure.py",
     "dms_predictor_summary": "scripts/dms_summary.py",
     # `fig:within_clade_shifts`' producers. These run scripts rather than
     # notebooks, like the producers above the panel block.
@@ -150,6 +153,7 @@ AGGREGATORS = (
     "figures",
     "subsampling",
     "dms",
+    "dms_strata",
     "dms_predictors",
 )
 

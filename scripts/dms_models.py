@@ -49,6 +49,7 @@ import dasm2  # noqa: F401  (imported first for its side effects)
 assert_dasm2_is_this_repo()
 
 import dms
+import dms_censor
 import numpy as np
 import pandas as pd
 import pyarrow as pa
@@ -164,6 +165,9 @@ def homolog_cells(homolog: str) -> tuple[pd.DataFrame, str]:
     columns and ``tests/test_dms.py`` pins its row count and stratum set against
     them.
 
+    **This is also where the training mask is applied**, so every predictor is
+    scored on one population. See the comment in the body.
+
     Returns:
         ``(cells, founder)``. The founder comes back rather than being read again
         by each caller: every predictor needs it for the sequence its manifest
@@ -176,6 +180,24 @@ def homolog_cells(homolog: str) -> tuple[pd.DataFrame, str]:
     cells = cells.copy()
     cells["homolog"] = homolog
     cells["parent_aa"] = [founder[site - 1] for site in cells["aa_site"]]
+
+    # The training mask, applied once for every predictor rather than per
+    # figure. `dms.load_dms` has already dropped the globally masked and
+    # per-clade censored *sites*; what `dms_censor` adds is the two layers that
+    # function's docstring says it deliberately leaves -- per-mutation censoring
+    # and founder->reference reversions -- plus the unobservable founder codons.
+    #
+    # Here rather than in a figure, because a comparison across predictors is
+    # only honest on one population: `scripts/panels.py` puts it as holding "no
+    # route one side saw and the other did not". A predictor masked downstream
+    # would be correlated over a different set from the one beside it in the
+    # same table.
+    censored = dms_censor.censored_mutations(dataset.clade)
+    retained = [
+        (int(site), mutant) not in censored
+        for site, mutant in zip(cells["aa_site"], cells["mutant_aa"])
+    ]
+    cells = cells[retained].reset_index(drop=True)
     return cells, founder
 
 

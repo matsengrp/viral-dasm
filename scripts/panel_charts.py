@@ -477,7 +477,14 @@ DMS_AXIS_BAND = 55
 #: One hue per row, carried by that row's dots and by its heading so the two
 #: read as one unit. Okabe-Ito blue and vermillion: far apart in lightness and
 #: in hue, and distinguishable under every common form of colour blindness.
-DMS_ROW_COLORS: dict[int, str] = {0: "#0072B2", 10: "#D55E00"}
+#: The pair of hues the DMS figures are drawn in, named once. Okabe-Ito blue
+#: and vermillion: far apart in lightness and in hue, and distinguishable under
+#: every common form of colour blindness. Two dicts below key them to different
+#: meanings, which is why they are a constant rather than a literal in each.
+OKABE_ITO_BLUE = "#0072B2"
+OKABE_ITO_VERMILLION = "#D55E00"
+
+DMS_ROW_COLORS: dict[int, str] = {0: OKABE_ITO_BLUE, 10: OKABE_ITO_VERMILLION}
 
 #: The bars' own geometry. Half the scatter panels' width, because three bars
 #: need far less room than a point cloud and the vertical tick labels mean the
@@ -501,6 +508,13 @@ DMS_Y_HEADROOM = 0.12
 
 #: The measurement's axis title, shared by all three columns.
 DMS_Y_TITLE = "DMS effect (cell entry)"
+
+#: The same string, named for the axis it labels on `fig:dms_strata`, which
+#: puts the measurement on x. Borrowing :data:`DMS_Y_TITLE` there would leave a
+#: constant named for one axis labelling the other -- and `28-dms-predictors`
+#: gives `DMS_Y_TITLE` a different string, so the borrow would silently change
+#: this figure's x title when that branch merges.
+DMS_STRATA_X_TITLE = DMS_Y_TITLE
 
 #: Each predictor's axis title, keyed by the name the figure gives it. Two
 #: lines even where one would fit, so all three titles sit on the same
@@ -722,6 +736,226 @@ def dms_scatter_row(
             dx=DMS_AXIS_BAND / 2,
             offset=6,
         )
+    )
+
+
+#: What each stratum is called on a chart. Ported from `28-dms-predictors`,
+#: where the reasoning is recorded: spelled here rather than in `scripts/dms.py`
+#: because the strings in that module are join keys and CSV values, and changing
+#: one to read better on a chart would change what a panel's table says.
+#:
+#: **Each says "mutations", and says what kind.** The stratum is a property of
+#: amino-acid mutations and of the founder codon that reaches them, and a bare
+#: "single-nt" leaves a reader to guess whether the nucleotide or the residue
+#: is the unit being counted. Two lines because the long forms are wider than
+#: a :data:`DMS_PANEL_WIDTH` cell, and Vega-Lite neither wraps nor elides a
+#: title: adjacent ones simply overlap.
+DMS_STRATUM_LABELS: dict[str, tuple[str, ...]] = {
+    "all": ("all amino-acid", "mutations"),
+    "single_nt": ("mutations reachable by a", "single-nt codon mutation"),
+    "multi_nt": ("mutations requiring a", "multi-nt codon mutation"),
+}
+
+#: Hue by stratum, for `fig:dms_strata`. The same Okabe-Ito blue and vermillion
+#: as :data:`DMS_ROW_COLORS`, reused deliberately: they are the DMS figures'
+#: pair, far apart in lightness and in hue, and distinguishable under every
+#: common form of colour blindness.
+#:
+#: **The two constants mean different things, and the caption has to say which.**
+#: On `fig:dms` the hue is a count threshold; here it is codon accessibility. A
+#: third blue would be worse -- two near-identical blues on facing pages read as
+#: a failed attempt at the same encoding -- but a reader given no caption would
+#: carry the first meaning onto the second figure.
+DMS_STRATUM_COLORS: dict[str, str] = {
+    "single_nt": OKABE_ITO_BLUE,
+    "multi_nt": OKABE_ITO_VERMILLION,
+}
+
+
+#: How many characters of y tick label each row of `fig:dms_strata` reserves.
+#:
+#: **This is what aligns the columns, and it has to happen in the chart.** The
+#: rows draw identical cells, so their only width difference is the y axis on
+#: the left -- antiGen's labels run to ``-16`` where the DASM's run to ``-5``,
+#: and Vega-Lite sizes the axis to the widest label it draws. Left justified,
+#: the narrower row's plots then sit a band left of the other's, and a column
+#: whose plots do not share an x is not a column.
+#:
+#: Padding to a common width in the *composition* fixes the composed figure and
+#: nothing else: the panel PNGs are still misaligned, and so is the notebook,
+#: which draws the rows as two charts. Reserving the width here fixes all three
+#: at once, which is why it is done here and not there.
+#:
+#: Three because that is the widest label either row draws. ``pad`` only ever
+#: adds, so a row that one day needs four would simply stop aligning rather
+#: than truncate -- `tests/test_dms_strata.py` is what notices.
+DMS_Y_LABEL_CHARS = 3
+
+#: The character the padding is made of: U+2007 FIGURE SPACE, which is defined
+#: to be the width of a digit. An ordinary space is narrower than a digit in a
+#: proportional font, so padding with one would leave the bands unequal by a
+#: fraction of a character -- small, and exactly the kind of misalignment that
+#: survives review.
+DMS_LABEL_PAD = " "
+
+
+def dms_stratum_label(stratum: str) -> list[str]:
+    """One stratum's name, as the figure prints it, a line per element.
+
+    Raises:
+        KeyError: On a stratum with no label. Returning the raw key instead
+            would put ``single_nt`` on a paper figure, which is the one failure
+            here that looks deliberate.
+    """
+    if stratum not in DMS_STRATUM_LABELS:
+        raise KeyError(
+            f"{stratum!r} has no label; expected one of {sorted(DMS_STRATUM_LABELS)}"
+        )
+    return list(DMS_STRATUM_LABELS[stratum])
+
+
+def dms_stratum_row(
+    frame: pd.DataFrame,
+    *,
+    score_column: str,
+    score_title: Sequence[str] | str,
+    stratum_order: Sequence[str],
+    x_domain: Sequence[float],
+    stats: pd.DataFrame | None = None,
+    show_column_titles: bool = True,
+    show_x_title: bool = True,
+    width: int = DMS_PANEL_WIDTH,
+    height: int = DMS_PANEL_HEIGHT,
+    font_size: int = DMS_FONT_SIZE,
+) -> alt.HConcatChart:
+    """One model's row of `fig:dms_strata`: the same scores, cut three ways.
+
+    **The measurement is on x and the model on y**, which is the transpose of
+    `fig:dms` and of the `28-dms-predictors` panel this is ported from. The
+    reason is the grid: the DMS is the one quantity common to both rows, so
+    putting it on x makes a column readable down the page -- the same mutations,
+    two models. The cost is that `DMS_Y_TITLE` and `DMS_AXIS_TITLES` are written
+    for the other orientation and are not reused here; the titles arrive as
+    arguments instead.
+
+    **Points and the corner statistic, nothing else.** No diagonal, because the
+    axes are a measurement and a model score in different units and a 45-degree
+    line would invite a reading the data does not support. No regression and no
+    binned median either, although the ported panel drew both: `fig:dms`'s own
+    scatters are a cloud and an ``r``, and this figure sits beside them.
+
+    **Each cell is layered by stratum rather than coloured by a column**, which
+    is what keeps every point. Altair refuses a *dataset* over 5,000 rows, and
+    the refusal is asymmetric in a way that hides it -- ``chart.save()`` writes
+    the PNG through ``vl-convert`` regardless while ``chart.to_dict()`` raises,
+    so a rule fails after its panel is already on disk. The ``all`` cell is over
+    that ceiling at every homolog; split into its two strata it is not, and the
+    split is one the figure wanted anyway. Nothing is thinned, which
+    `scripts/panel_spec.py` records as this figure's own decision.
+
+    Args:
+        frame: One homolog's cells, carrying ``dms_cell_entry``, ``stratum``
+            and ``score_column``.
+        score_column: The model's column, which becomes y.
+        score_title: The y axis title, a string or the lines of one.
+        stratum_order: Which cells to draw, left to right. ``"all"`` draws the
+            whole frame; any other value draws that stratum alone.
+        x_domain: The measurement's domain, shared across every row of the
+            figure so a column can be read down the page.
+        stats: ``predictor_correlations.csv`` filtered to this row's homolog and
+            predictor. ``r`` and ``n`` are read from it rather than recomputed,
+            so the picture and the table cannot drift.
+    """
+    axis = alt.Axis(labelFontSize=font_size, titleFontSize=font_size, titlePadding=6)
+    x_scale = alt.Scale(domain=list(x_domain), nice=False)
+    # One y domain across the row, computed from every cell rather than per
+    # cell: the strata are subsets of one population and the question the row
+    # answers is whether they differ, which two y ranges would hide.
+    y_scale = alt.Scale(domain=dms_padded_domain(frame[score_column]), nice=False)
+
+    cells = []
+    for stratum in stratum_order:
+        cell_frame = frame if stratum == "all" else frame[frame["stratum"] == stratum]
+        row = None
+        if stats is not None:
+            matching = stats[stats["stratum"] == stratum]
+            row = None if matching.empty else matching.iloc[0]
+
+        # The column heading and the x title belong to the *column*, not to
+        # each cell in it: every row is the same measurement over the same
+        # domain, so printing either once per row prints this figure's two
+        # longest strings three times each. The heading goes on the top row and
+        # the title on the bottom, where a reader looks for them. Tick labels
+        # stay on both: the rows are separated by a panel break, so a cell has
+        # to be readable without tracing down the page.
+        x_enc = alt.X(
+            "dms_cell_entry:Q",
+            title=DMS_STRATA_X_TITLE if show_x_title else None,
+            axis=axis,
+            scale=x_scale,
+        )
+        # The y scale is shared across the row, so only the leftmost cell
+        # carries the axis: repeating it prints this figure's longest string
+        # once per stratum.
+        y_axis = (
+            alt.Axis(
+                labelFontSize=font_size,
+                titleFontSize=font_size,
+                titlePadding=6,
+                # Reserve a fixed label width, so both rows' axes are the same
+                # band and their plots start at the same x. See
+                # `DMS_Y_LABEL_CHARS`.
+                labelExpr=(
+                    f"pad(datum.label, {DMS_Y_LABEL_CHARS}, '{DMS_LABEL_PAD}', 'left')"
+                ),
+            )
+            if not cells
+            else alt.Axis(labels=False, ticks=False, domain=True, title=None)
+        )
+        y_enc = alt.Y(
+            f"{score_column}:Q",
+            title=score_title if not cells else None,
+            axis=y_axis,
+            scale=y_scale,
+        )
+
+        # One layer per stratum present, each its own dataset at its own fixed
+        # colour. This is the row-limit escape described above, and it is also
+        # why no `alt.Color` scale and no `legend=None` appear anywhere here.
+        layers = [
+            alt.Chart(
+                cell_frame[cell_frame["stratum"] == present][
+                    ["dms_cell_entry", score_column]
+                ]
+            )
+            .mark_point(
+                size=DMS_POINT_SIZE,
+                opacity=DMS_POINT_OPACITY,
+                filled=True,
+                color=DMS_STRATUM_COLORS[present],
+            )
+            .encode(x=x_enc, y=y_enc)
+            for present in DMS_STRATUM_COLORS
+            if not cell_frame[cell_frame["stratum"] == present].empty
+        ]
+        # `n` is the cell's own count, not the layer's.
+        labelled = alt.layer(
+            *layers, _corner_label(stat_label(row, len(cell_frame)), font_size)
+        )
+        properties = {"width": width, "height": height}
+        if show_column_titles:
+            properties["title"] = alt.TitleParams(
+                dms_stratum_label(stratum),
+                fontSize=font_size,
+                offset=3,
+                anchor="middle",
+            )
+        cells.append(labelled.properties(**properties))
+    # Stated rather than changed: every cell was given the same explicit
+    # domains above. Without it Vega-Lite resolves concatenated scales
+    # independently and the shared domain becomes a coincidence of the data.
+    return alt.hconcat(*cells, spacing=DMS_ROW_SPACING).resolve_scale(
+        x="shared", y="shared"
     )
 
 

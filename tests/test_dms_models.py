@@ -29,6 +29,7 @@ pd = pytest.importorskip("pandas")
 import dms
 import dms_antigen
 import dms_blosum
+import dms_dasm
 import dms_leaf_scores
 import dms_models
 import founders
@@ -46,7 +47,16 @@ from dasm2.sequence.constants import AA_STR_SORTED
 #: because its source file changed outright and KP.3.1.1 because its
 #: thresholds are now applied; XBB.1.5 did not move at all, which is what
 #: makes it the control on anything that touches the loader.
-EXPECTED_CELLS = {"BA.1": 5431, "XBB.1.5": 6204, "KP.3.1.1": 7031}
+#:
+#: Re-measured again for #46, which applies the training mask in
+#: ``dms_models.homolog_cells`` so that every predictor is correlated over one
+#: population. ``scripts/dms_censor.py`` says what the mask is and why it cannot
+#: be inherited from the counts table here. The three fell by 18 / 10 / 17 from
+#: the 5431 / 6204 / 7031 that `2d0ebae` measured, almost entirely in the
+#: single-nucleotide stratum: the per-mutation censor layers only reach a
+#: mutation that has single-nucleotide routes, and the unobservable founder
+#: codons are one site each in 23A and 24E and none in 21K.
+EXPECTED_CELLS = {"BA.1": 5413, "XBB.1.5": 6194, "KP.3.1.1": 7014}
 
 _DMS_PATHS = tuple(lib.dms_dataset(homolog).path for homolog in lib.dms_homologs())
 
@@ -213,6 +223,7 @@ def test_the_predictor_ids_the_rules_resolve_are_the_ones_the_modules_score():
         dms_blosum.BLOSUM62,
         dms_leaf_scores.LEAF_LOGFREQ,
         dms_antigen.ANTIGEN,
+        dms_dasm.DASM,
     )
 
 

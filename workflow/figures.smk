@@ -53,6 +53,9 @@ from panel_spec import (
     DMS_PREDICTOR_CORRELATIONS,
     DMS_PREDICTORS,
     DMS_SELECTION,
+    DMS_STRATA_FIGURE_STEM,
+    DMS_STRATA_PANEL_LETTERS,
+    DMS_STRATA_PANELS,
     BACKGROUND_CSV,
     BACKGROUND_PANELS,
     CANDIDATE_CSV,
@@ -344,8 +347,10 @@ rule compose_dms:
 # BLOSUM62 nor antiGen reads it, so folding the predictors together would
 # rebuild it on every edit to the substitution matrix.
 #
-# Nothing here reads `selection_factors.parquet`: these are the part of the DMS
-# comparison that needs no trained model, which is why they can land before #16.
+# All but one of these need no trained model, which is why they could land
+# before #16. `dms_dasm_scores` is the exception and reads
+# `selection_factors.parquet`: it is a filter and a rename over a table
+# `rule score` already built, not a forward pass.
 #
 # Scores and tallies go under the artifact root; only the correlation table is
 # tracked. `panel_spec.DMS_LEAF_COUNT_DIR` records why.
@@ -370,14 +375,21 @@ def dms_all_scores(*_):
 
 
 rule dms_predictors:
-    """The DMS predictor comparison, as far as it is built without a model.
+    """The DMS predictor comparison: every predictor's correlation, per stratum.
 
-    The two reference predictors and the join they land through. **A table and
-    no panel:** `fig:dms`'s four drawn panels are the published figure's, which
-    `rule dms` builds, and this comparison has no drawn home until the DASM's
-    own column lands -- a filter on `selection_factors.parquet`, so it arrives
-    with `rule score`'s table. A target that demanded the chart now would be red
-    for the whole gap.
+    The two reference predictors, antiGen, and the DASM, through one join onto
+    one population. `fig:dms_strata` is what draws it; `rule dms_strata` builds
+    that, and this target is the table alone.
+
+    **This target is no longer model-free, and that changed when the DASM
+    joined `DMS_PREDICTORS`.** It was: the three reference predictors needed no
+    checkpoint, which is why the section header above says they could land
+    before #16. `dms_dasm_scores` reads `selection_factors.parquet`, so this
+    target now sits downstream of `rule score` and therefore of `rule train`.
+    Building it alone puts the training rules in the plan -- which is a
+    statement about the DAG rather than about this rule, since `rule all`
+    already reaches `train` through `models` and `scored`. Dry-run before
+    running it, as with anything that can reach a checkpoint.
     """
     input:
         str(panel_csv_path(DMS_SELECTION, DMS_PREDICTOR_CORRELATIONS)),
@@ -437,6 +449,56 @@ rule dms_leaf_counts:
         " > {log} 2>&1"
 
 
+rule dms_dasm_scores:
+    """The DASM's log selection factor for every cell one homolog's assay measured.
+
+    **The one score rule that reads `selection_factors.parquet`.** `rule score`
+    did the forward passes; this reads one model's rows for one clade and
+    renames a column, so it claims no GPU and loads no checkpoint.
+
+    Declares no leaf tally, for `dms_blosum_scores`' reason.
+    """
+    wildcard_constraints:
+        homolog="|".join(re.escape(homolog) for homolog in dms_homologs()),
+    input:
+        script="scripts/dms_dasm.py",
+        models="scripts/dms_models.py",
+        dms="scripts/dms.py",
+        published="scripts/dms_published.py",
+        censor="scripts/dms_censor.py",
+        panels="scripts/panels.py",
+        spec="scripts/panel_spec.py",
+        founder_reader="scripts/founders.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        scov2_rates="dasm2/neutral/scov2_rates.py",
+        constants="dasm2/sequence/constants.py",
+        conversion="dasm2/sequence/conversion.py",
+        masking="dasm2/sequence/masking.py",
+        codon_table="dasm2/codon_table.py",
+        parquet_backend="dasm2/data/parquet_backend.py",
+        dasm2_init="dasm2/__init__.py",
+        dms_csv=lambda w: str(dms_dataset(w.homolog).path),
+        clade_founders=clade_founder_fastas,
+        censored=str(mat_pcp_path("censored_mutations_file")),
+        clades=str(mat_pcp_path("censored_clades_file")),
+        masked=str(mat_pcp_path("masked_nt_sites_file")),
+        reference=str(mat_pcp_path("reference_sequence_file")),
+        table=SCORED_TABLE,
+    output:
+        scores=str(dms_score_path("dasm", "{homolog}")),
+    log:
+        f"{ARTIFACT_ROOT}/logs/dms_scores_dasm_{{homolog}}.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "python {input.script}"
+        " --homolog {wildcards.homolog}"
+        " --table {input.table}"
+        " --output {output.scores}"
+        " > {log} 2>&1"
+
+
 rule dms_blosum_scores:
     """BLOSUM62's score for every cell one homolog's assay measured.
 
@@ -448,6 +510,8 @@ rule dms_blosum_scores:
     input:
         script="scripts/dms_blosum.py",
         models="scripts/dms_models.py",
+        censor="scripts/dms_censor.py",
+        panels="scripts/panels.py",
         dms="scripts/dms.py",
         published="scripts/dms_published.py",
         founder_reader="scripts/founders.py",
@@ -470,6 +534,7 @@ rule dms_blosum_scores:
         censored=str(mat_pcp_path("censored_mutations_file")),
         clades=str(mat_pcp_path("censored_clades_file")),
         masked=str(mat_pcp_path("masked_nt_sites_file")),
+        reference=str(mat_pcp_path("reference_sequence_file")),
     output:
         scores=str(dms_score_path("blosum62", "{homolog}")),
     log:
@@ -503,6 +568,8 @@ rule dms_antigen_scores:
     input:
         script="scripts/dms_antigen.py",
         models="scripts/dms_models.py",
+        censor="scripts/dms_censor.py",
+        panels="scripts/panels.py",
         dms="scripts/dms.py",
         published="scripts/dms_published.py",
         founder_reader="scripts/founders.py",
@@ -518,6 +585,7 @@ rule dms_antigen_scores:
         censored=str(mat_pcp_path("censored_mutations_file")),
         clades=str(mat_pcp_path("censored_clades_file")),
         masked=str(mat_pcp_path("masked_nt_sites_file")),
+        reference=str(mat_pcp_path("reference_sequence_file")),
         # The model, and the construct projection it is fed. Both gated on the
         # md5 `config.yaml` pins, as the DMS CSVs are, so a replaced checkpoint
         # fails rather than moving the antiGen row quietly.
@@ -543,6 +611,8 @@ rule dms_leaf_scores:
     input:
         script="scripts/dms_leaf_scores.py",
         models="scripts/dms_models.py",
+        censor="scripts/dms_censor.py",
+        panels="scripts/panels.py",
         leaf_freq="scripts/dms_leaf_freq.py",
         dms="scripts/dms.py",
         published="scripts/dms_published.py",
@@ -560,6 +630,7 @@ rule dms_leaf_scores:
         censored=str(mat_pcp_path("censored_mutations_file")),
         clades=str(mat_pcp_path("censored_clades_file")),
         masked=str(mat_pcp_path("masked_nt_sites_file")),
+        reference=str(mat_pcp_path("reference_sequence_file")),
         # The tally this reads out, for the clade the homolog is matched to.
         counts=dms_homolog_counts,
     output:
@@ -581,6 +652,8 @@ rule dms_predictor_summary:
     input:
         script="scripts/dms_summary.py",
         models="scripts/dms_models.py",
+        censor="scripts/dms_censor.py",
+        panels="scripts/panels.py",
         dms="scripts/dms.py",
         published="scripts/dms_published.py",
         spec="scripts/panel_spec.py",
@@ -601,6 +674,7 @@ rule dms_predictor_summary:
         censored=str(mat_pcp_path("censored_mutations_file")),
         clades=str(mat_pcp_path("censored_clades_file")),
         masked=str(mat_pcp_path("masked_nt_sites_file")),
+        reference=str(mat_pcp_path("reference_sequence_file")),
         scores=dms_all_scores,
     output:
         table=str(panel_csv_path(DMS_SELECTION, DMS_PREDICTOR_CORRELATIONS)),
@@ -612,6 +686,99 @@ rule dms_predictor_summary:
         "python {input.script}"
         " --scores {input.scores}"
         " --output {output.table}"
+        " > {log} 2>&1"
+
+
+rule dms_strata:
+    """`fig:dms_strata`, and so its two panels beneath it."""
+    input:
+        composed_paths(DMS_SELECTION, DMS_STRATA_FIGURE_STEM),
+
+
+rule dms_strata_panels:
+    """The two model rows: DASM over antiGen, each cut by codon accessibility.
+
+    One rule for both, not two: they read the same join of the same scores and
+    differ only in which column becomes y, so splitting them would build the
+    merged frame twice to draw the second picture.
+
+    **Declares the correlation table.** `r` and `n` are read from it rather
+    than recomputed in the notebook, which is what keeps the picture and the
+    CSV beside it from drifting -- so this rule waits on
+    `rule dms_predictor_summary` rather than on the scores alone.
+    """
+    input:
+        notebook="notebooks/dms_strata.py",
+        summary="scripts/dms_summary.py",
+        models="scripts/dms_models.py",
+        censor="scripts/dms_censor.py",
+        dms="scripts/dms.py",
+        published="scripts/dms_published.py",
+        panels="scripts/panels.py",
+        spec="scripts/panel_spec.py",
+        charts="scripts/panel_charts.py",
+        founder_reader="scripts/founders.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        analysis_eval="dasm2/analysis/viral_fitness_eval.py",
+        codon_table="dasm2/codon_table.py",
+        constants="dasm2/sequence/constants.py",
+        conversion="dasm2/sequence/conversion.py",
+        masking="dasm2/sequence/masking.py",
+        scov2_rates="dasm2/neutral/scov2_rates.py",
+        parquet_backend="dasm2/data/parquet_backend.py",
+        dasm2_init="dasm2/__init__.py",
+        dms_data=dms_files,
+        clade_founders=clade_founder_fastas,
+        censored=str(mat_pcp_path("censored_mutations_file")),
+        clades=str(mat_pcp_path("censored_clades_file")),
+        masked=str(mat_pcp_path("masked_nt_sites_file")),
+        reference=str(mat_pcp_path("reference_sequence_file")),
+        scores=dms_all_scores,
+        table=str(panel_csv_path(DMS_SELECTION, DMS_PREDICTOR_CORRELATIONS)),
+    output:
+        html=f"{NOTEBOOK_DIR}/dms_strata.html",
+        panels=panel_outputs(DMS_STRATA_PANELS, DMS_SELECTION),
+    log:
+        f"{ARTIFACT_ROOT}/logs/dms_strata.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "marimo export html {input.notebook} -o {output.html} --force"
+        " -- --scores {input.scores}"
+        " > {log} 2>&1"
+
+
+rule compose_dms_strata:
+    """`fig:dms_strata` itself, laid out from its two panels.
+
+    No scoring, no assay and no table: it reads PNGs, the split every
+    composition here is built on. The manuscript copy is not a declared
+    output, for the reason `rule compose_agreement` gives.
+    """
+    input:
+        layout="scripts/figure_layout.py",
+        spec="scripts/panel_spec.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        charts="scripts/panel_charts.py",
+        notebook="notebooks/dms_strata_figure.py",
+        panels=[
+            str(figure_dir(DMS_SELECTION) / f"{stem}.png")
+            for stem in DMS_STRATA_PANEL_LETTERS.values()
+        ],
+    output:
+        html=f"{NOTEBOOK_DIR}/dms_strata_figure.html",
+        figure=[
+            str(path)
+            for path in composed_paths(DMS_SELECTION, DMS_STRATA_FIGURE_STEM)
+        ],
+    log:
+        f"{ARTIFACT_ROOT}/logs/compose_dms_strata.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "marimo export html {input.notebook} -o {output.html} --force"
         " > {log} 2>&1"
 
 
@@ -1151,6 +1318,12 @@ rule figures:
         ],
         # `fig:dms`, on the same footing: one panel set, one directory.
         [str(path) for path in composed_paths(DMS_SELECTION, DMS_FIGURE_STEM)],
+        # `fig:dms_strata`, which shares that directory: it is the same
+        # selection drawn from the same model, two panels rather than four.
+        [
+            str(path)
+            for path in composed_paths(DMS_SELECTION, DMS_STRATA_FIGURE_STEM)
+        ],
 
 
 rule background_effects:
