@@ -2864,28 +2864,18 @@ def arm_ladder_grid(
 # `fig:probabilities`
 # ---------------------------------------------------------------------------
 
-#: The rest of the Okabe-Ito palette, for a figure that needs hues the DMS
-#: figures have not already given a meaning to.
+#: Okabe-Ito bluish-green, the third categorical hue: `fig:dms_strata` needed
+#: only two because it draws two populations, and panel B's groups are three.
 OKABE_ITO_BLUISH_GREEN = "#009E73"
-OKABE_ITO_ORANGE = "#E69F00"
-OKABE_ITO_REDDISH_PURPLE = "#CC79A7"
 
 #: One colour per DMS experiment, taken in group order. **Not one per arm**:
 #: the arms are already named under every bar, so colouring by arm spends the
 #: channel on a distinction the labels carry, while colouring by experiment
 #: makes each group read as one dataset.
-#:
-#: **Deliberately not blue and vermillion.** Those two already mean something
-#: in the figures this one sits beside: the count rungs in :data:`DMS_ROW_COLORS`
-#: on `fig:dms`, and the accessibility strata in :data:`DMS_STRATUM_COLORS` on
-#: `fig:dms_strata`. Both of those draw grouped Pearson-r bars in this same
-#: house style, so reusing their hues for homologs would invite a reader who
-#: has learned "vermillion is the filtered stratum" to read a dataset as a
-#: filter.
 PROBABILITIES_HOMOLOG_COLORS: tuple[str, ...] = (
+    OKABE_ITO_BLUE,
+    OKABE_ITO_VERMILLION,
     OKABE_ITO_BLUISH_GREEN,
-    OKABE_ITO_ORANGE,
-    OKABE_ITO_REDDISH_PURPLE,
 )
 
 #: How each arm is named under its bar. Short, because they are set vertically.
@@ -2905,7 +2895,7 @@ PROBABILITIES_SCATTER_SIDE = 235
 #: else in these figures. Two significant figures while ``0.1 <= r < 1``, which
 #: `tests/test_probabilities.py` asserts the drawn values stay inside: the
 #: differences this figure is about are in the second decimal, and more digits
-#: would imply a precision the bootstrap intervals do not support.
+#: would imply a precision these correlations do not carry.
 PROBABILITIES_BAR_FORMAT = DMS_R_FORMAT
 
 #: The padding the equal-span domains carry, as a multiple of the wider span.
@@ -2939,6 +2929,29 @@ def probabilities_equal_span_domains(
     return out
 
 
+#: Panel A's tick step, in nats, on both axes.
+PROBABILITIES_TICK_STEP = 2
+
+#: Panel B's tick step on the `r` axis. The domain is rounded up to a multiple
+#: of it, so the axis always ends on a labelled tick rather than a bare rule:
+#: at `DMS_BAR_HEADROOM` the tallest bar leaves the top of the scale just shy
+#: of one, and an axis that stopped at 0.6 would read as if nothing went
+#: higher.
+PROBABILITIES_BAR_TICK_STEP = 0.2
+
+
+def _even_ticks(domain: Sequence[float], step: float) -> list[float]:
+    """Multiples of ``step`` inside ``domain``, which is what a reader counts.
+
+    Rounded at each tick rather than accumulated, because a fractional step
+    otherwise drifts: ten additions of 0.2 do not land on 2.0.
+    """
+    low, high = float(domain[0]), float(domain[1])
+    first = math.ceil(low / step) * step
+    count = math.floor((high - first) / step + 1e-9) + 1
+    return [round(first + index * step, 6) for index in range(count)]
+
+
 def probability_against_fitness(
     frame: pd.DataFrame,
     x: str,
@@ -2970,12 +2983,17 @@ def probability_against_fitness(
     """
     domains = probabilities_equal_span_domains(frame, x, y)
 
-    def _axis(title: list[str]) -> alt.Axis:
+    def _axis(title: list[str], domain: list[float]) -> alt.Axis:
         return alt.Axis(
             title=title,
             titleFontSize=DMS_FONT_SIZE,
             labelFontSize=DMS_FONT_SIZE,
-            tickCount=5,
+            # Every two nats, stated rather than left to Vega's tick count: the
+            # two axes carry the same quantity in the same units, so a reader
+            # checking the cloud's slope against the diagonal needs the two
+            # grids to have the same step. A `tickCount` gives Vega licence to
+            # pick a different one per axis as the domains move.
+            values=_even_ticks(domain, PROBABILITIES_TICK_STEP),
         )
 
     points = (
@@ -2985,12 +3003,12 @@ def probability_against_fitness(
             x=alt.X(
                 f"{x}:Q",
                 scale=alt.Scale(domain=domains[x], zero=False, nice=False),
-                axis=_axis(["DASM fitness effect"]),
+                axis=_axis(["DASM fitness effect"], domains[x]),
             ),
             y=alt.Y(
                 f"{y}:Q",
                 scale=alt.Scale(domain=domains[y], zero=False, nice=False),
-                axis=_axis(["log DASM mutation probability"]),
+                axis=_axis(["log DASM mutation probability"], domains[y]),
             ),
             color=alt.Color(
                 f"{colour}:Q",
@@ -3014,14 +3032,11 @@ def probability_against_fitness(
             ],
         )
     )
-    # **Named, not bare.** Every other `r` in these figures is a predictor
-    # against the assay, printed in this same corner at this same size. This
-    # one is two model quantities against each other, it is larger than any
-    # bar in panel B beside it, and nothing but the axis titles would tell a
-    # reader the difference.
+    # This `r` is the two drawn quantities against each other, not either
+    # against an assay -- unlike every other `r` these figures print in this
+    # corner. The caption carries that; the panel just says `r`.
     label = _corner_label(
-        f"r(log f, log p) = {r:{DMS_R_FORMAT}}\nn = {len(frame):,}",
-        font_size=DMS_FONT_SIZE,
+        f"r = {r:{DMS_R_FORMAT}}\nn = {len(frame):,}", font_size=DMS_FONT_SIZE
     )
     return (
         alt.layer(points, label)
@@ -3065,7 +3080,11 @@ def dms_correlation_bars(
         bar_height: Measured so the panel comes out level with panel A; see
             `notebooks/probabilities.py`.
     """
-    top = float(frame["pearson_r"].max()) * DMS_BAR_HEADROOM
+    headroom = float(frame["pearson_r"].max()) * DMS_BAR_HEADROOM
+    top = (
+        math.ceil(headroom / PROBABILITIES_BAR_TICK_STEP) * PROBABILITIES_BAR_TICK_STEP
+    )
+    ticks = _even_ticks([0.0, top], PROBABILITIES_BAR_TICK_STEP)
     order = [PROBABILITIES_ARM_LABELS[arm] for arm in arms]
     if len(homologs) > len(PROBABILITIES_HOMOLOG_COLORS):
         raise ValueError(
@@ -3101,6 +3120,7 @@ def dms_correlation_bars(
                 axis=alt.Axis(
                     titleFontSize=DMS_FONT_SIZE,
                     labelFontSize=DMS_FONT_SIZE,
+                    values=ticks,
                     labelOpacity=1.0 if first else 0.0,
                     tickOpacity=1.0 if first else 0.0,
                     domainOpacity=1.0 if first else 0.0,

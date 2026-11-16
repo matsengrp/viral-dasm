@@ -196,31 +196,20 @@ def test_panel_b_reads_every_arm_on_one_population(bars: pd.DataFrame):
         assert group["n_mutations"].nunique() == 1
 
 
-#: Where `dasm_prob` beating `antigen` is separated from zero. A paired
-#: bootstrap over the shared cells puts BA.1's +0.0105 at [-0.008, +0.029],
-#: with 13% of resamples reversing it, against +0.085 and +0.088 elsewhere
-#: whose intervals clear zero and never reverse.
-PROBABILITY_BEATS_ANTIGEN = ("XBB.1.5", "KP.3.1.1")
-
-
 @needs_dms
 @needs_artifacts
 def test_panel_b_shows_the_ordering_the_figure_claims(bars: pd.DataFrame):
-    """`dasm` over `dasm_prob` everywhere; over `antigen` where that is real.
+    """`dasm` over `dasm_prob` over `antigen`, in every dataset.
 
-    **The two legs are not equally solid, and this says so rather than
-    flattening them.** `dasm` over `dasm_prob` is +0.153 / +0.090 / +0.068 and
-    never reverses under a paired bootstrap, so it is asserted for every
-    dataset. `dasm_prob` over `antigen` is +0.085 and +0.088 on two of them and
-    **+0.0105 on BA.1**, where the interval straddles zero -- asserting it
-    there would pin a coin-flip as a repository invariant, and a caption
-    reading the figure as a clean sweep would be overstating it.
+    The figure's claim, tested rather than left to a caption. The second
+    comparison is a near-tie on BA.1 -- 0.49 against 0.48 -- so the figure
+    should not be described as a clean sweep, but the ordering is what the
+    committed table says and this pins it.
     """
     for homolog in lib.dms_homologs():
         group = bars[bars["homolog"] == homolog].set_index("predictor")["pearson_r"]
         assert group["dasm"] > group["dasm_prob"], homolog
-        if homolog in PROBABILITY_BEATS_ANTIGEN:
-            assert group["dasm_prob"] > group["antigen"], homolog
+        assert group["dasm_prob"] >= group["antigen"], homolog
 
 
 def test_the_bar_format_gives_two_significant_figures():
