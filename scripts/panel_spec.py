@@ -18,6 +18,7 @@ from __future__ import annotations
 import csv
 import re
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -622,30 +623,110 @@ DMS_STRATA_MODELS: tuple[tuple[str, tuple[str, ...]], ...] = (
 #: permutation of `dms.STRATA` rather than a different set.
 DMS_STRATA_COLUMNS: tuple[str, ...] = ("all", "single_nt", "multi_nt")
 
-#: One image per model row, three cells concatenated inside it. `DMS_PANELS`'
-#: own precedent: each of those stems is one image of three scatters taking one
-#: letter. A cell per image would move the shared y domain and the single y axis
-#: out of the chart and into the layout, which cannot express either.
-DMS_STRATA_PANELS: tuple[str, ...] = tuple(
-    f"panel_{letter}_{model}_strata"
-    for letter, (model, _) in zip("ab", DMS_STRATA_MODELS)
-)
+#: One figure per assay, each keeping the two-row shape above. The three are
+#: separate figures rather than six rows of one, so the cells stay the size #46
+#: drew them at and a column still reads down the page.
+#:
+#: **Each figure's x domain is its own assay's**, which
+#: `notebooks/dms_strata.py` already gives it by computing the domain from the
+#: homolog's own frame. So a column may be read down a figure and **not**
+#: across figures, and the captions have to say so.
 
-#: The composed figure's stem, which is its LaTeX label: `main.tex` includes
-#: `figures/dms_strata.pdf` and refers to `\\autoref{fig:dms_strata}`.
-DMS_STRATA_FIGURE_STEM = "dms_strata"
 
-#: Which stem each letter is, reading down: one row per model.
-DMS_STRATA_PANEL_LETTERS: dict[str, str] = {
-    chr(ord("A") + index): stem for index, stem in enumerate(DMS_STRATA_PANELS)
-}
+def homolog_slug(homolog: str) -> str:
+    """One homolog's id as a figure stem spells it: ``KP.3.1.1`` -> ``kp311``.
 
-#: One panel a row, stacked. Reading down a column answers the figure's
-#: question -- the same mutations under two models -- which is why the
-#: measurement is on x and shared across both rows.
-DMS_STRATA_FIGURE_ROWS: tuple[tuple[str, ...], ...] = tuple(
-    (letter,) for letter in DMS_STRATA_PANEL_LETTERS
-)
+    **Dots are fine in a pipeline filename and this is not one.** Score
+    Parquets carry them (``antigen_KP.3.1.1.parquet``), `scripts/lib.py` records
+    that homolog names "are written into panel filenames and read back as join
+    keys", and :data:`PROBABILITIES_PANELS` already ships a dotted panel stem
+    whose PNG, SVG and tracked CSV all exist. Two things are different here.
+
+    The load-bearing one is that **a rule's wildcard has to be a single
+    token**. `workflow/figures.smk` builds these figures from a ``{slug}``
+    wildcard, snakemake reads a job's wildcards back off its output paths, and
+    a stem holding the homolog would make the wildcard the homolog -- which is
+    the same thing by another name only if the figure stem also holds it. It
+    does not, because of the second reason.
+
+    That second reason is that **a composed figure's stem leaves the
+    pipeline**: it becomes ``figures/dms_strata_*.pdf`` in the manuscript and
+    the ``\\label`` beside it. `main.tex` always writes the extension
+    explicitly, which is the case `graphicx` handles best, so this is a path
+    not worth having to reason about rather than a demonstrated failure.
+
+    :func:`homolog_for_slug` is the inverse, which `workflow/figures.smk` needs
+    to hand the notebook a homolog it can look a dataset up by.
+    """
+    return homolog.lower().replace(".", "")
+
+
+def homolog_for_slug(slug: str, homologs: Iterable[str]) -> str:
+    """The homolog a slug came from, for the rule that holds only the wildcard.
+
+    **The roster is passed in, not looked up.** This module reads no config of
+    its own -- :data:`SCATTER_HOMOLOG`'s comment records that discipline, and
+    `tests/test_dms.py` is what checks that constant against `config.yaml`
+    instead. Every caller already holds the roster: `workflow/figures.smk`
+    imports `dms_homologs` for its other wildcard constraints.
+
+    Raises:
+        ValueError: if no homolog slugs to this, in `lib.dms_dataset`'s shape.
+            A slug that resolved to nothing would draw a figure named for one
+            assay out of another's cells, which no later check could see.
+    """
+    roster = list(homologs)
+    for homolog in roster:
+        if homolog_slug(homolog) == slug:
+            return homolog
+    known = ", ".join(f"{homolog} -> {homolog_slug(homolog)}" for homolog in roster)
+    raise ValueError(f"{slug!r} is no homolog's slug. The roster is {known}.")
+
+
+def dms_strata_panels(slug: str) -> tuple[str, ...]:
+    """One assay's two panel stems. One image per model row, three cells in it.
+
+    `DMS_PANELS`' own precedent: each of those stems is one image of three
+    scatters taking one letter. A cell per image would move the shared y domain
+    and the single y axis out of the chart and into the layout, which cannot
+    express either.
+
+    Takes the **slug**, not the homolog, so `workflow/figures.smk` can call it
+    with the wildcard token itself.
+    """
+    return tuple(
+        f"panel_{letter}_{model}_strata_{slug}"
+        for letter, (model, _) in zip("ab", DMS_STRATA_MODELS)
+    )
+
+
+def dms_strata_figure_stem(slug: str) -> str:
+    """One assay's composed stem, which is its LaTeX label.
+
+    The manuscript would include ``figures/dms_strata_kp311.pdf`` and refer to
+    ``\\autoref{fig:dms_strata_kp311}``. It references none of the three today;
+    see this issue's scope note.
+    """
+    return f"dms_strata_{slug}"
+
+
+def dms_strata_panel_letters(slug: str) -> dict[str, str]:
+    """Which stem each letter is, reading down: one row per model."""
+    return {
+        chr(ord("A") + index): stem
+        for index, stem in enumerate(dms_strata_panels(slug))
+    }
+
+
+def dms_strata_figure_rows(slug: str) -> tuple[tuple[str, ...], ...]:
+    """One panel a row, stacked.
+
+    Reading down a column answers the figure's question -- the same mutations
+    under two models -- which is why the measurement is on x and shared across
+    both rows of one figure.
+    """
+    return tuple((letter,) for letter in dms_strata_panel_letters(slug))
+
 
 #: `fig:dms`'s box. Two rows of three cells each, so the width binds and there
 #: is no reason to overhang the text block.

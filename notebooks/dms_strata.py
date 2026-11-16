@@ -75,15 +75,24 @@ def _(mo):
     import altair as alt
 
     SELECTION = panel_spec.DMS_SELECTION
-    HOMOLOG = panel_spec.SCATTER_HOMOLOG
 
     # Required, not defaulted, as the other panel notebooks have it.
     _args = mo.cli_args()
     SCORE_PATHS = [Path(str(path)) for path in _args.get_all("scores")]
+
+    # **The assay this run draws, and `--homolog` is required too.** One figure
+    # per assay, so `notebooks/within_clade_shifts.py`'s reason for taking its
+    # selection from the rule applies here: the rule states the homolog, and a
+    # fallback spelling here would be a second statement of it. The cost is
+    # concrete rather than stylistic -- a default would draw one assay under
+    # three filenames and nothing would raise.
+    HOMOLOG = str(_args["homolog"])
+    SLUG = panel_spec.homolog_slug(HOMOLOG)
     return (
         HOMOLOG,
         SCORE_PATHS,
         SELECTION,
+        SLUG,
         alt,
         charts,
         dms,
@@ -128,17 +137,20 @@ def _(HOMOLOG, charts, dms, frame, mo, panel_spec, stats):
 
 
 @app.cell
-def _(SELECTION, charts, dms, frame, panel_spec, panels, stats):
-    # One x domain for the whole figure. Computed once and passed into both
-    # rows: the measurement is the same quantity in all six cells, and a column
-    # that cannot be read down the page is the one thing this layout is for.
+def _(SELECTION, SLUG, charts, dms, frame, panel_spec, panels, stats):
+    # One x domain for the whole figure, and **one figure is one assay**.
+    # Computed once and passed into both rows: the measurement is the same
+    # quantity in all six cells, and a column that cannot be read down the page
+    # is the one thing this layout is for. It is computed from this homolog's
+    # own cells, so the three figures land on three domains and a column may
+    # NOT be read across them -- which each caption has to say.
     x_domain = charts.dms_padded_domain(frame["dms_cell_entry"])
 
     _last = len(panel_spec.DMS_STRATA_MODELS) - 1
 
     strata_panels = []
     for _index, (_stem, (_model, _title)) in enumerate(
-        zip(panel_spec.DMS_STRATA_PANELS, panel_spec.DMS_STRATA_MODELS)
+        zip(panel_spec.dms_strata_panels(SLUG), panel_spec.DMS_STRATA_MODELS)
     ):
         _row = charts.save_panel(
             charts.dms_stratum_row(
