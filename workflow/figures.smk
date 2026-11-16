@@ -348,10 +348,11 @@ rule compose_dms:
 # BLOSUM62 nor antiGen reads it, so folding the predictors together would
 # rebuild it on every edit to the substitution matrix.
 #
-# All but one of these need no trained model, which is why they could land
-# before #16. `dms_dasm_scores` is the exception and reads
-# `selection_factors.parquet`: it is a filter and a rename over a table
-# `rule score` already built, not a forward pass.
+# Most of these need no trained model, which is why they could land before #16.
+# `dms_dasm_scores` and `dms_prob_scores` are the exceptions and read
+# `selection_factors.parquet`: the first is a filter and a rename over a table
+# `rule score` already built, the second exponentiates the same table's grid
+# and weights it by the neutral rates. Neither is a forward pass.
 #
 # Scores and tallies go under the artifact root; only the correlation table is
 # tracked. `panel_spec.DMS_LEAF_COUNT_DIR` records why.
@@ -378,15 +379,20 @@ def dms_all_scores(*_):
 rule dms_predictors:
     """The DMS predictor comparison: every predictor's correlation, per stratum.
 
-    The two reference predictors, antiGen, and the DASM, through one join onto
-    one population. `fig:dms_strata` is what draws it; `rule dms_strata` builds
-    that, and this target is the table alone.
+    The two reference predictors, antiGen, the DASM, and the DASM read as a
+    probability (`dasm_prob`) beside the neutral rate it differs from the
+    selection factor by (`neutral_rate`) -- all through one join onto one
+    population. `fig:dms_strata` is what draws the first four; `rule dms_strata`
+    builds that, and this target is the table alone. The last two are drawn by
+    nothing: a probability is defined only on the single-nucleotide stratum, so
+    it is a row of the table rather than a column of the figure.
 
     **This target is no longer model-free, and that changed when the DASM
     joined `DMS_PREDICTORS`.** It was: the three reference predictors needed no
     checkpoint, which is why the section header above says they could land
-    before #16. `dms_dasm_scores` reads `selection_factors.parquet`, so this
-    target now sits downstream of `rule score` and therefore of `rule train`.
+    before #16. `dms_dasm_scores` and `dms_prob_scores` both read
+    `selection_factors.parquet`, so this target now sits downstream of
+    `rule score` and therefore of `rule train`.
     Building it alone puts the training rules in the plan -- which is a
     statement about the DAG rather than about this rule, since `rule all`
     already reaches `train` through `models` and `scored`. Dry-run before

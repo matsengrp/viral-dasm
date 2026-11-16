@@ -8,10 +8,15 @@ legitimate zero factor so the guard has to be ``< 0`` rather than ``<= 0``.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
 import pytest
+
+#: Turns a skip into a failure on the host that builds the figures, as every
+#: other data-gated module in this suite does.
+REQUIRE_DATA = os.environ.get("VIRAL_DASM_REQUIRE_DATA") == "1"
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 for _path in (REPO_ROOT, REPO_ROOT / "scripts"):
@@ -24,6 +29,7 @@ import dms_models
 import dms_prob
 import lib
 import numpy as np
+import pandas as pd
 import panel_spec
 import torch
 from build_era_neutral_models import archive_name
@@ -34,9 +40,15 @@ from dasm2.analysis.whichmut_probs import founder_rates, neutral_rate_to_aa
 from dasm2.neutral.tabular_rates import TabularRatesNeutralModel
 from dasm2.sequence.constants import AA_STR_SORTED
 
-#: The table every check reads. Not rebuilt here: `rule score` wrote it, and a
-#: test that rebuilt it would be the one thing this repository must not do.
-SCORED_TABLE = lib.ARTIFACT_ROOT / "scored" / "selection_factors.parquet"
+#: The table every data check reads, spelled as `tests/test_dms.py` spells it.
+#: Not rebuilt here: `rule score` wrote it, and a test that rebuilt it would be
+#: the one thing this repository must not do.
+SCORED_TABLE = panel_spec.SCORED_DIR / "selection_factors.parquet"
+
+#: ``build_neutral``'s output directory. `workflow/corpus.smk` owns the name and
+#: a Snakefile cannot be imported, so this is a second spelling -- the same one
+#: `tests/test_era_map.py` already asserts against.
+NEUTRAL_DIR = lib.ARTIFACT_ROOT / "neutral_models"
 
 
 def _archive(clade: str) -> Path:
@@ -47,29 +59,34 @@ def _archive(clade: str) -> Path:
     Snakefile -- so without this the test would be a third spelling of the
     path, and the one that would not break when the other two changed.
     """
-    era = panel_spec.era_of_clade(clade)
-    return lib.ARTIFACT_ROOT / "neutral_models" / f"{archive_name(lib.GENE, era)}.zip"
+    return NEUTRAL_DIR / f"{archive_name(lib.GENE, panel_spec.era_of_clade(clade))}.zip"
 
 
-def _artifacts_readable() -> bool:
+def _absent_artifacts() -> list[str]:
+    """Which of this module's inputs are missing, by path."""
     try:
-        return SCORED_TABLE.is_file() and all(
-            _archive(lib.dms_dataset(homolog).clade).is_file()
-            for homolog in lib.dms_homologs()
-        )
-    except OSError:
-        return False
+        paths = [SCORED_TABLE, *(_archive(c) for c in _CLADES)]
+        return [str(path) for path in paths if not path.is_file()]
+    except OSError as exc:  # an unreadable mount, not a missing file
+        return [f"{lib.ARTIFACT_ROOT} ({exc})"]
 
+
+_CLADES = [lib.dms_dataset(homolog).clade for homolog in lib.dms_homologs()]
+_ABSENT = _absent_artifacts()
 
 needs_artifacts = pytest.mark.skipif(
-    not _artifacts_readable(),
-    reason="the scored table or a neutral archive is not readable here",
+    bool(_ABSENT), reason=f"not readable here: {', '.join(_ABSENT)}"
 )
 
-
-@pytest.fixture(scope="module")
-def homologs() -> list[str]:
-    return list(lib.dms_homologs())
+if REQUIRE_DATA and _ABSENT:
+    # `tests/test_dms.py`'s rule, for this module's reason: every check that
+    # exercises the probability -- the identity, the reachability set, the
+    # stratum -- is gated on these, so on the host that builds the figure a
+    # moved archive would leave the suite green with none of them run. Raised
+    # at collection so the reason is the path rather than a pile of skips.
+    raise RuntimeError(
+        "VIRAL_DASM_REQUIRE_DATA=1 but these are not readable: " + ", ".join(_ABSENT)
+    )
 
 
 @needs_dms
@@ -93,7 +110,8 @@ def test_log_p_minus_log_f_minus_log_lambda_is_one_constant(homolog: str):
     """
     clade = lib.dms_dataset(homolog).clade
     scored, _ = dms_prob.prob_scores(homolog, SCORED_TABLE, _archive(clade))
-    (prob, _), (rate, _) = scored
+    prob, _ = scored[dms_prob.DASM_PROB]
+    rate, _ = scored[dms_prob.NEUTRAL_RATE]
 
     grid = dms_dasm.selection_factor_grid(clade, SCORED_TABLE)
     merged = (
@@ -148,64 +166,128 @@ def test_the_neutral_rate_is_zero_exactly_where_one_base_cannot_reach(homolog: s
     assert reachable_by_rate.shape == reachable_by_codon.shape
     assert int((reachable_by_rate != reachable_by_codon).sum()) == 0
 
-    # Not vacuous: both must find a substantial reachable set, or an all-False
-    # pair would agree and say nothing.
-    assert reachable_by_rate.sum() > 1000
+    # Not vacuous: an all-False pair would agree and say nothing. The floor is
+    # the genetic code's rather than a round number. Every sense codon's nine
+    # single-base neighbours encode at least four distinct non-parent, non-stop
+    # residues -- CGA is the worst, at exactly four -- so two per site is a
+    # bound the code guarantees with room to spare. The observed count is
+    # ~8,810 of 25,460 cells, so this catches a collapse without pinning one.
+    assert reachable_by_rate.sum() >= 2 * reachable_by_rate.shape[0]
 
 
 @needs_dms
 @needs_artifacts
 @pytest.mark.parametrize("homolog", lib.dms_homologs())
-def test_every_scored_cell_is_single_nucleotide_and_none_is_missing(homolog: str):
-    """The scored set *is* the declared stratum -- no more, and no fewer.
+def test_every_scored_cell_is_reachable_by_one_base(homolog: str):
+    """Every scored cell is one base away, and no measured one is left out.
 
-    The counts are derived from `melt_dms`'s own stratum labels rather than
-    pinned, so this moves with the assays' filtering instead of going stale
-    beside it. Both predictors are checked: they are written from one merge,
-    but by two `write_scores` calls.
+    **Checked against the codon indicator, not against the stratum column.**
+    `prob_scores` filters on ``stratum == single_nt``, so comparing its output
+    back to that same filter would hold by construction and prove only that
+    the merge kept its rows. `single_nt_indicator` derives reachability from
+    the founder's codons independently, which is what makes this a check.
+
+    Both predictors are checked: they come from one merge, but go out through
+    two `write_scores` calls.
     """
     clade = lib.dms_dataset(homolog).clade
     cells, _ = dms_models.homolog_cells(homolog)
-    expected = cells[cells["stratum"] == dms.SINGLE_NT]
-    expected_keys = set(zip(expected["aa_site"], expected["mutant_aa"]))
-    assert expected_keys, f"{homolog} has no single-nucleotide cells to score"
+    indicator = dms.single_nt_indicator(clade, lib.GENE)
+
+    measured = set(zip(cells["aa_site"], cells["mutant_aa"]))
+    independently_reachable = {
+        (site, aa) for site, aa in measured if bool(indicator.loc[aa, site - 1])
+    }
+    assert independently_reachable, f"{homolog} has no cell one base away"
 
     scored, _ = dms_prob.prob_scores(homolog, SCORED_TABLE, _archive(clade))
-    for frame, manifest in scored:
+    for model, (frame, manifest) in scored.items():
+        assert model in dms_prob.SCORED_COLUMNS
         assert manifest.strata == (dms.SINGLE_NT,)
-        assert set(zip(frame["aa_site"], frame["mutant_aa"])) == expected_keys
+        assert set(zip(frame["aa_site"], frame["mutant_aa"])) == (
+            independently_reachable
+        )
         assert np.isfinite(frame["score"]).all()
+        assert (frame["model"] == model).all()
 
 
-@needs_dms
-@needs_artifacts
-def test_the_pivot_refuses_a_grid_that_is_not_one_row_per_cell():
-    """The pivot is where a site or residue offset would enter unseen.
-
-    The identity test above cannot catch one -- see its docstring -- so the
-    ordering is checked where it is decided. A short grid is the likely way to
-    get there: a caller that filtered the table before pivoting it.
-    """
-    clade = lib.dms_dataset(lib.dms_homologs()[0]).clade
-    grid = dms_dasm.selection_factor_grid(clade, SCORED_TABLE)
-    founder = dms_models.homolog_cells(lib.dms_homologs()[0])[1]
-
-    with pytest.raises(ValueError, match="rows for a founder of"):
-        dms_prob.linear_selection_factors(grid.iloc[:-1], founder, torch.float32)
+#: A founder short enough to write a whole grid for by hand.
+_TOY_FOUNDER = "MKV"
 
 
-def test_each_predictor_is_scored_from_its_own_column():
-    """Which column each predictor's ``log`` is taken of.
-
-    ``NEUTRAL_RATE`` and ``LINEAR_RATE_COLUMN`` happen to spell the same string
-    today, and they are different things: the first is a predictor id whose
-    score is ``log lambda``, the second a column of ``build_probability_dataframe``
-    holding ``lambda`` itself. This pins the *pairing* rather than that
-    coincidence, so renaming the predictor id stays a one-line change instead
-    of breaking a test that had no business depending on it.
-    """
-    assert dms_prob.SCORED_QUANTITIES == (
-        (dms_prob.DASM_PROB, dms_prob.PROBABILITY_COLUMN),
-        (dms_prob.NEUTRAL_RATE, dms_prob.LINEAR_RATE_COLUMN),
+def _toy_grid(founder: str = _TOY_FOUNDER) -> pd.DataFrame:
+    """A complete, well-formed `L x 20` grid in the scored table's columns."""
+    return pd.DataFrame(
+        [
+            {
+                "aa_site": site,
+                "mutant_aa": aa,
+                "parent_aa": founder[site - 1],
+                dms_dasm.SCORE_COLUMN: 0.0,
+            }
+            for site in range(1, len(founder) + 1)
+            for aa in AA_STR_SORTED
+        ]
     )
-    assert dms_prob.PROBABILITY_COLUMN != dms_prob.LINEAR_RATE_COLUMN
+
+
+def test_the_pivot_accepts_a_complete_grid():
+    """The guard below has to pass as well as fire, or it proves nothing."""
+    out = dms_prob.linear_selection_factors(_toy_grid(), _TOY_FOUNDER, torch.float32)
+    assert out.shape == (len(_TOY_FOUNDER), len(AA_STR_SORTED))
+    # exp(0) == 1 everywhere, which is also the gauge the real grid is in.
+    assert torch.allclose(out, torch.ones_like(out))
+
+
+@pytest.mark.parametrize(
+    "mangle, message",
+    [
+        pytest.param(lambda g: g.iloc[:-1], "rows for a founder of", id="short-grid"),
+        pytest.param(
+            lambda g: pd.concat([g, g.iloc[:1]]),
+            "rows for a founder of",
+            id="long-grid",
+        ),
+        pytest.param(
+            lambda g: g.assign(aa_site=g["aa_site"] - 1),
+            "absent after reindexing",
+            id="zero-indexed-sites",
+        ),
+        pytest.param(
+            lambda g: g.assign(mutant_aa=g["mutant_aa"].replace({"A": "X"})),
+            "absent after reindexing",
+            id="residue-outside-alphabet",
+        ),
+    ],
+)
+def test_the_pivot_refuses_a_grid_that_is_not_this_founder_s(mangle, message):
+    """Each way the grid can be indexed against something else.
+
+    The identity test cannot catch any of these -- see its docstring -- so the
+    ordering is checked where it is decided. Synthetic grids rather than a
+    slice of the real one, so these run off-cluster too: a site offset is the
+    bug this guard exists for, and it should not be gated on a cluster mount.
+    """
+    with pytest.raises(ValueError, match=message):
+        dms_prob.linear_selection_factors(
+            mangle(_toy_grid()), _TOY_FOUNDER, torch.float32
+        )
+
+
+def test_a_scored_column_must_be_positive_everywhere():
+    """A zero rate inside the declared stratum raises rather than dropping.
+
+    That cell is one the predictor says it can speak on, so a silent drop
+    would leave the scored count short of the stratum without saying so.
+    """
+    merged = pd.DataFrame(
+        {
+            "aa_site": [1, 2],
+            "mutant_aa": ["A", "C"],
+            dms_prob.SCORED_COLUMNS[dms_prob.NEUTRAL_RATE]: [1e-3, 0.0],
+        }
+    )
+    with pytest.raises(ValueError, match="no positive"):
+        dms_prob._require_loggable(
+            merged, dms_prob.SCORED_COLUMNS[dms_prob.NEUTRAL_RATE]
+        )

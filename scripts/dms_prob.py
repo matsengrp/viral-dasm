@@ -74,26 +74,29 @@ from dasm2.sequence.constants import AA_STR_SORTED
 DASM_PROB = "dasm_prob"
 
 #: The neutral-rate predictor's id. Carried as a predictor of its own because
-#: the size of the probability's penalty is only interpretable beside it: a
-#: rate that predicted the assay well would make ``log p`` a blend of two
-#: informative signals rather than one signal plus an irrelevance.
+#: the probability's penalty is only interpretable beside it: ``log p`` is
+#: ``log f`` plus ``log lambda`` at unit weight, so what the penalty measures
+#: is whether unit weight is the right weight. Its *marginal* correlation with
+#: the assay is weakly negative, but that is mostly induced -- the whichmut
+#: loss fits ``f`` as observed-over-opportunity, so ``f`` absorbs the inverse
+#: of ``lambda`` and the two correlate negatively. See `tests/test_dms_prob.py`
+#: and the PR that added this for the conditional picture, which differs.
 NEUTRAL_RATE = "neutral_rate"
 
-#: ``build_probability_dataframe``'s own columns. :data:`LINEAR_RATE_COLUMN`
-#: collides by spelling with :data:`NEUTRAL_RATE` and is a different quantity --
-#: that one is a predictor id whose score is ``log lambda``, this one is a
-#: column holding ``lambda`` itself. Named apart so neither can be typed where
-#: the other belongs.
-PROBABILITY_COLUMN = "whichmut_probability"
-LINEAR_RATE_COLUMN = "neutral_rate"
-
-#: What each predictor's ``score`` column is, in the order the two outputs are
-#: written. The frame description in each manifest names the archive as well as
-#: the founder, because a probability is a property of the pair.
-SCORED_QUANTITIES = (
-    (DASM_PROB, PROBABILITY_COLUMN),
-    (NEUTRAL_RATE, LINEAR_RATE_COLUMN),
-)
+#: Which of ``build_probability_dataframe``'s columns each predictor is the
+#: natural log of. Note that ``neutral_rate`` names both a predictor here and a
+#: column there, and means a different thing on each side: the predictor's score
+#: is ``log lambda``, the column holds ``lambda``.
+#:
+#: A mapping rather than a sequence, because the output paths are looked up by
+#: predictor id in :func:`main`. A pair of positional sequences zipped together
+#: would write the probabilities to the neutral-rate file if either were ever
+#: reordered, and nothing downstream could catch it: ``write_scores`` validates
+#: the frame against its manifest, and neither knows which path it is bound for.
+SCORED_COLUMNS: dict[str, str] = {
+    DASM_PROB: "whichmut_probability",
+    NEUTRAL_RATE: "neutral_rate",
+}
 
 
 def linear_selection_factors(
@@ -102,10 +105,12 @@ def linear_selection_factors(
     """``[L, 20]`` linear selection factors, from the long scored grid.
 
     The pivot is the one place a site or residue offset could enter unnoticed,
-    and the identity test downstream cannot catch it -- ``probabilities`` is
-    ``selection_factors * rate_to_aa / Z`` by construction, so an identity
-    recomputed from this tensor holds however wrong this tensor is. So the
-    checks are here, where the ordering is actually decided.
+    so the ordering is checked here, where it is decided. The identity
+    ``log p - log f - log lambda = -log Z`` can catch an offset too, but only
+    when ``log f`` is re-read and re-joined from the scored table: recomputed
+    from *this* tensor it is ``selection_factors * rate_to_aa / Z`` divided
+    back out, and holds however wrong this tensor is.
+    `tests/test_dms_prob.py` writes it in the form that catches one.
 
     Args:
         grid: :func:`dms_dasm.selection_factor_grid`'s rows for one clade.
@@ -118,9 +123,11 @@ def linear_selection_factors(
         in **linear** space.
 
     Raises:
-        ValueError: If the grid is not exactly one row per (site, residue), if
-            any site in ``1..L`` is missing, if any residue is missing, or if
-            any factor is null. Each would otherwise reach
+        ValueError: If the grid is not exactly one row per (site, residue), or
+            if reindexing it to ``1..L`` x ``AA_STR_SORTED`` leaves a hole.
+            Between them those two cover a filtered grid, a grid still holding
+            more than one model or clade, 0-indexed sites, and a missing
+            residue -- each of which would otherwise reach
             ``aa_mutation_probabilities`` as a silently reindexed tensor.
     """
     expected = len(founder_aa) * len(AA_STR_SORTED)
@@ -133,28 +140,21 @@ def linear_selection_factors(
             f"still holds more than one model, clade or arm."
         )
 
-    pivot = grid.pivot(
+    # `reindex` rather than a check per axis: a hole after it is a site outside
+    # `1..L` or a residue outside the alphabet, and with the row count already
+    # fixed above, either one means the grid is indexed against something other
+    # than this founder. Separate messages per axis cost two more raises and
+    # say the same thing.
+    ordered = grid.pivot(
         index="aa_site", columns="mutant_aa", values=dms_dasm.SCORE_COLUMN
-    )
-    sites = list(range(1, len(founder_aa) + 1))
-    if list(pivot.index) != sites:
+    ).reindex(index=range(1, len(founder_aa) + 1), columns=list(AA_STR_SORTED))
+    holes = int(ordered.isna().to_numpy().sum())
+    if holes:
         raise ValueError(
-            f"the scored grid's sites are not 1..{len(founder_aa)}; it runs "
-            f"{pivot.index.min()}..{pivot.index.max()} over {len(pivot.index)} "
-            f"distinct values. Sites are 1-indexed into the founder."
-        )
-    missing = sorted(set(AA_STR_SORTED) - set(pivot.columns))
-    if missing:
-        raise ValueError(
-            f"the scored grid is missing {len(missing)} residues: {missing}. "
-            f"The model scores all twenty at every site."
-        )
-
-    ordered = pivot[list(AA_STR_SORTED)]
-    if ordered.isna().to_numpy().any():
-        raise ValueError(
-            f"{int(ordered.isna().to_numpy().sum())} cells of the scored grid "
-            f"are null, so the pivot did not cover every (site, residue) pair."
+            f"{holes} of {expected} cells are absent after reindexing the "
+            f"scored grid to sites 1..{len(founder_aa)} and the twenty "
+            f"residues. Sites are 1-indexed into the founder, and the model "
+            f"scores all twenty at every one of them."
         )
     return torch.tensor(np.exp(ordered.to_numpy()), dtype=dtype)
 
@@ -203,24 +203,49 @@ def probability_frame(
     return build_probability_dataframe(probabilities, rate_to_aa, founder_aa)
 
 
+def _require_loggable(merged: pd.DataFrame, column: str) -> None:
+    """Every cell in the declared stratum carries a positive ``column``.
+
+    Both columns are checked rather than only the probability, although
+    ``p = lambda * f / Z`` with ``f`` and ``Z`` positive makes a positive ``p``
+    imply a positive ``lambda``. The implication fails exactly where ``p``
+    underflows, and a message naming the column actually at fault is worth more
+    than the line it costs.
+
+    Raises:
+        ValueError: If any cell is missing, zero or negative. These are cells
+            the predictor declares itself able to speak on, so dropping them
+            would leave the scored count short of the declared stratum without
+            saying so.
+    """
+    flat = merged[merged[column].isna() | (merged[column] <= 0)]
+    if not len(flat):
+        return
+    absent = int(flat[column].isna().sum())
+    sample = sorted(zip(flat["aa_site"], flat["mutant_aa"]))[:5]
+    raise ValueError(
+        f"{len(flat)} of {len(merged)} single-nucleotide cells have no positive "
+        f"{column}, so its log is undefined -- {absent} absent from the "
+        f"probability grid and {len(flat) - absent} zero or negative. A cell "
+        f"absent from the grid means the grid and the assay disagree about the "
+        f"site range; a zero means the stratum and the neutral rates disagree "
+        f"about which mutations one base change reaches. First few: {sample}."
+    )
+
+
 def prob_scores(
     homolog: str, table_path: str | Path, archive_path: str | Path
-) -> tuple[list[tuple[pd.DataFrame, dms_models.Manifest]], str]:
+) -> tuple[dict[str, tuple[pd.DataFrame, dms_models.Manifest]], str]:
     """Both predictors' scores for one homolog, and the founder they read.
 
     One function for the pair rather than one per predictor: the archive load
-    and the partition function are the expensive half and are shared, and a
+    and the partition function are the expensive half and are shared, so a
     second script would run them again for the same founder.
 
     Returns:
-        ``([(frame, manifest), ...], founder)``, in :data:`SCORED_QUANTITIES`
-        order.
-
-    Raises:
-        ValueError: If a single-nucleotide cell has no probability. That cell
-            is one the predictor declares itself able to speak on, so dropping
-            it would leave the scored count short of the declared stratum
-            without saying so.
+        ``({predictor id: (frame, manifest)}, founder)``. Keyed rather than
+        ordered so that a caller binds each frame to its output path by name --
+        see :data:`SCORED_COLUMNS`.
     """
     cells, founder_aa = dms_models.homolog_cells(homolog)
     clade = dms_dataset(homolog).clade
@@ -228,37 +253,36 @@ def prob_scores(
 
     reachable = cells[cells["stratum"] == dms.SINGLE_NT]
     merged = reachable.merge(
-        frame[[*dms_models.JOIN_KEY, PROBABILITY_COLUMN, LINEAR_RATE_COLUMN]],
+        frame[[*dms_models.JOIN_KEY, *SCORED_COLUMNS.values()]],
         on=list(dms_models.JOIN_KEY),
         how="left",
         validate="one_to_one",
     )
+    for column in SCORED_COLUMNS.values():
+        _require_loggable(merged, column)
 
-    out: list[tuple[pd.DataFrame, dms_models.Manifest]] = []
-    for model, column in SCORED_QUANTITIES:
-        flat = merged[merged[column].isna() | (merged[column] <= 0)]
-        if len(flat):
-            sample = sorted(zip(flat["aa_site"], flat["mutant_aa"]))[:5]
-            raise ValueError(
-                f"{model}: {len(flat)} of {len(merged)} single-nucleotide cells "
-                f"have no positive {column}, so its log is undefined. Every "
-                f"cell in this stratum is reachable by one base change and must "
-                f"carry a positive neutral rate; a zero means the stratum and "
-                f"the rates disagree about reachability. First few: {sample}."
-            )
-        scored = merged.assign(model=model, score=np.log(merged[column]))
-        manifest = dms_models.Manifest(
-            model=model,
-            strata=(dms.SINGLE_NT,),
-            frame=(
-                f"clade founder {clade} {lib.GENE}, from mat-pcp's own "
-                f"clade_founders FASTA; 1-indexed, so no site mapping. Neutral "
-                f"rates from {Path(archive_path).name}"
+    # One manifest per predictor, differing only in `model`: both read the same
+    # founder through the same archive, which is what the frame string records.
+    described = (
+        f"clade founder {clade} {lib.GENE}, from mat-pcp's own clade_founders "
+        f"FASTA; 1-indexed, so no site mapping. Neutral rates from "
+        f"{Path(archive_path).name}"
+    )
+    digest = dms_models.sequence_sha256(founder_aa)
+    return {
+        model: (
+            merged.assign(model=model, score=np.log(merged[column]))[
+                list(dms_models.PREDICTOR_COLUMNS)
+            ],
+            dms_models.Manifest(
+                model=model,
+                strata=(dms.SINGLE_NT,),
+                frame=described,
+                input_sequence_sha256=digest,
             ),
-            input_sequence_sha256=dms_models.sequence_sha256(founder_aa),
         )
-        out.append((scored[list(dms_models.PREDICTOR_COLUMNS)], manifest))
-    return out, founder_aa
+        for model, column in SCORED_COLUMNS.items()
+    }, founder_aa
 
 
 def main() -> None:
@@ -275,10 +299,14 @@ def main() -> None:
     parser.add_argument("--neutral-output", required=True, type=Path)
     args = parser.parse_args()
 
+    # Bound by predictor id rather than by position: `write_scores` validates a
+    # frame against its manifest, and neither of them knows which path it is
+    # being written to, so a swap here would be silent.
+    outputs = {DASM_PROB: args.output, NEUTRAL_RATE: args.neutral_output}
     scored, sequence = prob_scores(args.homolog, args.table, args.neutral_archive)
-    for (frame, manifest), path in zip(scored, (args.output, args.neutral_output)):
-        dms_models.write_scores(frame, manifest, sequence, path)
-        print(f"wrote {path}: {len(frame)} cells for {args.homolog}")
+    for model, (frame, manifest) in scored.items():
+        dms_models.write_scores(frame, manifest, sequence, outputs[model])
+        print(f"wrote {outputs[model]}: {len(frame)} cells for {args.homolog}")
 
 
 if __name__ == "__main__":
