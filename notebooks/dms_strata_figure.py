@@ -63,7 +63,7 @@ def _(mo):
 
 
 @app.cell
-def _(PANEL_DIR, SLUG, charts, fl, mo, spec):
+def _(HOMOLOG, PANEL_DIR, SLUG, charts, fl, mo, spec):
     # `mo.stop` rather than a raise, for `notebooks/dms.py`'s reason: a reader
     # exporting this by hand before the panels exist should be told which rule
     # writes them. Under `rule compose_dms_strata` the case cannot arise.
@@ -101,8 +101,11 @@ def _(PANEL_DIR, SLUG, charts, fl, mo, spec):
             f"tick label either row draws."
         )
 
+    # The assay is named here because three renders of this notebook are
+    # otherwise identical on screen, and the panel stems are the only thing
+    # distinguishing them.
     mo.md(
-        "At the size the panel rule rendered it:\n\n"
+        f"**{HOMOLOG}**, at the size the panel rule rendered it:\n\n"
         + "\n".join(
             f"- **{_k}** — {_v.shape[1]} x {_v.shape[0]} px"
             for _k, _v in PANELS.items()

@@ -53,11 +53,11 @@ from panel_spec import (
     DMS_PREDICTOR_CORRELATIONS,
     DMS_PREDICTORS,
     DMS_SELECTION,
+    check_slugs_are_distinct,
     dms_strata_figure_stem,
     dms_strata_panel_letters,
     dms_strata_panels,
     homolog_for_slug,
-    homolog_slug,
     PROBABILITIES_FIGURE_STEM,
     PROBABILITIES_SCATTER_HOMOLOG,
     PROBABILITIES_PANEL_LETTERS,
@@ -379,6 +379,46 @@ def dms_all_scores(*_):
         str(dms_score_path(model, homolog))
         for model in DMS_PREDICTORS
         for homolog in dms_homologs()
+    ]
+
+
+#: `fig:dms_strata`'s slug for each homolog, checked for collisions **here**,
+#: once, at parse time. `panel_spec.homolog_slug` strips dots and case and so
+#: is not injective; a roster where two homologs slugged alike would have two
+#: jobs write one figure, and the constraint below would hold the same token
+#: twice. This raises instead.
+DMS_STRATA_SLUGS: dict[str, str] = check_slugs_are_distinct(dms_homologs())
+
+#: The alternation both `fig:dms_strata` rules constrain their wildcard to.
+#:
+#: **Load-bearing rather than defensive.** Without it `dms_strata_{slug}.html`
+#: and `dms_strata_figure_{slug}.html` can match each other -- a slug of
+#: `figure_kp311` satisfies the first -- and snakemake would see two rules able
+#: to produce one file.
+DMS_STRATA_SLUG_PATTERN = "|".join(re.escape(slug) for slug in DMS_STRATA_SLUGS)
+
+
+def dms_strata_homolog(wildcards):
+    """The homolog a `fig:dms_strata` job is drawing, from its `{slug}`.
+
+    A `params` lookup rather than a wildcard, because every output of those
+    rules carries the slug and snakemake reads a job's wildcards back off its
+    output paths -- so there is no `homolog` wildcard to interpolate.
+    """
+    return homolog_for_slug(wildcards.slug, dms_homologs())
+
+
+def dms_strata_figure_paths(*_):
+    """Every assay's composed `fig:dms_strata`, in every format.
+
+    Named once because two rules need it and they must not disagree:
+    `rule dms_strata` is the aggregator, and `rule figures` enumerates the
+    figures itself rather than depending on it.
+    """
+    return [
+        str(path)
+        for slug in DMS_STRATA_SLUGS
+        for path in composed_paths(DMS_SELECTION, dms_strata_figure_stem(slug))
     ]
 
 
@@ -785,13 +825,7 @@ rule dms_strata:
     always done and what the captions have to say.
     """
     input:
-        [
-            str(path)
-            for homolog in dms_homologs()
-            for path in composed_paths(
-                DMS_SELECTION, dms_strata_figure_stem(homolog_slug(homolog))
-            )
-        ],
+        dms_strata_figure_paths,
 
 
 rule dms_strata_panels:
@@ -806,19 +840,16 @@ rule dms_strata_panels:
     CSV beside it from drifting -- so this rule waits on
     `rule dms_predictor_summary` rather than on the scores alone.
 
-    **The wildcard is the slug, and the homolog is a `params` lookup.**
-    Snakemake reads a job's wildcards back off its output paths, and every
-    output here carries `panel_spec.homolog_slug`'s token -- so there is no
-    `homolog` wildcard to interpolate, and asking for one raises when the shell
-    command is formatted, after the DAG has already built. `scores` is the
-    whole predictor x homolog cross product either way, so no input moves.
+    The wildcard is the slug and the homolog is a `params` lookup; see
+    `dms_strata_homolog` above. **`scores` is the whole predictor x homolog
+    cross product for every slug**, because `dms_summary.merged_frames` reads
+    all of it and then selects one homolog -- so no input moved, and a change
+    to any one homolog's scores reruns all three jobs.
     """
     wildcard_constraints:
-        slug="|".join(
-            re.escape(homolog_slug(homolog)) for homolog in dms_homologs()
-        ),
+        slug=DMS_STRATA_SLUG_PATTERN,
     params:
-        homolog=lambda wildcards: homolog_for_slug(wildcards.slug, dms_homologs()),
+        homolog=dms_strata_homolog,
     input:
         notebook="notebooks/dms_strata.py",
         summary="scripts/dms_summary.py",
@@ -874,11 +905,9 @@ rule compose_dms_strata:
     separator this rule had no need of before it took an argument.
     """
     wildcard_constraints:
-        slug="|".join(
-            re.escape(homolog_slug(homolog)) for homolog in dms_homologs()
-        ),
+        slug=DMS_STRATA_SLUG_PATTERN,
     params:
-        homolog=lambda wildcards: homolog_for_slug(wildcards.slug, dms_homologs()),
+        homolog=dms_strata_homolog,
     input:
         layout="scripts/figure_layout.py",
         spec="scripts/panel_spec.py",
@@ -1562,13 +1591,7 @@ rule figures:
         # figures rather than one, since each assay gets its own. Enumerated
         # here rather than taken from `rule dms_strata`, which this rule does
         # not depend on.
-        [
-            str(path)
-            for homolog in dms_homologs()
-            for path in composed_paths(
-                DMS_SELECTION, dms_strata_figure_stem(homolog_slug(homolog))
-            )
-        ],
+        dms_strata_figure_paths(),
         [
             str(path)
             for path in composed_paths(DMS_SELECTION, PROBABILITIES_FIGURE_STEM)

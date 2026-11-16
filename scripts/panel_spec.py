@@ -636,29 +636,57 @@ DMS_STRATA_COLUMNS: tuple[str, ...] = ("all", "single_nt", "multi_nt")
 def homolog_slug(homolog: str) -> str:
     """One homolog's id as a figure stem spells it: ``KP.3.1.1`` -> ``kp311``.
 
-    **Dots are fine in a pipeline filename and this is not one.** Score
-    Parquets carry them (``antigen_KP.3.1.1.parquet``), `scripts/lib.py` records
-    that homolog names "are written into panel filenames and read back as join
-    keys", and :data:`PROBABILITIES_PANELS` already ships a dotted panel stem
-    whose PNG, SVG and tracked CSV all exist. Two things are different here.
-
-    The load-bearing one is that **a rule's wildcard has to be a single
-    token**. `workflow/figures.smk` builds these figures from a ``{slug}``
-    wildcard, snakemake reads a job's wildcards back off its output paths, and
-    a stem holding the homolog would make the wildcard the homolog -- which is
-    the same thing by another name only if the figure stem also holds it. It
-    does not, because of the second reason.
-
-    That second reason is that **a composed figure's stem leaves the
+    **One reason, and it is that a composed figure's stem leaves the
     pipeline**: it becomes ``figures/dms_strata_*.pdf`` in the manuscript and
     the ``\\label`` beside it. `main.tex` always writes the extension
     explicitly, which is the case `graphicx` handles best, so this is a path
     not worth having to reason about rather than a demonstrated failure.
 
-    :func:`homolog_for_slug` is the inverse, which `workflow/figures.smk` needs
-    to hand the notebook a homolog it can look a dataset up by.
+    **Dots in a pipeline filename are fine, and nothing here says otherwise.**
+    Score Parquets carry them (``antigen_KP.3.1.1.parquet``), five rules in
+    `workflow/figures.smk` already take a dotted ``{homolog}`` wildcard,
+    `scripts/lib.py` records that homolog names "are written into panel
+    filenames and read back as join keys", and :data:`PROBABILITIES_PANELS`
+    ships a dotted panel stem whose PNG, SVG and tracked CSV all exist. The
+    panel stems here are slugged only so that one wildcard serves a rule whose
+    other outputs are the composed figure's.
+
+    **Not injective**, which is why :func:`homolog_for_slug` checks rather than
+    assumes: ``KP.3.1.1`` and ``KP.3.11`` both come out ``kp311``, as do
+    ``XBB.1.5`` and ``XBB.15``. Two such homologs would write one filename and
+    the second job would overwrite the first, with the wildcard constraint
+    holding the same token twice and nothing raising.
     """
     return homolog.lower().replace(".", "")
+
+
+def check_slugs_are_distinct(homologs: Iterable[str]) -> dict[str, str]:
+    """Map every homolog's slug back to it, refusing a roster that collides.
+
+    Called once where `workflow/figures.smk` builds its wildcard constraint, so
+    a roster whose slugs collide stops the workflow at parse time rather than
+    silently drawing one assay's figure over another's.
+
+    Returns:
+        ``{slug: homolog}``, which is also what :func:`homolog_for_slug` looks
+        a wildcard up in.
+
+    Raises:
+        ValueError: if two homologs share a slug.
+    """
+    roster = list(homologs)
+    mapping: dict[str, str] = {}
+    for homolog in roster:
+        slug = homolog_slug(homolog)
+        if slug in mapping:
+            raise ValueError(
+                f"{mapping[slug]!r} and {homolog!r} both slug to {slug!r}, so "
+                f"they would share a figure stem and one would overwrite the "
+                f"other. `homolog_slug` strips dots and case, which is not "
+                f"injective; this roster needs a different rule."
+            )
+        mapping[slug] = homolog
+    return mapping
 
 
 def homolog_for_slug(slug: str, homologs: Iterable[str]) -> str:
@@ -671,15 +699,15 @@ def homolog_for_slug(slug: str, homologs: Iterable[str]) -> str:
     imports `dms_homologs` for its other wildcard constraints.
 
     Raises:
-        ValueError: if no homolog slugs to this, in `lib.dms_dataset`'s shape.
-            A slug that resolved to nothing would draw a figure named for one
-            assay out of another's cells, which no later check could see.
+        ValueError: if two homologs share this slug (via
+            :func:`check_slugs_are_distinct`), or if none has it. Under the
+            rules' `wildcard_constraints` the second cannot happen, so it
+            guards a direct caller rather than a job.
     """
-    roster = list(homologs)
-    for homolog in roster:
-        if homolog_slug(homolog) == slug:
-            return homolog
-    known = ", ".join(f"{homolog} -> {homolog_slug(homolog)}" for homolog in roster)
+    mapping = check_slugs_are_distinct(homologs)
+    if slug in mapping:
+        return mapping[slug]
+    known = ", ".join(f"{homolog} -> {s}" for s, homolog in mapping.items())
     raise ValueError(f"{slug!r} is no homolog's slug. The roster is {known}.")
 
 
@@ -704,8 +732,9 @@ def dms_strata_figure_stem(slug: str) -> str:
     """One assay's composed stem, which is its LaTeX label.
 
     The manuscript would include ``figures/dms_strata_kp311.pdf`` and refer to
-    ``\\autoref{fig:dms_strata_kp311}``. It references none of the three today;
-    see this issue's scope note.
+    ``\\autoref{fig:dms_strata_kp311}``. `main.tex` references none of the three
+    today, and the three captions are a manuscript change this pipeline does
+    not make.
     """
     return f"dms_strata_{slug}"
 
@@ -768,7 +797,7 @@ PROBABILITIES_SCATTER_HOMOLOG = SCATTER_HOMOLOG
 PROBABILITIES_BAR_ARMS: tuple[str, ...] = ("dasm", "dasm_prob", "antigen")
 
 #: One image per panel. Panel A is a single scatter and panel B a single row of
-#: grouped bars, so unlike `DMS_STRATA_PANELS` there is nothing concatenated
+#: grouped bars, so unlike `dms_strata_panels` there is nothing concatenated
 #: inside either.
 PROBABILITIES_PANELS: tuple[str, ...] = (
     f"panel_a_probability_vs_fitness_{PROBABILITIES_SCATTER_HOMOLOG}",
@@ -786,7 +815,7 @@ PROBABILITIES_PANEL_LETTERS: dict[str, str] = {
 
 #: One row of two panels, side by side. The figure is a single row, so the two
 #: images must be level in **height** -- which is the mirror of the width
-#: levelling `DMS_STRATA_FIGURE_ROWS` needs, and is why
+#: levelling `dms_strata_figure_rows` needs, and is why
 #: `notebooks/probabilities_figure.py` checks heights rather than widths.
 PROBABILITIES_FIGURE_ROWS: tuple[tuple[str, ...], ...] = (
     tuple(PROBABILITIES_PANEL_LETTERS),

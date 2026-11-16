@@ -90,8 +90,11 @@ EXPECTED_SLUGS = {"BA.1": "ba1", "XBB.1.5": "xbb15", "KP.3.1.1": "kp311"}
 def test_the_slugs_are_what_the_manuscript_would_carry():
     """A figure stem leaves the pipeline, so its spelling is pinned here."""
     for homolog, slug in EXPECTED_SLUGS.items():
-        assert panel_spec.homolog_slug(homolog) == slug
-        assert "." not in slug, "a composed stem becomes a filename and a label"
+        produced = panel_spec.homolog_slug(homolog)
+        assert produced == slug
+        # Asserted on the function's own output, not on the literal above: a
+        # dot in a composed stem reaches a filename and a `\\label`.
+        assert "." not in produced
     assert set(lib.dms_homologs()) == set(EXPECTED_SLUGS), (
         "config.yaml's homologs moved; the slugs above are what the "
         "manuscript's figure filenames would become"
@@ -122,12 +125,30 @@ def test_the_two_panel_stems_match_the_two_models():
         ] == list(letters)
 
 
+def test_the_roster_has_no_two_homologs_that_slug_alike():
+    """`homolog_slug` strips dots and case, so it is not injective.
+
+    ``KP.3.1.1`` and ``KP.3.11`` both come out ``kp311``. Two such homologs
+    would write one figure stem and the second job would overwrite the first,
+    with the `slug` wildcard constraint holding the same token twice and
+    nothing raising. The slugs are taken from the **roster** here rather than
+    from `EXPECTED_SLUGS`, because that is the set that can collide.
+    """
+    roster = lib.dms_homologs()
+    assert set(panel_spec.check_slugs_are_distinct(roster).values()) == set(roster)
+
+    with pytest.raises(ValueError, match="both slug to"):
+        panel_spec.check_slugs_are_distinct(["KP.3.1.1", "KP.3.11"])
+
+
 def test_no_two_assays_share_a_stem():
     """Three figures in one directory, each drawn from a different assay.
 
-    A slug function that returned a constant -- or one homolog's slug being a
-    prefix of another's -- would have three rules write one pair of PNGs, and
-    the last to finish would be the figure all three compositions read.
+    What this catches is a stem builder that **ignores its slug** -- dropping
+    the ``_{slug}`` suffix would have three rules write one pair of PNGs, and
+    the last to finish would be the figure all three compositions read. The
+    distinctness of the slugs themselves is the test above; this one is handed
+    three that already differ.
     """
     stems = [
         stem
@@ -135,6 +156,24 @@ def test_no_two_assays_share_a_stem():
         for stem in panel_spec.dms_strata_panels(slug)
     ]
     assert len(set(stems)) == len(stems), f"panel stems collide: {stems}"
+
+
+def test_the_stems_are_the_tracked_tables_beside_them():
+    """The one check that pins the stem *format* rather than its shape.
+
+    Every other assertion here is structural -- the letters follow the stems,
+    the rows follow the letters -- and all of them would pass if the format
+    string changed, while the six committed CSVs became orphans named for a
+    spelling nothing produces any more. These files are tracked, so this reads
+    them.
+    """
+    for slug in EXPECTED_SLUGS.values():
+        for stem in panel_spec.dms_strata_panels(slug):
+            path = panel_spec.panel_csv_path(panel_spec.DMS_SELECTION, stem)
+            assert path.exists(), (
+                f"{path} is not in the tree, so `dms_strata_panels` no longer "
+                f"names the tables `rule dms_strata_panels` wrote"
+            )
 
     figures = [
         panel_spec.dms_strata_figure_stem(slug) for slug in EXPECTED_SLUGS.values()

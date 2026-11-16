@@ -272,14 +272,14 @@ def test_the_figure_does_not_share_fig_dms_panel_stems():
     `fig:dms_strata` is three figures now, one per assay, so its stems are
     checked against all three rather than against one.
     """
-    _slugs = [panel_spec.homolog_slug(homolog) for homolog in lib.dms_homologs()]
+    slugs = [panel_spec.homolog_slug(homolog) for homolog in lib.dms_homologs()]
     others = set(panel_spec.DMS_PANELS) | {
-        stem for slug in _slugs for stem in panel_spec.dms_strata_panels(slug)
+        stem for slug in slugs for stem in panel_spec.dms_strata_panels(slug)
     }
     assert not others & set(panel_spec.PROBABILITIES_PANELS)
     assert panel_spec.PROBABILITIES_FIGURE_STEM != panel_spec.DMS_FIGURE_STEM
     assert panel_spec.PROBABILITIES_FIGURE_STEM not in {
-        panel_spec.dms_strata_figure_stem(slug) for slug in _slugs
+        panel_spec.dms_strata_figure_stem(slug) for slug in slugs
     }
 
 
