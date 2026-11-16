@@ -12,62 +12,81 @@ and anything derived from them may be committed.
 
 | homolog | clade | file | source | released |
 |---|---|---|---|---|
-| BA.1 | 21K | `haddox2023_BA1_mutations_df.csv` | [matsengrp/SARS-CoV-2_spike_multidms](https://github.com/matsengrp/SARS-CoV-2_spike_multidms), `results/mutations_df.csv` at commit `66b9833d39308b853a9531634cc7e9043d6a11f8` | no licence declared; this project's own paper |
+| BA.1 | 21K | `dadonaite2023_BA1_muteffects.csv` | [dms-vep/SARS-CoV-2_Omicron_BA.1_spike_DMS_mAbs](https://github.com/dms-vep/SARS-CoV-2_Omicron_BA.1_spike_DMS_mAbs), `results/muteffects_functional/muteffects_observed.csv` at commit `fc551fe332ac8c50c3ffeacc4c6a8dac5fe43369` | MIT |
 | XBB.1.5 | 23A | `dadonaite2024_XBB15_summary.csv` | [dms-vep/SARS-CoV-2_XBB.1.5_spike_DMS](https://github.com/dms-vep/SARS-CoV-2_XBB.1.5_spike_DMS), `results/summaries/summary.csv` | MIT, granting "this software and associated data" |
 | KP.3.1.1 | 24E | `dadonaite2025_KP311_func_effects.csv` | [dms-vep/SARS-CoV-2_KP.3.1.1_spike_DMS](https://github.com/dms-vep/SARS-CoV-2_KP.3.1.1_spike_DMS), `results/func_effects/averages/293T_medium_ACE2_entry_func_effects.csv` | MIT, as above |
 
-Citations: BA.1, Haddox et al., [10.1101/2023.07.31.551037](https://doi.org/10.1101/2023.07.31.551037); XBB.1.5, Dadonaite et al., [10.1038/s41586-024-07636-1](https://doi.org/10.1038/s41586-024-07636-1); KP.3.1.1, Dadonaite et al., [10.1128/jvi.01423-25](https://doi.org/10.1128/jvi.01423-25).
+Citations: BA.1, Dadonaite et al., [10.1016/j.cell.2023.02.001](https://doi.org/10.1016/j.cell.2023.02.001); XBB.1.5, Dadonaite et al., [10.1038/s41586-024-07636-1](https://doi.org/10.1038/s41586-024-07636-1); KP.3.1.1, Dadonaite et al., [10.1128/jvi.01423-25](https://doi.org/10.1128/jvi.01423-25).
 
 ## Filtering: each study's own, not a house rule
 
 These are three separate experiments with their own thresholds, and the
-measurements used here are the ones their authors would hand you. Two of the
-three release a file that is already filtered; one does not, and what it is
+measurements used here are the ones their authors would hand you. One of the
+three releases a file that is already filtered; two do not, and what each is
 missing is read from that study rather than borrowed from the other two.
 
-### BA.1 — already filtered by its study
+### BA.1 — not filtered by its study, so its threshold is applied here
 
-`results/mutations_df.csv` is written by that repository's own
-`spike-analysis.ipynb`:
+`results/muteffects_functional/muteffects_observed.csv` is the per-mutation
+effect on spike-mediated entry that experiment publishes, the median over its
+three libraries, on the observed phenotype scale. It is released over every
+mutation the pipeline fit — it still carries `times_seen`, `effect_std` and
+`n_libraries` — so this pipeline applies the threshold that repository
+declares:
+
+- `config.yaml`, `muteffects_plot_kwargs`: `addtl_slider_stats: {times_seen: 3}`.
+
+**That is the threshold its own analysis uses for this job.** The repository's
+`notebooks/compare_muteffects.ipynb` correlates these effects against four
+other datasets — natural-sequence enrichment, and the Starr, Ouyang and Tan
+scans — which is exactly what `fig:dms` does, and it reads:
 
 ```python
-# the number of times a mutation must be seen in each condition to be included in downstream analysis
-times_seen_threshold = 1
-# The chosen lasso strength for our final spike model results
-chosen_lasso_strength = 5e-5
-...
-mut_df_replicates = multidms.utils.combine_replicate_muts(
-    {row.replicate: row[model_name] for idx, row in chosen_replicate_models.iterrows()},
-    times_seen_threshold=times_seen_threshold,
-    how="inner",
+times_seen = config["muteffects_plot_kwargs"]["addtl_slider_stats"]["times_seen"]
+muteffects = (
+    pd.read_csv(config["muteffects_observed"])
+    .query("wildtype != mutant")
+    .query("(wildtype not in ['-', '*']) and (mutant not in ['-', '*'])")
+    .query("times_seen >= @times_seen")
 )
-mut_df_replicates.to_csv(f"{OUTDIR}/mutations_df.csv")
 ```
 
-So every mutation it carries was seen at least once in **each** of the three
-homolog conditions and was fit in **both** replicates, at the lasso strength
-that notebook calls the chosen one. Nothing further is filtered here.
+The first two queries are what `scripts/dms_published.py` and `scripts/dms.py`
+already do for all three homologs; the third is `min_times_seen: 3`.
 
-**The effect column is `avg_predicted_func_score`**, the two replicates'
-average. It carries no homolog suffix because BA.1 is the model's *reference*
-condition — the file has `shift_Delta` and `shift_Omicron_BA2` columns and no
-BA.1 shift, which is what identifies the reference.
+**No `effect_std` bound is set, because that study declares none.** Its
+largest value on this file is 3.54, so borrowing KP.3.1.1's 2.5 would drop
+rows these authors keep. `tests/test_dms_published.py` pins both directions of
+the predicate.
 
-**This is a fitted artifact, not a raw measurement table.** It is the output
-of a multidms fit over that repository's own functional scores, so reproducing
-it means rerunning that pipeline rather than downloading a file. Unlike the
-other two, which are released measurements, this one is a model's parameters —
-which is also why the manuscript says the BA.1 effects it analyzes "are not
-that experiment's own estimates, but effects re-estimated from its data".
+**`reference_site`, not `sequential_site`.** The file carries both; the first
+is Wuhan-Hu-1 numbering, which is what every table in this pipeline is keyed
+on, and the second indexes the construct. They agree on 6% of rows, so reading
+the wrong one would not fail loudly.
 
-**The commit is the one that accompanies the preprint**, Haddox et al.,
-"Jointly modeling deep mutational scans identifies shifted mutational effects
-among SARS-CoV-2 spike homologs", bioRxiv
-[2023.07.31.551037v1](https://doi.org/10.1101/2023.07.31.551037) — `main.bib`'s
-`haddox2023jointly`, whose PDF is in the manuscript repository's `papers/`.
-That is what fixes the fit this file holds: the `times_seen_threshold` and the
-lasso strength above are the ones that version's analysis notebook sets, and a
-later revision of the paper may move both.
+#### This replaces the multidms refit, which this figure read before
+
+Until this change, BA.1's effects came from `matsengrp/SARS-CoV-2_spike_multidms`'s
+`results/mutations_df.csv` — the `avg_predicted_func_score` column of a
+multidms fit over Delta, BA.1 and BA.2, at commit
+`66b9833d39308b853a9531634cc7e9043d6a11f8`. Two reasons it is gone:
+
+- **It is a variant's predicted phenotype, not a mutation's effect.** The
+  wildtype does not sit at zero on that scale: the 1,117 mutations the fit
+  gives `|avg_beta| < 0.05` land at −1.68 ± 0.17, and 99.98% of the column is
+  below zero. BA.1 was the one homolog of the three whose axis did not mean
+  "effect relative to this clade's wildtype", and nothing on the figure said
+  so.
+- **It covers less.** That table is written with
+  `combine_replicate_muts(..., how="inner")`, keeping only mutations seen in
+  all three homolog libraries; the experiment's own table keeps every mutation
+  it fit. Retained substitutions rise from 5,431 to 6,828, and measured cells
+  from 5,413 to 6,808.
+
+The two quantities correlate at r = 0.911, and the switch moves the figure's
+correlations by at most 0.015 — the DASM's, over the cells both carry, goes
++0.585 → +0.571 overall and +0.642 → +0.627 on the single-nucleotide stratum.
+It was not made to change a number.
 
 ### XBB.1.5 — already filtered by its study
 

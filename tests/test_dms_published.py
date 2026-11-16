@@ -122,17 +122,61 @@ def test_the_kp_filter_is_the_one_its_own_authors_apply():
     assert len(kept_keys) == int(clears.sum()) > 0
 
 
+def test_ba1_keeps_exactly_the_mutations_its_study_would_correlate():
+    """BA.1's threshold is its own study's, and only the one it declares.
+
+    That repository publishes `muteffects_observed.csv` over every mutation it
+    fit and leaves the threshold to the consumer, exactly as KP.3.1.1 does.
+    Its own `notebooks/compare_muteffects.ipynb` -- which correlates these
+    effects against other datasets, this figure's job -- reads
+    ``config["muteffects_plot_kwargs"]["addtl_slider_stats"]["times_seen"]``
+    and keeps ``times_seen >= 3``. It declares no bound on `effect_std`, and
+    the largest on the current file is 3.54, so inventing one would drop rows
+    the authors keep.
+
+    Pinned as the predicate in both directions, like KP.3.1.1's above: a
+    threshold borrowed from KP.3.1.1 (seen in at least two variants) keeps a
+    different set and fails here.
+    """
+    dataset = lib.dms_dataset("BA.1")
+    raw = pd.read_csv(dataset.path)
+    out = normalise_published(raw, dataset)
+
+    assert dataset.min_times_seen == 3
+    assert dataset.max_effect_std is None, (
+        "that study declares no effect_std bound; one here would drop rows it keeps"
+    )
+
+    candidates = raw[
+        (raw["wildtype"] != raw["mutant"])
+        & raw["effect"].notna()
+        & raw["reference_site"].astype(str).str.fullmatch(r"-?\d+")
+    ].astype({"reference_site": int})
+    kept_keys = set(zip(out["site"], out["wildtype"], out["mutant"]))
+    clears = candidates["times_seen"] >= 3
+    in_output = [
+        key in kept_keys
+        for key in zip(
+            candidates["reference_site"], candidates["wildtype"], candidates["mutant"]
+        )
+    ]
+    assert list(clears) == in_output, (
+        "the rows kept are exactly the rows clearing the study's threshold"
+    )
+    assert len(kept_keys) == int(clears.sum()) > 0
+
+
 def test_a_study_without_thresholds_carries_none():
     """A threshold in the spec means "the authors apply this and their file does not".
 
-    BA.1 and XBB.1.5 release filtered files, so a `min_times_seen` appearing on
-    either would silently filter a second time, on a column whose meaning in
-    that study is not the one KP.3.1.1 gives it.
+    XBB.1.5 releases a filtered summary, so a `min_times_seen` appearing on it
+    would silently filter a second time, on a column whose meaning in that
+    study is not the one BA.1 and KP.3.1.1 give it. It is the only one of the
+    three that still releases its own filtering.
     """
-    for homolog in ("BA.1", "XBB.1.5"):
-        dataset = lib.dms_dataset(homolog)
-        assert dataset.min_times_seen is None, homolog
-        assert dataset.max_effect_std is None, homolog
+    dataset = lib.dms_dataset("XBB.1.5")
+    assert dataset.min_times_seen is None
+    assert dataset.max_effect_std is None
 
 
 def test_a_renamed_column_raises_rather_than_reading_the_wrong_quantity():

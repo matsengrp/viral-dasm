@@ -57,7 +57,13 @@ from dasm2.sequence.constants import AA_STR_SORTED
 #: single-nucleotide stratum: the per-mutation censor layers only reach a
 #: mutation that has single-nucleotide routes, and the unobservable founder
 #: codons are one site each in 23A and 24E and none in 21K.
-EXPECTED_CELLS = {"BA.1": 5413, "XBB.1.5": 6194, "KP.3.1.1": 7014}
+#:
+#: BA.1 re-measured once more when its source became the experiment's own
+#: released measurements rather than the multidms refit of them. It rose by
+#: 1395, because the refit's table keeps only the mutations seen in all three
+#: of Delta, BA.1 and BA.2 and the experiment's own table keeps every mutation
+#: it fit. The other two did not move, which is the control.
+EXPECTED_CELLS = {"BA.1": 6808, "XBB.1.5": 6194, "KP.3.1.1": 7014}
 
 _DMS_PATHS = tuple(lib.dms_dataset(homolog).path for homolog in lib.dms_homologs())
 
