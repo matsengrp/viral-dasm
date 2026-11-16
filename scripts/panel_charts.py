@@ -959,6 +959,32 @@ def dms_stratum_row(
     )
 
 
+def _dms_bar_group_header(title: str, n: int) -> alt.Chart:
+    """The ``n =`` strip above one group of bars, with the group's name on it.
+
+    Shared by `fig:dms`'s bar row and `fig:probabilities`' bars: both stack a
+    header over a bar chart and the geometry has to match, or the two figures
+    set the same furniture at different sizes. Extracted when the second
+    caller arrived rather than copied a third time.
+    """
+    return (
+        alt.Chart(pd.DataFrame({"_label": [f"n = {n:,}"]}))
+        .mark_text(fontSize=DMS_FONT_SIZE, align="center")
+        .encode(x=alt.value(DMS_BAR_WIDTH / 2), y=alt.value(10), text="_label:N")
+        .properties(
+            width=DMS_BAR_WIDTH,
+            height=24,
+            view=alt.ViewBackground(stroke=None),
+            title=alt.TitleParams(
+                text=title,
+                fontSize=DMS_FONT_SIZE,
+                fontWeight="bold",
+                anchor="middle",
+            ),
+        )
+    )
+
+
 def dms_bar_row(
     correlations: pd.DataFrame,
     *,
@@ -985,21 +1011,8 @@ def dms_bar_row(
 
     def panel(homolog: str, first: bool) -> alt.VConcatChart:
         one = rows[rows["homolog"] == homolog]
-        header = (
-            alt.Chart(pd.DataFrame({"_label": [f"n = {int(one['n'].iloc[0]):,}"]}))
-            .mark_text(fontSize=DMS_FONT_SIZE, align="center")
-            .encode(x=alt.value(DMS_BAR_WIDTH / 2), y=alt.value(10), text="_label:N")
-            .properties(
-                width=DMS_BAR_WIDTH,
-                height=24,
-                view=alt.ViewBackground(stroke=None),
-                title=alt.TitleParams(
-                    text=f"{homolog} ({clades[homolog]})",
-                    fontSize=DMS_FONT_SIZE,
-                    fontWeight="bold",
-                    anchor="middle",
-                ),
-            )
+        header = _dms_bar_group_header(
+            f"{homolog} ({clades[homolog]})", int(one["n"].iloc[0])
         )
         bar = (
             alt.Chart(one)
@@ -2851,22 +2864,28 @@ def arm_ladder_grid(
 # `fig:probabilities`
 # ---------------------------------------------------------------------------
 
-#: Okabe-Ito bluish-green, the third categorical hue. `fig:dms_strata` needed
-#: two because it draws two populations; panel B draws three arms, and the
-#: third is antiGen. Chosen from the same palette so the figure's categorical
-#: colours are one family, and far enough from both in hue and lightness to
-#: survive every common form of colour blindness.
+#: The rest of the Okabe-Ito palette, for a figure that needs hues the DMS
+#: figures have not already given a meaning to.
 OKABE_ITO_BLUISH_GREEN = "#009E73"
+OKABE_ITO_ORANGE = "#E69F00"
+OKABE_ITO_REDDISH_PURPLE = "#CC79A7"
 
 #: One colour per DMS experiment, taken in group order. **Not one per arm**:
 #: the arms are already named under every bar, so colouring by arm spends the
 #: channel on a distinction the labels carry, while colouring by experiment
-#: makes each group read as one dataset and keeps the three groups apart at a
-#: glance. The Okabe-Ito hues, in `DMS_ROW_COLORS`' order.
+#: makes each group read as one dataset.
+#:
+#: **Deliberately not blue and vermillion.** Those two already mean something
+#: in the figures this one sits beside: the count rungs in :data:`DMS_ROW_COLORS`
+#: on `fig:dms`, and the accessibility strata in :data:`DMS_STRATUM_COLORS` on
+#: `fig:dms_strata`. Both of those draw grouped Pearson-r bars in this same
+#: house style, so reusing their hues for homologs would invite a reader who
+#: has learned "vermillion is the filtered stratum" to read a dataset as a
+#: filter.
 PROBABILITIES_HOMOLOG_COLORS: tuple[str, ...] = (
-    OKABE_ITO_BLUE,
-    OKABE_ITO_VERMILLION,
     OKABE_ITO_BLUISH_GREEN,
+    OKABE_ITO_ORANGE,
+    OKABE_ITO_REDDISH_PURPLE,
 )
 
 #: How each arm is named under its bar. Short, because they are set vertically.
@@ -2877,32 +2896,20 @@ PROBABILITIES_ARM_LABELS: dict[str, str] = {
 }
 
 #: The scatter's side. Square, and that is the whole point: one nat on x is one
-#: nat on y, so the slope-1 guide lands at 45 degrees and a reader can check a
-#: claim about a slope without the aspect ratio distorting it.
+#: nat on y, so the cloud's slope-1 structure reads at 45 degrees and the
+#: iso-colour contours run parallel to the diagonal. An aspect ratio that
+#: distorted the slope would make that claim unreadable.
 PROBABILITIES_SCATTER_SIDE = 235
 
-#: Panel A's mark, taken from `fig:dms` and `fig:dms_strata` rather than
-#: respelled, so every scatter in the paper is set at one dot size and one
-#: opacity. The upstream version of this panel used a smaller mark (14 at 0.35),
-#: on the argument that a colour encoding is harder to read through overlapping
-#: dots. These figures are a set first, so they share the paper's mark, and the
-#: gradient is checked by eye rather than protected by a one-off size.
-PROBABILITIES_POINT_SIZE = DMS_POINT_SIZE
-PROBABILITIES_POINT_OPACITY = DMS_POINT_OPACITY
+#: How a bar's value is printed above it, which is `r`'s format everywhere
+#: else in these figures. Two significant figures while ``0.1 <= r < 1``, which
+#: `tests/test_probabilities.py` asserts the drawn values stay inside: the
+#: differences this figure is about are in the second decimal, and more digits
+#: would imply a precision the bootstrap intervals do not support.
+PROBABILITIES_BAR_FORMAT = DMS_R_FORMAT
 
-#: How a bar's value is printed above it. Two significant figures: every value
-#: here lies in ``0.1 <= r < 1`` so ``.2f`` gives exactly two, and the
-#: differences this figure is about are in the second decimal. More digits
-#: would imply a precision the bootstrap intervals do not support. A future
-#: value below 0.1 would need this revisited, which
-#: `tests/test_probabilities.py` asserts against.
-PROBABILITIES_BAR_FORMAT = ".2f"
-
-#: The padding the equal-span domains carry, and the floor under the span.
-#: Upstream's, and load-bearing: without a floor a founder whose two columns
-#: happened to be near-constant would get a zero-width domain.
+#: The padding the equal-span domains carry, as a multiple of the wider span.
 PROBABILITIES_DOMAIN_PAD = 1.08
-PROBABILITIES_DOMAIN_FLOOR = 0.5
 
 
 def probabilities_equal_span_domains(
@@ -2924,7 +2931,7 @@ def probabilities_equal_span_domains(
         ``{x: [low, high], y: [low, high]}``, the two spans equal.
     """
     spans = [float(frame[column].max() - frame[column].min()) for column in (x, y)]
-    half = max(max(spans) * PROBABILITIES_DOMAIN_PAD, PROBABILITIES_DOMAIN_FLOOR) / 2
+    half = max(spans) * PROBABILITIES_DOMAIN_PAD / 2
     out: dict[str, list[float]] = {}
     for column in (x, y):
         midrange = (float(frame[column].max()) + float(frame[column].min())) / 2
@@ -2938,7 +2945,7 @@ def probability_against_fitness(
     y: str,
     colour: str,
     homolog: str,
-    side: int = PROBABILITIES_SCATTER_SIDE,
+    r: float,
 ) -> alt.Chart:
     """Panel A: the probability as the fitness effect, displaced by the rate.
 
@@ -2948,12 +2955,6 @@ def probability_against_fitness(
     that rate makes the structure visible: the correlation between the vertical
     residual and ``log lambda`` is exactly 1, so the iso-colour contours *are*
     the slope-1 lines.
-
-    **No guide line.** An earlier draft drew a dashed slope-1 reference through
-    the median residual. The colour gradient already carries the structure, and
-    the line read as a fit rather than as the reference it was. The equal-span
-    domains below stay for the same reason they were introduced: they are what
-    makes the cloud's own 45-degree orientation readable.
 
     The panel is therefore tautological -- it cannot come out otherwise. It
     earns its place by making an identity legible, not by testing one.
@@ -2979,7 +2980,7 @@ def probability_against_fitness(
 
     points = (
         alt.Chart(frame)
-        .mark_circle(size=PROBABILITIES_POINT_SIZE, opacity=PROBABILITIES_POINT_OPACITY)
+        .mark_circle(size=DMS_POINT_SIZE, opacity=DMS_POINT_OPACITY)
         .encode(
             x=alt.X(
                 f"{x}:Q",
@@ -3002,7 +3003,7 @@ def probability_against_fitness(
                     # gives two numbers and no sense of where the middle of the
                     # scale sits on the cloud.
                     tickCount=4,
-                    gradientLength=side * 0.6,
+                    gradientLength=PROBABILITIES_SCATTER_SIDE * 0.6,
                     offset=4,
                 ),
             ),
@@ -3013,27 +3014,20 @@ def probability_against_fitness(
             ],
         )
     )
-    # `r` over `n`, in the corner the paper's other scatters use. `r` is the
-    # correlation of the two drawn quantities rather than either against an
-    # assay -- this panel has no assay on it -- so it is computed here instead
-    # of read from `predictor_correlations.csv`, which holds only DMS
-    # correlations. It is invariant to the log base, so it does not move with
-    # the axes.
-    _r = float(frame[x].corr(frame[y]))
-    label = (
-        alt.Chart(pd.DataFrame({"_i": [0]}))
-        .mark_text(align="left", baseline="top", dx=6, dy=6, fontSize=DMS_FONT_SIZE)
-        .encode(
-            x=alt.value(0),
-            y=alt.value(0),
-            text=alt.value([f"r = {_r:{DMS_R_FORMAT}}", f"n = {len(frame):,}"]),
-        )
+    # **Named, not bare.** Every other `r` in these figures is a predictor
+    # against the assay, printed in this same corner at this same size. This
+    # one is two model quantities against each other, it is larger than any
+    # bar in panel B beside it, and nothing but the axis titles would tell a
+    # reader the difference.
+    label = _corner_label(
+        f"r(log f, log p) = {r:{DMS_R_FORMAT}}\nn = {len(frame):,}",
+        font_size=DMS_FONT_SIZE,
     )
     return (
         alt.layer(points, label)
         .properties(
-            width=side,
-            height=side,
+            width=PROBABILITIES_SCATTER_SIDE,
+            height=PROBABILITIES_SCATTER_SIDE,
             title=alt.TitleParams(
                 text=homolog,
                 fontSize=DMS_FONT_SIZE,
@@ -3073,29 +3067,19 @@ def dms_correlation_bars(
     """
     top = float(frame["pearson_r"].max()) * DMS_BAR_HEADROOM
     order = [PROBABILITIES_ARM_LABELS[arm] for arm in arms]
+    if len(homologs) > len(PROBABILITIES_HOMOLOG_COLORS):
+        raise ValueError(
+            f"{len(homologs)} homologs but only "
+            f"{len(PROBABILITIES_HOMOLOG_COLORS)} colours; `zip` would drop the "
+            f"last group silently. Add a hue to PROBABILITIES_HOMOLOG_COLORS."
+        )
     hues = dict(zip(homologs, PROBABILITIES_HOMOLOG_COLORS))
 
     def group(homolog: str, first: bool) -> alt.Chart:
         one = frame[frame["homolog"] == homolog].copy()
         one["_arm"] = [PROBABILITIES_ARM_LABELS[a] for a in one["predictor"]]
         one["_value"] = [f"{r:{PROBABILITIES_BAR_FORMAT}}" for r in one["pearson_r"]]
-        n = int(one["n_mutations"].iloc[0])
-        header = (
-            alt.Chart(pd.DataFrame({"_label": [f"n = {n:,}"]}))
-            .mark_text(fontSize=DMS_FONT_SIZE, align="center")
-            .encode(x=alt.value(DMS_BAR_WIDTH / 2), y=alt.value(10), text="_label:N")
-            .properties(
-                width=DMS_BAR_WIDTH,
-                height=24,
-                view=alt.ViewBackground(stroke=None),
-                title=alt.TitleParams(
-                    text=homolog,
-                    fontSize=DMS_FONT_SIZE,
-                    fontWeight="bold",
-                    anchor="middle",
-                ),
-            )
-        )
+        header = _dms_bar_group_header(homolog, int(one["n_mutations"].iloc[0]))
         base = alt.Chart(one).encode(
             x=alt.X(
                 "_arm:N",

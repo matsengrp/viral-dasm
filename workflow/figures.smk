@@ -57,6 +57,7 @@ from panel_spec import (
     DMS_STRATA_PANEL_LETTERS,
     DMS_STRATA_PANELS,
     PROBABILITIES_FIGURE_STEM,
+    PROBABILITIES_SCATTER_HOMOLOG,
     PROBABILITIES_PANEL_LETTERS,
     PROBABILITIES_PANELS,
     BACKGROUND_CSV,
@@ -890,6 +891,8 @@ rule probabilities_panels:
     input:
         notebook="notebooks/probabilities.py",
         summary="scripts/dms_summary.py",
+        prob="scripts/dms_prob.py",
+        dasm="scripts/dms_dasm.py",
         models="scripts/dms_models.py",
         censor="scripts/dms_censor.py",
         dms="scripts/dms.py",
@@ -914,8 +917,21 @@ rule probabilities_panels:
         clades=str(mat_pcp_path("censored_clades_file")),
         masked=str(mat_pcp_path("masked_nt_sites_file")),
         reference=str(mat_pcp_path("reference_sequence_file")),
+        whichmut_probs="dasm2/analysis/whichmut_probs.py",
+        whichmut_loss="dasm2/losses/whichmut_loss.py",
+        codon_neutral_rates="dasm2/molevol/codon_neutral_rates.py",
+        neutral_base="dasm2/neutral/base.py",
+        tabular_rates="dasm2/neutral/tabular_rates.py",
+        zip_io="dasm2/serialization/zip_io.py",
         scores=dms_all_scores,
-        table=str(panel_csv_path(DMS_SELECTION, DMS_PREDICTOR_CORRELATIONS)),
+        correlations=str(panel_csv_path(DMS_SELECTION, DMS_PREDICTOR_CORRELATIONS)),
+        # Panel A is founder-wide, so it rebuilds the probabilities from the
+        # scored grid and the era's archive rather than reading the per-cell
+        # score files panel B uses.
+        scored_table=SCORED_TABLE,
+        archive=lambda w: NEUTRAL_ZIP[
+            era_of_clade(dms_dataset(PROBABILITIES_SCATTER_HOMOLOG).clade)
+        ],
     output:
         html=f"{NOTEBOOK_DIR}/probabilities.html",
         panels=panel_outputs(PROBABILITIES_PANELS, DMS_SELECTION),
@@ -926,6 +942,8 @@ rule probabilities_panels:
     shell:
         "marimo export html {input.notebook} -o {output.html} --force"
         " -- --scores {input.scores}"
+        " --table {input.scored_table}"
+        " --neutral-archive {input.archive}"
         " > {log} 2>&1"
 
 

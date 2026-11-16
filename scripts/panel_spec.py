@@ -673,11 +673,12 @@ DMS_STRATA_TITLE_PX = DMS_TITLE_PX
 
 #: The founder panel A's scatter is drawn on. One founder, because a scatter
 #: can only show one; this one, because it is the dataset the paper leads with
-#: and `fig:dms_strata` already does. Upstream drew BA.1 on the different
-#: criterion of where the probability's penalty is largest -- see the issue,
-#: which records the override. The identity panel A draws is exact on every
-#: founder, so the choice costs the panel nothing.
-PROBABILITIES_SCATTER_HOMOLOG = "KP.3.1.1"
+#: and `fig:dms_strata` already does -- so it is :data:`SCATTER_HOMOLOG`
+#: rather than a second spelling of the same choice. Upstream drew BA.1, on the
+#: different criterion of where the probability's penalty is largest; the
+#: identity panel A draws is exact on every founder, so leading with the
+#: paper's own dataset costs the panel nothing.
+PROBABILITIES_SCATTER_HOMOLOG = SCATTER_HOMOLOG
 
 #: The three arms of panel B, in bar order: the model's own two readings, then
 #: the published model's. `dasm` first because it is the reading the rest of the

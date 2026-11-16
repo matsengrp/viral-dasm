@@ -54,6 +54,7 @@ import dasm2  # noqa: F401  (imported first for its side effects)
 assert_dasm2_is_this_repo()
 
 import dms
+import dms_censor
 import dms_dasm
 import dms_models
 import numpy as np
@@ -231,6 +232,85 @@ def _require_loggable(merged: pd.DataFrame, column: str) -> None:
         f"site range; a zero means the stratum and the neutral rates disagree "
         f"about which mutations one base change reaches. First few: {sample}."
     )
+
+
+def founder_frame(
+    clade: str, founder_aa: str, table_path: str | Path, archive_path: str | Path
+) -> pd.DataFrame:
+    """Every single-nucleotide amino-acid mutation to one founder, scored.
+
+    **The whole protein, not the measured part of it.** `fig:probabilities`'
+    scatter is about a property of the model on its founder -- how a mutation
+    probability sits relative to its fitness effect -- and that question has
+    nothing to do with which cells an assay happened to cover. Restricting it
+    to measured cells would answer it on a subset chosen by a different
+    method. :func:`prob_scores` narrows to the assay because it feeds a
+    correlation *against* the assay; this does not, because nothing here is
+    correlated against anything.
+
+    What is dropped is only what has no value or was never trained:
+
+    * **Synonymous cells**, which are not mutations of the residue.
+    * **Multi-nucleotide cells**, where ``lambda`` is exactly zero, so
+      ``log p`` is undefined rather than small. That is the figure's stratum,
+      and it is a definition rather than a filter.
+    * **Censored and masked mutations**, via `scripts/dms_censor.py`, because
+      the model was told to ignore them. The same mask every other population
+      in this pipeline carries, so the panel is not the odd one out; it is a
+      small share of the grid either way.
+
+    Returns:
+        One row per drawn point, carrying the three quantities under the same
+        names the predictor join gives them -- ``dasm``, ``dasm_prob`` and
+        ``neutral_rate`` -- so the panel reads one vocabulary throughout.
+    """
+    probabilities = probability_frame(clade, founder_aa, table_path, archive_path)
+    grid = dms_dasm.selection_factor_grid(clade, table_path)
+
+    merged = probabilities.merge(
+        grid[[*dms_models.JOIN_KEY, dms_dasm.SCORE_COLUMN]],
+        on=list(dms_models.JOIN_KEY),
+        how="inner",
+        validate="one_to_one",
+    )
+
+    reachable = dms.single_nt_indicator(clade, lib.GENE)
+    censored = dms_censor.censored_mutations(clade)
+    keep = [
+        not synonymous
+        and bool(reachable.loc[mutant, site - 1])
+        and (int(site), mutant) not in censored
+        for site, mutant, synonymous in zip(
+            merged["aa_site"], merged["mutant_aa"], merged["is_synonymous"]
+        )
+    ]
+    drawn = merged[keep].reset_index(drop=True)
+
+    probability = SCORED_COLUMNS[DASM_PROB]
+    positive = drawn[probability] > 0
+    if not positive.all():
+        raise ValueError(
+            f"{int((~positive).sum())} of {len(drawn)} single-nucleotide cells "
+            f"have no positive {probability}. Every cell kept here is "
+            f"one base from the founder's codon, so the stratum and the "
+            f"neutral rates disagree about reachability."
+        )
+
+    return drawn.assign(
+        parent_aa=[founder_aa[site - 1] for site in drawn["aa_site"]],
+        dasm=drawn[dms_dasm.SCORE_COLUMN],
+        dasm_prob=np.log(drawn[probability]),
+        neutral_rate=np.log(drawn[SCORED_COLUMNS[NEUTRAL_RATE]]),
+    )[
+        [
+            "aa_site",
+            "parent_aa",
+            "mutant_aa",
+            "dasm",
+            "dasm_prob",
+            "neutral_rate",
+        ]
+    ]
 
 
 def prob_scores(
