@@ -4,11 +4,11 @@ The failure these tests exist for is silent: a conversion that reads the wrong
 column, or applies a filter one study wants to another that does not, still
 returns a plausible four-column table and still draws a figure. So the checks
 here are against the studies themselves -- one against a file XBB.1.5's authors
-publish, one against the filtered column KP.3.1.1's authors publish -- rather
-than against numbers this repository chose.
+publish, and one apiece against the thresholds BA.1's and KP.3.1.1's authors
+declare -- rather than against numbers this repository chose.
 
-Everything but the two "against the study" tests runs on fixtures and needs no
-data, so the conversion stays tested off the cluster.
+Everything but the three "against the study" tests runs on fixtures and needs
+no data, so the conversion stays tested off the cluster.
 """
 
 from __future__ import annotations

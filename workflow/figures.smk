@@ -819,6 +819,12 @@ rule dms_predictor_summary:
     resources:
         mem_mb=PANEL_MEM_MB,
     shell:
+        # **Space-separated is correct here, and must stay.** This runs
+        # `scripts/dms_summary.py`, whose `argparse` declares `--scores` with
+        # `nargs="+"` and so reads every path from one occurrence of the flag.
+        # The marimo rules need the opposite -- `panel_spec.scores_flags` and
+        # one `--scores` per path -- because `mo.cli_args().get_all` counts
+        # occurrences. Converting this one by analogy would break it.
         "python {input.script}"
         " --scores {input.scores}"
         " --output {output.table}"

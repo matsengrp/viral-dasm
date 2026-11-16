@@ -1,12 +1,13 @@
 """Each published DMS file, as its own study releases it, in one shape.
 
 `fig:dms` reads three deep mutational scans. Each study publishes its
-measurements in its own format -- two columns of identifiers and a phenotype
-column among several, or a per-mutation table of fitted parameters -- and each
-applies its own filtering before releasing them. This module converts all
-three to the four columns the loader wants, ``wildtype,site,mutant,
-functional_effect``, and applies whatever filter the study applies that its
-released file does not already carry.
+measurements in its own format -- a phenotype column among several, or a
+per-mutation effect table beside the counts it was fit from -- and each
+applies its own filtering before releasing them, or declares thresholds and
+leaves them to the consumer. This module converts all three to the four
+columns the loader wants, ``wildtype,site,mutant,functional_effect``, and
+applies whatever filter the study applies that its released file does not
+already carry.
 
 **The filtering standard is the study's own.** The three experiments set their
 own thresholds and there is no house rule here: a mutation is kept when the
@@ -14,15 +15,16 @@ authors would keep it, which is read from their configuration and their
 analysis code rather than borrowed from whichever homolog is to hand. What
 each one does, and where it was read:
 
-- **BA.1** -- `matsengrp/SARS-CoV-2_spike_multidms`' ``results/mutations_df.csv``
-  is already filtered. ``spike-analysis.ipynb`` writes it from
-  ``combine_replicate_muts(..., times_seen_threshold=times_seen_threshold,
-  how="inner")`` at ``times_seen_threshold = 1`` -- "the number of times a
-  mutation must be seen in each condition to be included in downstream
-  analysis" -- so every mutation it carries was seen in each of the three
-  homolog conditions and was fit in both replicates. The fit is the one that
-  notebook calls "the chosen lasso strength for our final spike model
-  results", ``chosen_lasso_strength = 5e-5``. Nothing is filtered here.
+- **BA.1** -- `dms-vep/SARS-CoV-2_Omicron_BA.1_spike_DMS_mAbs` publishes
+  ``results/muteffects_functional/muteffects_observed.csv`` over every
+  mutation it fit, leaving the threshold to the consumer, so this module
+  applies the one that repository declares: ``times_seen: 3``, from
+  ``muteffects_plot_kwargs.addtl_slider_stats`` in its ``config.yaml``. That
+  is the filter its own ``notebooks/compare_muteffects.ipynb`` applies before
+  correlating these effects against other datasets, which is this figure's
+  job. It declares no ``effect_std`` bound, so none is set. The site column is
+  ``reference_site``, Wuhan-Hu-1 numbering, beside a ``sequential_site`` that
+  indexes the construct.
 - **XBB.1.5** -- `dms-vep/SARS-CoV-2_XBB.1.5_spike_DMS` publishes
   ``results/summaries/summary.csv``, the filtered summary across its assays;
   the ``spike mediated entry`` column is the phenotype this figure reads.

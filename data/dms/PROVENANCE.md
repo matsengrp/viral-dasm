@@ -72,29 +72,56 @@ is Wuhan-Hu-1 numbering, which is what every table in this pipeline is keyed
 on, and the second indexes the construct. They agree on 6% of rows, so reading
 the wrong one would not fail loudly.
 
-#### This replaces the multidms refit, which this figure read before
+#### Superseded: the multidms refit this figure read before
 
-Until this change, BA.1's effects came from `matsengrp/SARS-CoV-2_spike_multidms`'s
-`results/mutations_df.csv` — the `avg_predicted_func_score` column of a
-multidms fit over Delta, BA.1 and BA.2, at commit
-`66b9833d39308b853a9531634cc7e9043d6a11f8`. Two reasons it is gone:
+Earlier versions of this pipeline took BA.1's effects from
+`matsengrp/SARS-CoV-2_spike_multidms`'s `results/mutations_df.csv` — the
+`avg_predicted_func_score` column of a multidms fit over Delta, BA.1 and BA.2,
+at commit `66b9833d39308b853a9531634cc7e9043d6a11f8`. The commit is kept here
+so that source stays recoverable. Two reasons it is not what this figure
+wants:
 
-- **It is a variant's predicted phenotype, not a mutation's effect.** The
-  wildtype does not sit at zero on that scale: the 1,117 mutations the fit
-  gives `|avg_beta| < 0.05` land at −1.68 ± 0.17, and 99.98% of the column is
-  below zero. BA.1 was the one homolog of the three whose axis did not mean
-  "effect relative to this clade's wildtype", and nothing on the figure said
-  so.
-- **It covers less.** That table is written with
-  `combine_replicate_muts(..., how="inner")`, keeping only mutations seen in
-  all three homolog libraries; the experiment's own table keeps every mutation
-  it fit. Retained substitutions rise from 5,431 to 6,828, and measured cells
-  from 5,413 to 6,808.
+- **It is a variant's predicted phenotype, not a mutation's effect.** It is
+  `g(C + β)`: the global-epistasis link applied to the wildtype's own latent
+  baseline plus the mutation's. The wildtype therefore does not sit at zero —
+  the 1,117 mutations that fit gives `|avg_beta| < 0.05` land at −1.68 ± 0.17,
+  and 99.98% of the column is below zero. Pearson *r* is shift-invariant, so
+  the displaced zero biases nothing by itself; what it costs is that BA.1 was
+  the one homolog of three whose axis did not mean "effect relative to this
+  clade's wildtype", and nothing on the figure said so. The nonlinearity is
+  the part that does move a number: `r(avg_beta, avg_predicted_func_score)` is
+  0.90, so it is a squashed monotone transform of the effect, not the effect.
+- **Its mutation set is biased toward the single-nucleotide stratum.** That
+  table is written with `combine_replicate_muts(..., how="inner")`, keeping
+  only mutations sampled in all three homolog libraries — which preferentially
+  keeps well-sampled ones, and a mutation one nucleotide change from the
+  founder's codon is better sampled than one needing two or three. Measured
+  cells go from 5,413 to 6,808, and the multi-nucleotide share of the
+  population from 24.7% to 33.3%.
 
-The two quantities correlate at r = 0.911, and the switch moves the figure's
-correlations by at most 0.015 — the DASM's, over the cells both carry, goes
-+0.585 → +0.571 overall and +0.642 → +0.627 on the single-nucleotide stratum.
-It was not made to change a number.
+**How to read the before/after correlations, because the pooled number
+misleads.** Each figure below names the set it is computed over.
+
+| | old set (5,413) | new set (6,808) |
+|---|---|---|
+| DASM, all | +0.5852 | +0.5379 |
+| DASM, single-nt | +0.6415 (n=4,074) | +0.6114 (n=4,538) |
+| DASM, multi-nt | +0.4127 (n=1,339) | **+0.4153** (n=2,270) |
+
+The pooled fall of 0.047 is **larger than either stratum's change**, and
+multi-nt's agreement *rises*. It is a re-weighting: the new population is a
+third multi-nucleotide instead of a quarter, and that is the harder stratum.
+The 1,617 added cells are 60.9% multi-nucleotide against 24.7% in the old set,
+and correlate at +0.469; 222 previously measured cells fall below
+`times_seen >= 3` and are dropped.
+
+Over the 5,191 cells both populations carry — the quantity changing and the
+population held fixed — the DASM goes +0.5747 → +0.5596 overall, +0.6347 →
++0.6190 on the single-nucleotide stratum and +0.3899 → +0.3848 on the
+multi-nucleotide one, and the two assay quantities correlate at +0.9195. That
+is the whole effect of the change in quantity: about 0.015. Everything else is
+the comparator no longer being depleted of the mutations the model finds
+hardest.
 
 ### XBB.1.5 — already filtered by its study
 

@@ -267,45 +267,91 @@ def test_scores_reach_the_notebook_as_one_flag_each():
         "--scores a/dasm_BA.1.parquet --scores b/antigen_XBB.1.5.parquet"
     )
     assert panel_spec.scores_flags(["only.parquet"]) == "--scores only.parquet"
-    assert panel_spec.scores_flags([]) == ""
 
     # The flag count is the contract, not the string: one per path, always.
     many = [f"p{index}.parquet" for index in range(18)]
     assert panel_spec.scores_flags(many).count("--scores ") == len(many)
 
 
-def test_a_path_with_whitespace_is_refused_rather_than_split():
-    """The one input this unquoted form cannot carry.
+def test_a_path_the_shell_would_mangle_is_quoted_rather_than_refused():
+    """Snakemake splices `params` in verbatim, so the quoting is ours to do.
 
-    Two paths joined by a space is exactly the bug above; a single path
-    *containing* a space would reproduce it from the other direction, and
-    silently, since the notebook would see two entries where the rule declared
-    one input.
+    A space is the case that reproduces the bug above from the other
+    direction -- the notebook would see two entries where the rule declared
+    one input -- but it is not the only one, and a guard that refused spaces
+    while letting ``;`` or ``$`` through would look complete and not be.
+    `shlex.quote` covers all of them and leaves an ordinary path untouched,
+    which is why the assertions above are unquoted strings.
     """
-    with pytest.raises(ValueError, match="whitespace"):
-        panel_spec.scores_flags(["has a space.parquet"])
+    quoted = panel_spec.scores_flags(["has a space.parquet"])
+    assert quoted == "--scores 'has a space.parquet'"
+    assert panel_spec.scores_flags(["a;rm -rf b.parquet"]).startswith("--scores '")
+
+    # Ordinary paths -- the only kind this pipeline builds -- stay bare.
+    assert "'" not in panel_spec.scores_flags(["dir/dasm_KP.3.1.1.parquet"])
 
 
-def test_no_marimo_rule_still_passes_the_space_separated_form():
-    """A text check, because the defect is the spelling on the command line.
+def test_no_paths_at_all_raises_here_rather_than_in_the_notebook():
+    """Both callers pass every predictor's scores for every homolog.
 
-    `tests/test_rule_inputs.py` passes on the broken rule: the inputs are
-    declared correctly and only their expansion into the shell is wrong, so
-    there is no object to assert on and this reads the workflow.
+    An empty roster is a bug upstream, and a notebook handed no scores fails
+    on an empty table, further from the cause.
+    """
+    with pytest.raises(ValueError, match="no score paths"):
+        panel_spec.scores_flags([])
+    with pytest.raises(ValueError, match="empty string"):
+        panel_spec.scores_flags(["ok.parquet", ""])
 
-    **Scoped to the marimo rules, because the form is only wrong for them.**
-    `rule dms_predictor_summary` passes the same paths to
-    `scripts/dms_summary.py`, whose ``argparse`` ``nargs="+"`` reads
-    space-separated values correctly; forbidding the spelling everywhere would
-    fail on a rule that has no bug.
+
+def test_every_marimo_rule_with_scores_passes_them_through_params():
+    """A *positive* check, because a negative one is trivially evaded.
+
+    Asserting only that ``--scores {input.scores}`` is absent passes on a rule
+    that writes ``{input.scores:q}``, and passes on a rule that stops passing
+    the scores at all -- both verified by mutation. Requiring the
+    ``{params.scores}`` spelling rejects every one of those, because
+    `panel_spec.scores_flags` is the only thing that builds it.
+
+    Scoped to the marimo rules on purpose: `rule dms_predictor_summary` passes
+    the same paths to `scripts/dms_summary.py`, whose ``argparse``
+    ``nargs="+"`` reads them space-separated correctly, so the spelling is
+    right there and must not be "fixed" by analogy.
     """
     workflow = (REPO_ROOT / "workflow" / "figures.smk").read_text()
-    offenders = [
-        block.splitlines()[0].rstrip(":")
+    blocks = {
+        block.splitlines()[0].rstrip(":"): block
         for block in workflow.split("\nrule ")
-        if "marimo export html" in block and "--scores {input.scores}" in block
-    ]
-    assert not offenders, (
-        f"{offenders} expand every score path into one `--scores` occurrence, "
-        f"which marimo reads as a single path; see panel_spec.scores_flags"
+        if "marimo export html" in block
+    }
+    assert blocks, "no marimo rules found; the split above stopped working"
+
+    for name, block in blocks.items():
+        if "scores=dms_all_scores" not in block:
+            continue
+        assert "{params.scores}" in block, (
+            f"rule {name} declares the score files but does not pass them as "
+            f"`{{params.scores}}`; see panel_spec.scores_flags"
+        )
+        assert "--scores {input.scores}" not in block, (
+            f"rule {name} expands every score path into one `--scores` "
+            f"occurrence, which marimo reads as a single path"
+        )
+
+
+def test_the_notebooks_that_need_repeated_flags_are_the_ones_we_fixed():
+    """A canary on the premise of the test above.
+
+    Only a notebook that calls ``get_all`` needs its flag repeated. Two do,
+    and both their rules are checked above. A third appearing means either
+    another rule needs the same treatment or this file's reasoning has gone
+    stale, and either way someone should look.
+    """
+    notebooks = {
+        path.name
+        for path in sorted((REPO_ROOT / "notebooks").glob("*.py"))
+        if "get_all(" in path.read_text()
+    }
+    assert notebooks == {"dms_strata.py", "probabilities.py"}, (
+        f"{sorted(notebooks)} read repeated CLI flags; every one of them needs "
+        f"its rule to pass `{{params.scores}}`, not `{{input.scores}}`"
     )
