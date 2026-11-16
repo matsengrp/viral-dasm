@@ -98,12 +98,6 @@ def test_panel_a_draws_the_identity_it_claims(scatter: pd.DataFrame):
     residual = scatter["dasm_prob"] - scatter["dasm"] - scatter["neutral_rate"]
     assert np.ptp(residual) < 1e-5
 
-    # And in the base the panel is actually drawn in. Converting all three
-    # together is what keeps the guide a 45-degree line: a mixed-base panel
-    # would have slope 1/ln(10), and nothing on the picture would say so.
-    log10 = residual / np.log(10)
-    assert np.ptp(log10) < 1e-5
-
     # A real `-log Z` and not zero, which is what a column accidentally written
     # as `log f + log lambda` with no normalizer would give.
     assert abs(residual.mean()) > 1.0

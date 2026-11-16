@@ -2898,11 +2898,6 @@ PROBABILITIES_POINT_OPACITY = DMS_POINT_OPACITY
 #: `tests/test_probabilities.py` asserts against.
 PROBABILITIES_BAR_FORMAT = ".2f"
 
-#: Headroom above the tallest bar on panel B. More than
-#: :data:`DMS_BAR_HEADROOM`, because this panel prints each bar's value above
-#: it and `fig:dms`'s bars do not: at 1.12 the tallest label crosses the frame.
-PROBABILITIES_BAR_HEADROOM = 1.20
-
 #: The padding the equal-span domains carry, and the floor under the span.
 #: Upstream's, and load-bearing: without a floor a founder whose two columns
 #: happened to be near-constant would get a zero-width domain.
@@ -2994,13 +2989,13 @@ def probability_against_fitness(
             y=alt.Y(
                 f"{y}:Q",
                 scale=alt.Scale(domain=domains[y], zero=False, nice=False),
-                axis=_axis(["log10 DASM mutation probability"]),
+                axis=_axis(["log DASM mutation probability"]),
             ),
             color=alt.Color(
                 f"{colour}:Q",
                 scale=alt.Scale(scheme="viridis"),
                 legend=alt.Legend(
-                    title=["log10 neutral", "mutation rate"],
+                    title=["log neutral", "mutation rate"],
                     titleFontSize=DMS_FONT_SIZE,
                     labelFontSize=DMS_FONT_SIZE,
                     # Vega labels a gradient's ends only by default, which
@@ -3012,9 +3007,9 @@ def probability_against_fitness(
                 ),
             ),
             tooltip=[
-                alt.Tooltip(f"{x}:Q", title="log10 f", format=".2f"),
-                alt.Tooltip(f"{y}:Q", title="log10 p", format=".2f"),
-                alt.Tooltip(f"{colour}:Q", title="log10 lambda", format=".2f"),
+                alt.Tooltip(f"{x}:Q", title="log f", format=".2f"),
+                alt.Tooltip(f"{y}:Q", title="log p", format=".2f"),
+                alt.Tooltip(f"{colour}:Q", title="log lambda", format=".2f"),
             ],
         )
     )
@@ -3040,7 +3035,7 @@ def probability_against_fitness(
             width=side,
             height=side,
             title=alt.TitleParams(
-                text=f"{homolog}, single-nt mutations",
+                text=homolog,
                 fontSize=DMS_FONT_SIZE,
                 fontWeight="bold",
                 anchor="middle",
@@ -3076,7 +3071,7 @@ def dms_correlation_bars(
         bar_height: Measured so the panel comes out level with panel A; see
             `notebooks/probabilities.py`.
     """
-    top = float(frame["pearson_r"].max()) * PROBABILITIES_BAR_HEADROOM
+    top = float(frame["pearson_r"].max()) * DMS_BAR_HEADROOM
     order = [PROBABILITIES_ARM_LABELS[arm] for arm in arms]
     hues = dict(zip(homologs, PROBABILITIES_HOMOLOG_COLORS))
 
@@ -3138,8 +3133,12 @@ def dms_correlation_bars(
                 alt.Tooltip("n_mutations:Q", title="n", format=","),
             ],
         )
+        # `dy` sits the value just clear of the bar it belongs to. Small:
+        # these panels render at `VEGA_WRITE_PPI`, so a chart-unit offset is
+        # multiplied by about four on the written PNG, and -6 left a visible
+        # band of white between every bar and its number.
         values = base.mark_text(
-            dy=-6, fontSize=DMS_FONT_SIZE, baseline="bottom"
+            dy=-2, fontSize=DMS_FONT_SIZE, baseline="bottom"
         ).encode(text="_value:N")
         return alt.vconcat(
             header,
