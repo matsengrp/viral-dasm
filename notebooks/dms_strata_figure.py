@@ -35,7 +35,7 @@ def _(mo):
 
 
 @app.cell
-def _():
+def _(mo):
     import sys
     from pathlib import Path
 
@@ -53,16 +53,22 @@ def _():
     # from `FIGURE_MODEL`.
     SELECTION = spec.DMS_SELECTION
     PANEL_DIR = spec.figure_dir(SELECTION)
-    return PANEL_DIR, SELECTION, charts, fl, spec
+
+    # **Required, not defaulted**, for `notebooks/dms_strata.py`'s reason: one
+    # figure per assay, and a default here would compose one assay's panels
+    # under another's filename without raising.
+    HOMOLOG = str(mo.cli_args()["homolog"])
+    SLUG = spec.homolog_slug(HOMOLOG)
+    return HOMOLOG, PANEL_DIR, SELECTION, SLUG, charts, fl, spec
 
 
 @app.cell
-def _(PANEL_DIR, charts, fl, mo, spec):
+def _(HOMOLOG, PANEL_DIR, SLUG, charts, fl, mo, spec):
     # `mo.stop` rather than a raise, for `notebooks/dms.py`'s reason: a reader
     # exporting this by hand before the panels exist should be told which rule
     # writes them. Under `rule compose_dms_strata` the case cannot arise.
     _missing = fl.missing_panels(
-        PANEL_DIR, list(spec.DMS_STRATA_PANEL_LETTERS.values())
+        PANEL_DIR, list(spec.dms_strata_panel_letters(SLUG).values())
     )
     mo.stop(
         bool(_missing),
@@ -73,7 +79,7 @@ def _(PANEL_DIR, charts, fl, mo, spec):
         ),
     )
 
-    PANELS = fl.load_panels(PANEL_DIR, spec.DMS_STRATA_PANEL_LETTERS)
+    PANELS = fl.load_panels(PANEL_DIR, spec.dms_strata_panel_letters(SLUG))
 
     # **Checked, not corrected.** The rows draw the same three cells at the
     # same width, so equal image widths mean their y axes are the same band
@@ -95,8 +101,11 @@ def _(PANEL_DIR, charts, fl, mo, spec):
             f"tick label either row draws."
         )
 
+    # The assay is named here because three renders of this notebook are
+    # otherwise identical on screen, and the panel stems are the only thing
+    # distinguishing them.
     mo.md(
-        "At the size the panel rule rendered it:\n\n"
+        f"**{HOMOLOG}**, at the size the panel rule rendered it:\n\n"
         + "\n".join(
             f"- **{_k}** — {_v.shape[1]} x {_v.shape[0]} px"
             for _k, _v in PANELS.items()
@@ -106,12 +115,12 @@ def _(PANEL_DIR, charts, fl, mo, spec):
 
 
 @app.cell
-def _(PANELS, fl, spec):
+def _(PANELS, SLUG, fl, spec):
     # Both panels are Vega-Lite written at `DMS_FONT_SIZE`, so one title size
     # serves the page and the panel letters are sized against it.
     composed = fl.compose(
         PANELS,
-        [list(_row) for _row in spec.DMS_STRATA_FIGURE_ROWS],
+        [list(_row) for _row in spec.dms_strata_figure_rows(SLUG)],
         box_in=spec.DMS_STRATA_BOX_IN,
         scale=spec.DMS_STRATA_FIGURE_SCALE,
         title_px_on_disk=fl.vega_title_px_on_disk(title_px=spec.DMS_STRATA_TITLE_PX),
@@ -122,10 +131,10 @@ def _(PANELS, fl, spec):
 
 
 @app.cell
-def _(PANEL_DIR, SELECTION, composed, fl, mo, spec):
+def _(PANEL_DIR, SELECTION, SLUG, composed, fl, mo, spec):
     _tex = spec.tex_figure_dir(SELECTION)
     _written = fl.save_figure(
-        composed, PANEL_DIR, spec.DMS_STRATA_FIGURE_STEM, tex_figure_dir=_tex
+        composed, PANEL_DIR, spec.dms_strata_figure_stem(SLUG), tex_figure_dir=_tex
     )
     _copied = _tex is not None and any(_p.parent == _tex for _p in _written)
     _note = (

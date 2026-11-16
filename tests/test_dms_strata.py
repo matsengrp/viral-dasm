@@ -20,7 +20,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
-import lib  # noqa: F401
+import lib
 
 import dasm2  # noqa: F401
 
@@ -80,15 +80,105 @@ def test_both_halves_have_a_colour_and_the_union_does_not():
     assert len(set(charts.DMS_STRATUM_COLORS.values())) == 2
 
 
+#: The three slugs, spelled out rather than computed. These are what the
+#: manuscript's filenames and `\\label`s would carry, so a `homolog_slug` that
+#: quietly started returning something else would rename three figures, and a
+#: test that derived its expectation from the function could not see it.
+EXPECTED_SLUGS = {"BA.1": "ba1", "XBB.1.5": "xbb15", "KP.3.1.1": "kp311"}
+
+
+def test_the_slugs_are_what_the_manuscript_would_carry():
+    """A figure stem leaves the pipeline, so its spelling is pinned here."""
+    for homolog, slug in EXPECTED_SLUGS.items():
+        produced = panel_spec.homolog_slug(homolog)
+        assert produced == slug
+        # Asserted on the function's own output, not on the literal above: a
+        # dot in a composed stem reaches a filename and a `\\label`.
+        assert "." not in produced
+    assert set(lib.dms_homologs()) == set(EXPECTED_SLUGS), (
+        "config.yaml's homologs moved; the slugs above are what the "
+        "manuscript's figure filenames would become"
+    )
+
+
+def test_every_slug_resolves_back_to_its_homolog():
+    """`workflow/figures.smk` holds only the wildcard and needs the homolog."""
+    roster = lib.dms_homologs()
+    for homolog in roster:
+        assert (
+            panel_spec.homolog_for_slug(panel_spec.homolog_slug(homolog), roster)
+            == homolog
+        )
+    with pytest.raises(ValueError, match="no homolog's slug"):
+        panel_spec.homolog_for_slug("not-a-slug", roster)
+
+
 def test_the_two_panel_stems_match_the_two_models():
     """One image per model row, and the letters follow the stems."""
-    assert len(panel_spec.DMS_STRATA_PANELS) == len(panel_spec.DMS_STRATA_MODELS)
-    assert set(panel_spec.DMS_STRATA_PANEL_LETTERS.values()) == set(
-        panel_spec.DMS_STRATA_PANELS
-    )
-    assert [letter for row in panel_spec.DMS_STRATA_FIGURE_ROWS for letter in row] == (
-        list(panel_spec.DMS_STRATA_PANEL_LETTERS)
-    )
+    for slug in EXPECTED_SLUGS.values():
+        panels = panel_spec.dms_strata_panels(slug)
+        letters = panel_spec.dms_strata_panel_letters(slug)
+        assert len(panels) == len(panel_spec.DMS_STRATA_MODELS)
+        assert set(letters.values()) == set(panels)
+        assert [
+            letter for row in panel_spec.dms_strata_figure_rows(slug) for letter in row
+        ] == list(letters)
+
+
+def test_the_roster_has_no_two_homologs_that_slug_alike():
+    """`homolog_slug` strips dots and case, so it is not injective.
+
+    ``KP.3.1.1`` and ``KP.3.11`` both come out ``kp311``. Two such homologs
+    would write one figure stem and the second job would overwrite the first,
+    with the `slug` wildcard constraint holding the same token twice and
+    nothing raising. The slugs are taken from the **roster** here rather than
+    from `EXPECTED_SLUGS`, because that is the set that can collide.
+    """
+    roster = lib.dms_homologs()
+    assert set(panel_spec.check_slugs_are_distinct(roster).values()) == set(roster)
+
+    with pytest.raises(ValueError, match="both slug to"):
+        panel_spec.check_slugs_are_distinct(["KP.3.1.1", "KP.3.11"])
+
+
+def test_no_two_assays_share_a_stem():
+    """Three figures in one directory, each drawn from a different assay.
+
+    What this catches is a stem builder that **ignores its slug** -- dropping
+    the ``_{slug}`` suffix would have three rules write one pair of PNGs, and
+    the last to finish would be the figure all three compositions read. The
+    distinctness of the slugs themselves is the test above; this one is handed
+    three that already differ.
+    """
+    stems = [
+        stem
+        for slug in EXPECTED_SLUGS.values()
+        for stem in panel_spec.dms_strata_panels(slug)
+    ]
+    assert len(set(stems)) == len(stems), f"panel stems collide: {stems}"
+
+
+def test_the_stems_are_the_tracked_tables_beside_them():
+    """The one check that pins the stem *format* rather than its shape.
+
+    Every other assertion here is structural -- the letters follow the stems,
+    the rows follow the letters -- and all of them would pass if the format
+    string changed, while the six committed CSVs became orphans named for a
+    spelling nothing produces any more. These files are tracked, so this reads
+    them.
+    """
+    for slug in EXPECTED_SLUGS.values():
+        for stem in panel_spec.dms_strata_panels(slug):
+            path = panel_spec.panel_csv_path(panel_spec.DMS_SELECTION, stem)
+            assert path.exists(), (
+                f"{path} is not in the tree, so `dms_strata_panels` no longer "
+                f"names the tables `rule dms_strata_panels` wrote"
+            )
+
+    figures = [
+        panel_spec.dms_strata_figure_stem(slug) for slug in EXPECTED_SLUGS.values()
+    ]
+    assert len(set(figures)) == len(figures), f"figure stems collide: {figures}"
 
 
 def _row_spec():
@@ -158,5 +248,6 @@ def test_the_figure_does_not_share_fig_dms_panel_stems():
     overwrite the other's PNG and `notebooks/dms.py`'s completeness check pass
     on the wrong picture.
     """
-    assert not set(panel_spec.DMS_STRATA_PANELS) & set(panel_spec.DMS_PANELS)
-    assert panel_spec.DMS_STRATA_FIGURE_STEM != panel_spec.DMS_FIGURE_STEM
+    for slug in EXPECTED_SLUGS.values():
+        assert not set(panel_spec.dms_strata_panels(slug)) & set(panel_spec.DMS_PANELS)
+        assert panel_spec.dms_strata_figure_stem(slug) != panel_spec.DMS_FIGURE_STEM

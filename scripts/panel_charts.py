@@ -861,7 +861,10 @@ def dms_stratum_row(
         stratum_order: Which cells to draw, left to right. ``"all"`` draws the
             whole frame; any other value draws that stratum alone.
         x_domain: The measurement's domain, shared across every row of the
-            figure so a column can be read down the page.
+            figure so a column can be read down the page. **Within one figure
+            only.** `fig:dms_strata` is one figure per assay and each computes
+            this from its own homolog's cells, so a column may not be read
+            across the three.
         stats: ``predictor_correlations.csv`` filtered to this row's homolog and
             predictor. ``r`` and ``n`` are read from it rather than recomputed,
             so the picture and the table cannot drift.

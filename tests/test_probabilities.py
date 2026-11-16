@@ -267,13 +267,20 @@ def test_the_two_axis_domains_are_equal_in_width():
 
 
 def test_the_figure_does_not_share_fig_dms_panel_stems():
-    """`DMS_SELECTION` is one directory, so a clash would overwrite a panel."""
-    others = set(panel_spec.DMS_PANELS) | set(panel_spec.DMS_STRATA_PANELS)
+    """`DMS_SELECTION` is one directory, so a clash would overwrite a panel.
+
+    `fig:dms_strata` is three figures now, one per assay, so its stems are
+    checked against all three rather than against one.
+    """
+    slugs = [panel_spec.homolog_slug(homolog) for homolog in lib.dms_homologs()]
+    others = set(panel_spec.DMS_PANELS) | {
+        stem for slug in slugs for stem in panel_spec.dms_strata_panels(slug)
+    }
     assert not others & set(panel_spec.PROBABILITIES_PANELS)
-    assert (
-        panel_spec.PROBABILITIES_FIGURE_STEM != panel_spec.DMS_FIGURE_STEM
-        and panel_spec.PROBABILITIES_FIGURE_STEM != panel_spec.DMS_STRATA_FIGURE_STEM
-    )
+    assert panel_spec.PROBABILITIES_FIGURE_STEM != panel_spec.DMS_FIGURE_STEM
+    assert panel_spec.PROBABILITIES_FIGURE_STEM not in {
+        panel_spec.dms_strata_figure_stem(slug) for slug in slugs
+    }
 
 
 def test_each_experiment_has_its_own_colour_and_each_arm_its_own_label():

@@ -53,9 +53,11 @@ from panel_spec import (
     DMS_PREDICTOR_CORRELATIONS,
     DMS_PREDICTORS,
     DMS_SELECTION,
-    DMS_STRATA_FIGURE_STEM,
-    DMS_STRATA_PANEL_LETTERS,
-    DMS_STRATA_PANELS,
+    check_slugs_are_distinct,
+    dms_strata_figure_stem,
+    dms_strata_panel_letters,
+    dms_strata_panels,
+    homolog_for_slug,
     PROBABILITIES_FIGURE_STEM,
     PROBABILITIES_SCATTER_HOMOLOG,
     PROBABILITIES_PANEL_LETTERS,
@@ -377,6 +379,46 @@ def dms_all_scores(*_):
         str(dms_score_path(model, homolog))
         for model in DMS_PREDICTORS
         for homolog in dms_homologs()
+    ]
+
+
+#: `fig:dms_strata`'s slug for each homolog, checked for collisions **here**,
+#: once, at parse time. `panel_spec.homolog_slug` strips dots and case and so
+#: is not injective; a roster where two homologs slugged alike would have two
+#: jobs write one figure, and the constraint below would hold the same token
+#: twice. This raises instead.
+DMS_STRATA_SLUGS: dict[str, str] = check_slugs_are_distinct(dms_homologs())
+
+#: The alternation both `fig:dms_strata` rules constrain their wildcard to.
+#:
+#: **Load-bearing rather than defensive.** Without it `dms_strata_{slug}.html`
+#: and `dms_strata_figure_{slug}.html` can match each other -- a slug of
+#: `figure_kp311` satisfies the first -- and snakemake would see two rules able
+#: to produce one file.
+DMS_STRATA_SLUG_PATTERN = "|".join(re.escape(slug) for slug in DMS_STRATA_SLUGS)
+
+
+def dms_strata_homolog(wildcards):
+    """The homolog a `fig:dms_strata` job is drawing, from its `{slug}`.
+
+    A `params` lookup rather than a wildcard, because every output of those
+    rules carries the slug and snakemake reads a job's wildcards back off its
+    output paths -- so there is no `homolog` wildcard to interpolate.
+    """
+    return homolog_for_slug(wildcards.slug, dms_homologs())
+
+
+def dms_strata_figure_paths(*_):
+    """Every assay's composed `fig:dms_strata`, in every format.
+
+    Named once because two rules need it and they must not disagree:
+    `rule dms_strata` is the aggregator, and `rule figures` enumerates the
+    figures itself rather than depending on it.
+    """
+    return [
+        str(path)
+        for slug in DMS_STRATA_SLUGS
+        for path in composed_paths(DMS_SELECTION, dms_strata_figure_stem(slug))
     ]
 
 
@@ -775,9 +817,15 @@ rule dms_predictor_summary:
 
 
 rule dms_strata:
-    """`fig:dms_strata`, and so its two panels beneath it."""
+    """`fig:dms_strata` for all three assays, and so the six panels beneath.
+
+    Three figures rather than six rows of one, so each keeps the cell size #46
+    drew it at. They are not comparable across figures: each takes its x domain
+    from its own assay's cells, which is what `notebooks/dms_strata.py` has
+    always done and what the captions have to say.
+    """
     input:
-        composed_paths(DMS_SELECTION, DMS_STRATA_FIGURE_STEM),
+        dms_strata_figure_paths,
 
 
 rule dms_strata_panels:
@@ -791,7 +839,17 @@ rule dms_strata_panels:
     than recomputed in the notebook, which is what keeps the picture and the
     CSV beside it from drifting -- so this rule waits on
     `rule dms_predictor_summary` rather than on the scores alone.
+
+    The wildcard is the slug and the homolog is a `params` lookup; see
+    `dms_strata_homolog` above. **`scores` is the whole predictor x homolog
+    cross product for every slug**, because `dms_summary.merged_frames` reads
+    all of it and then selects one homolog -- so no input moved, and a change
+    to any one homolog's scores reruns all three jobs.
     """
+    wildcard_constraints:
+        slug=DMS_STRATA_SLUG_PATTERN,
+    params:
+        homolog=dms_strata_homolog,
     input:
         notebook="notebooks/dms_strata.py",
         summary="scripts/dms_summary.py",
@@ -822,25 +880,34 @@ rule dms_strata_panels:
         scores=dms_all_scores,
         table=str(panel_csv_path(DMS_SELECTION, DMS_PREDICTOR_CORRELATIONS)),
     output:
-        html=f"{NOTEBOOK_DIR}/dms_strata.html",
-        panels=panel_outputs(DMS_STRATA_PANELS, DMS_SELECTION),
+        html=f"{NOTEBOOK_DIR}/dms_strata_{{slug}}.html",
+        panels=panel_outputs(dms_strata_panels("{slug}"), DMS_SELECTION),
     log:
-        f"{ARTIFACT_ROOT}/logs/dms_strata.log",
+        f"{ARTIFACT_ROOT}/logs/dms_strata_{{slug}}.log",
     resources:
         mem_mb=PANEL_MEM_MB,
     shell:
         "marimo export html {input.notebook} -o {output.html} --force"
         " -- --scores {input.scores}"
+        " --homolog {params.homolog}"
         " > {log} 2>&1"
 
 
 rule compose_dms_strata:
-    """`fig:dms_strata` itself, laid out from its two panels.
+    """One assay's `fig:dms_strata`, laid out from its two panels.
 
     No scoring, no assay and no table: it reads PNGs, the split every
     composition here is built on. The manuscript copy is not a declared
     output, for the reason `rule compose_agreement` gives.
+
+    The `{slug}` wildcard is `rule dms_strata_panels`' and carries the same
+    reason; `rule compose_within_clade_shifts` is the shape, down to the `--`
+    separator this rule had no need of before it took an argument.
     """
+    wildcard_constraints:
+        slug=DMS_STRATA_SLUG_PATTERN,
+    params:
+        homolog=dms_strata_homolog,
     input:
         layout="scripts/figure_layout.py",
         spec="scripts/panel_spec.py",
@@ -850,20 +917,23 @@ rule compose_dms_strata:
         notebook="notebooks/dms_strata_figure.py",
         panels=[
             str(figure_dir(DMS_SELECTION) / f"{stem}.png")
-            for stem in DMS_STRATA_PANEL_LETTERS.values()
+            for stem in dms_strata_panel_letters("{slug}").values()
         ],
     output:
-        html=f"{NOTEBOOK_DIR}/dms_strata_figure.html",
+        html=f"{NOTEBOOK_DIR}/dms_strata_figure_{{slug}}.html",
         figure=[
             str(path)
-            for path in composed_paths(DMS_SELECTION, DMS_STRATA_FIGURE_STEM)
+            for path in composed_paths(
+                DMS_SELECTION, dms_strata_figure_stem("{slug}")
+            )
         ],
     log:
-        f"{ARTIFACT_ROOT}/logs/compose_dms_strata.log",
+        f"{ARTIFACT_ROOT}/logs/compose_dms_strata_{{slug}}.log",
     resources:
         mem_mb=PANEL_MEM_MB,
     shell:
         "marimo export html {input.notebook} -o {output.html} --force"
+        " -- --homolog {params.homolog}"
         " > {log} 2>&1"
 
 
@@ -1516,12 +1586,12 @@ rule figures:
         ],
         # `fig:dms`, on the same footing: one panel set, one directory.
         [str(path) for path in composed_paths(DMS_SELECTION, DMS_FIGURE_STEM)],
-        # `fig:dms_strata`, which shares that directory: it is the same
-        # selection drawn from the same model, two panels rather than four.
-        [
-            str(path)
-            for path in composed_paths(DMS_SELECTION, DMS_STRATA_FIGURE_STEM)
-        ],
+        # `fig:dms_strata`, which shares that directory: the same selection
+        # drawn from the same model, two panels rather than four -- and three
+        # figures rather than one, since each assay gets its own. Enumerated
+        # here rather than taken from `rule dms_strata`, which this rule does
+        # not depend on.
+        dms_strata_figure_paths(),
         [
             str(path)
             for path in composed_paths(DMS_SELECTION, PROBABILITIES_FIGURE_STEM)
