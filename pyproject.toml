@@ -66,3 +66,10 @@ extend-exclude = ["dasm2"]
 # re-sorting them. A cell has no such statement to put between them, so the
 # ordering is enforced by that test rather than by this linter.
 "notebooks/*.py" = ["PLR1711", "B018", "I001"]
+# `exploration/` holds marimo notebooks too, so it needs the same three. It is
+# listed separately rather than folded into one glob because the two
+# directories are not the same kind of thing: every file under `notebooks/` is
+# reached by a rule and declared in `tests/test_rule_inputs.py`, while
+# `exploration/` is evidence behind a scope decision that no rule builds and no
+# test covers. See `exploration/dnms/README.md`.
+"exploration/**/*.py" = ["PLR1711", "B018", "I001"]
