@@ -62,7 +62,7 @@ OUTPUT_COLUMNS = ("wildtype", "site", "mutant", "functional_effect")
 def normalise_published(raw: pd.DataFrame, spec) -> pd.DataFrame:
     """One study's published file, as the four columns the loader reads.
 
-    The steps are shared by all three studies and every one of them is a
+    The steps are shared by all four studies and every one of them is a
     property of the released file rather than a choice made here:
 
     1. Rename the study's identifier and phenotype columns.

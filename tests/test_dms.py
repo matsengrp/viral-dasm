@@ -743,12 +743,12 @@ def test_the_laid_out_bar_row_carries_no_heading_of_its_own():
             "n": [100, 100, 100],
         }
     )
-    kwargs = dict(
-        homologs=["KP.3.1.1"],
-        clades={"KP.3.1.1": "24E"},
-        methods=dms.METHODS,
-        y_domain=[0.0, 1.0],
-    )
+    kwargs = {
+        "homologs": ["KP.3.1.1"],
+        "clades": {"KP.3.1.1": "24E"},
+        "methods": dms.METHODS,
+        "y_domain": [0.0, 1.0],
+    }
     bare = panel_charts.dms_bar_row(
         correlations,
         min_count=panel_spec.DMS_FIGURE_MIN_COUNT,
