@@ -106,7 +106,7 @@ needs_antigen = pytest.mark.skipif(
 if REQUIRE_DATA:
     _absent = []
     if not all(lib.dms_dataset(h).path.is_file() for h in lib.dms_homologs()):
-        _absent.append("the three DMS CSVs")
+        _absent.append("the DMS CSVs")
     if not (_SPEC.checkout / "antiGen").is_dir():
         _absent.append(f"the antiGen checkout at {_SPEC.checkout}")
     if _absent:

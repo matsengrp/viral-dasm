@@ -997,10 +997,10 @@ def dms_bar_row(
     methods: Sequence[tuple[str, str]],
     y_domain: Sequence[float],
 ) -> alt.HConcatChart:
-    """One row of panel B: the same coefficient, for all three homologs.
+    """One row of panel B: the same coefficient, for every homolog.
 
     The scatter row reports `r` in each panel for one homolog; this collects
-    it for all three, so the comparison that matters -- how much each method
+    them all, so the comparison that matters -- how much each method
     loses when the threshold drops -- is one figure rather than three dropdown
     settings held in the reader's head.
 

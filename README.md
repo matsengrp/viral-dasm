@@ -41,7 +41,7 @@ results/      the publishable tables it writes, tracked
 
 The two data directories split by direction, not by provenance. `data/` holds
 input a reader may edit -- the era template, the shift candidates and the
-three published DMS files. `results/` holds what
+four published DMS files. `results/` holds what
 the pipeline produces and the repository keeps: `runs.csv`, and one CSV per
 figure panel. Everything large or intermediate -- corpora,
 checkpoints, the scored table, logs -- goes under `artifact_root` on the
@@ -98,8 +98,8 @@ behind them to a tree, an alignment or a MAT, so a missing input stops the DAG
 at the mat-pcp target that produces it.
 
 **One input is not GISAID-derived, and it is carried here.** `fig:dms` reads
-three published deep mutational scans — full-spike cell-entry measurements on
-BA.1, XBB.1.5 and KP.3.1.1 — which have their own papers and their own
+four published deep mutational scans — full-spike cell-entry measurements on
+Delta, BA.1, XBB.1.5 and KP.3.1.1 — which have their own papers and their own
 repositories. `data/dms/` holds a copy of each study's released file, pinned
 by md5 in `config.yaml`'s `dms` block and documented in
 `data/dms/PROVENANCE.md`, so a reader without GISAID access rebuilds that
@@ -223,7 +223,7 @@ already did the forward passes, so a panel rule reads
 | `compose_agreement` | the figure itself, laid out from those five PNGs |
 
 `snakemake dms` draws `fig:dms` the same way, from the same scored table plus
-the three published assays:
+the four published assays:
 
 | rule | what it produces |
 |---|---|
@@ -277,7 +277,7 @@ every one of a clade's tree leaves from its own root-to-tip mutation path,
 tallies residues per site, and scores a substitution by the log ratio of its
 residue's leaf count to the clade founder's at that site. antiGen is a published
 transformer, scored at the last rung of its authors' own time-cutoff grid — the
-only rung whose training split contains all three DMS parent sequences, so every
+only rung whose training split contains every DMS parent sequence, so every
 cell is scored by a model that saw its background. It is fed the WH1 projection
 of the construct each assay expressed rather than the clade founder the other
 two score against; the two differ only at columns `load_dms` has already

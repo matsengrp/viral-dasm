@@ -1,4 +1,4 @@
-# The three deep mutational scans `fig:dms` reads
+# The four deep mutational scans `fig:dms` reads
 
 Each file here is a copy of what its study published, unmodified. The
 conversion to this pipeline's `wildtype,site,mutant,functional_effect` columns
@@ -12,18 +12,58 @@ and anything derived from them may be committed.
 
 | homolog | clade | file | source | released |
 |---|---|---|---|---|
+| Delta | 21J | `dadonaite2023_Delta_muteffects.csv` | [dms-vep/SARS-CoV-2_Delta_spike_DMS_REGN10933](https://github.com/dms-vep/SARS-CoV-2_Delta_spike_DMS_REGN10933), `results/muteffects_functional/muteffects_observed.csv` at commit `ac9c29b0d9aea6b2ef484b63c3a634ea0aa26adb` | MIT, `Copyright (c) 2022, Bernadeta Dadonaite and Jesse Bloom` |
 | BA.1 | 21K | `dadonaite2023_BA1_muteffects.csv` | [dms-vep/SARS-CoV-2_Omicron_BA.1_spike_DMS_mAbs](https://github.com/dms-vep/SARS-CoV-2_Omicron_BA.1_spike_DMS_mAbs), `results/muteffects_functional/muteffects_observed.csv` at commit `fc551fe332ac8c50c3ffeacc4c6a8dac5fe43369` | MIT |
 | XBB.1.5 | 23A | `dadonaite2024_XBB15_summary.csv` | [dms-vep/SARS-CoV-2_XBB.1.5_spike_DMS](https://github.com/dms-vep/SARS-CoV-2_XBB.1.5_spike_DMS), `results/summaries/summary.csv` | MIT, granting "this software and associated data" |
 | KP.3.1.1 | 24E | `dadonaite2025_KP311_func_effects.csv` | [dms-vep/SARS-CoV-2_KP.3.1.1_spike_DMS](https://github.com/dms-vep/SARS-CoV-2_KP.3.1.1_spike_DMS), `results/func_effects/averages/293T_medium_ACE2_entry_func_effects.csv` | MIT, as above |
 
-Citations: BA.1, Dadonaite et al., [10.1016/j.cell.2023.02.001](https://doi.org/10.1016/j.cell.2023.02.001); XBB.1.5, Dadonaite et al., [10.1038/s41586-024-07636-1](https://doi.org/10.1038/s41586-024-07636-1); KP.3.1.1, Dadonaite et al., [10.1128/jvi.01423-25](https://doi.org/10.1128/jvi.01423-25).
+Citations: Delta and BA.1 are the same paper, Dadonaite et al., [10.1016/j.cell.2023.02.001](https://doi.org/10.1016/j.cell.2023.02.001) (`dadonaite2023pseudovirus`); XBB.1.5, Dadonaite et al., [10.1038/s41586-024-07636-1](https://doi.org/10.1038/s41586-024-07636-1); KP.3.1.1, Dadonaite et al., [10.1128/jvi.01423-25](https://doi.org/10.1128/jvi.01423-25).
 
 ## Filtering: each study's own, not a house rule
 
-These are three separate experiments with their own thresholds, and the
+These are four separate experiments with their own thresholds, and the
 measurements used here are the ones their authors would hand you. One of the
-three releases a file that is already filtered; two do not, and what each is
-missing is read from that study rather than borrowed from the other two.
+four releases a file that is already filtered; three do not, and what each is
+missing is read from that study rather than borrowed from the others.
+
+### Delta — not filtered by its study, so its threshold is applied here
+
+Delta and BA.1 come from the same paper and the same pipeline, so this file is
+BA.1's in every structural respect: the per-mutation effect on spike-mediated
+entry on the observed phenotype, released over every mutation the pipeline fit
+and still carrying `times_seen`, `effect_std` and `n_libraries`. The threshold
+is that repository's own `muteffects_plot_kwargs.addtl_slider_stats:
+{times_seen: 3}`, read from the same config key as BA.1's and applied by the
+same `notebooks/compare_muteffects.ipynb`. It declares no `effect_std` bound,
+so none is set here. `reference_site` is Wuhan-Hu-1 numbering, as for BA.1.
+
+Retained: 6,143 cells — 4,599 one nucleotide change from the founder's codon,
+1,544 needing two or three.
+
+**What `effect` is.** That repository's `config.yaml` names this file as
+`muteffects_observed` and sets `muteffects_avg_method: median`.
+`dms-vep-pipeline` (its submodule, pinned at `48bf2f21`)
+`notebooks/avg_muteffects.ipynb` concatenates the per-*selection* global
+epistasis fits for all eight Delta selections — four libraries, two replicates
+each — groups by site and mutation, and takes that median. So it is the median
+across replicates **and** libraries, which is what the paper says it reports.
+The `Lib-N effect` columns beside it are a separate merge, the median within
+each library, and are not the inputs to `effect`; `effect` therefore does not
+equal their median.
+
+**One way it is not BA.1's twin: the observed scale is saturated on this
+background.** Delta's wildtype sits at the top of the global-epistasis link's
+range in five of the eight selections (Lib-1 ×2, Lib-2 replicate 1, Lib-4 ×2),
+whose per-selection fits max out at exactly `-0.0000` with no positive value
+at all; the other three behave normally. With the median taken over eight
+selections of which five are capped, the published `effect` is exactly 0.0 for
+43.9% of rows and 43.5% of retained cells, against no exact zeros at all in
+the other three homologs. The latent phenotype is unaffected in all eight
+selections, and so are the raw variant-level `func_scores`, so the ceiling is
+the link function rather than the libraries — and it is a property of the
+published data, not of this copy. It bounds every predictor equally, which is
+why Delta's correlations are not comparable at face value with the other
+three homologs'.
 
 ### BA.1 — not filtered by its study, so its threshold is applied here
 
@@ -53,7 +93,7 @@ muteffects = (
 ```
 
 The first two queries are what `scripts/dms_published.py` and `scripts/dms.py`
-already do for all three homologs; the third is `min_times_seen: 3`.
+already do for every homolog; the third is `min_times_seen: 3`.
 
 **`times_seen` here is a mean, not a count.** `dms-vep-pipeline`'s
 `avg_muteffects.ipynb` aggregates it as `s.sum() / n_selections` over all four
@@ -148,7 +188,7 @@ pipeline applies the two thresholds that repository declares:
 `spike mediated entry` column of `results/summaries/sera_group_averages.csv`:
 the same **8,263** substitutions, with `max |difference| = 0.0` on every one.
 (The summary carries 9,576 rows; the difference is 1,235 synonymous rows and
-82 insertion-site rows, which this pipeline drops for all three homologs.)
+82 insertion-site rows, which this pipeline drops for every homolog.)
 
 Two notes for whoever revisits this:
 

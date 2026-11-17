@@ -6,7 +6,7 @@ the wrong cells; and a join whose key is not unique multiplies rows and raises
 every ``n`` without raising anything. Neither raises on its own.
 
 The checks over hand-built frames run always. The ones that read this
-repository's own mat-pcp run or the three DMS CSVs skip when those are not
+repository's own mat-pcp run or the DMS CSVs skip when those are not
 readable, so the suite runs off-cluster.
 """
 
