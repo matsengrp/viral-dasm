@@ -1,7 +1,7 @@
 homolog,min_count,method,column,pearson,spearman,n,spec_fitness_metric,spec_min_count,spec_clip_lower,spec_min_clade_mutations,spec_exclude_synonymous,spec_count_filter_mode
-BA.1,10,DASM,log_selection_factor,0.6744,0.6375,2744,delta_fitness_ratio,10.0,,20,True,or
-BA.1,10,per-clade counts,delta_fitness_ratio,0.6402,0.623,2744,delta_fitness_ratio,10.0,,20,True,or
-BA.1,10,full-tree counts,delta_fitness_ratio_all,0.7118,0.6653,2744,delta_fitness_ratio,10.0,,20,True,or
+BA.1,10,DASM,log_selection_factor,0.6537,0.6032,2858,delta_fitness_ratio,10.0,,20,True,or
+BA.1,10,per-clade counts,delta_fitness_ratio,0.621,0.593,2858,delta_fitness_ratio,10.0,,20,True,or
+BA.1,10,full-tree counts,delta_fitness_ratio_all,0.6905,0.6196,2858,delta_fitness_ratio,10.0,,20,True,or
 XBB.1.5,10,DASM,log_selection_factor,0.6359,0.5824,1315,delta_fitness_ratio,10.0,,20,True,or
 XBB.1.5,10,per-clade counts,delta_fitness_ratio,0.5537,0.5577,1315,delta_fitness_ratio,10.0,,20,True,or
 XBB.1.5,10,full-tree counts,delta_fitness_ratio_all,0.6067,0.5788,1315,delta_fitness_ratio,10.0,,20,True,or

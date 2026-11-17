@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import csv
 import re
+import shlex
 import sys
 from collections.abc import Iterable
 from pathlib import Path
@@ -1218,3 +1219,46 @@ def figure_dir(selection: str) -> Path:
 def panel_csv_path(selection: str, stem: str) -> Path:
     """Where one selection's panel table goes, in the tracked tree."""
     return PANEL_CSV_DIR / selection / f"{stem}.csv"
+
+
+def scores_flags(paths: Iterable[str | Path]) -> str:
+    """``--scores`` once per path, which is the only form marimo reads.
+
+    ``mo.cli_args().get_all("scores")`` returns one entry per *occurrence of
+    the flag*, so a notebook given ``--scores a b c`` sees a single entry,
+    ``"a b c"``, and opens a file named after all three at once. Snakemake
+    expands ``{input.scores}`` to exactly that, space-separated. It is a
+    parsing bug rather than a quoting one, so no amount of escaping rescues
+    the single-flag form; the flag has to be repeated. Verified against
+    marimo 0.23.15, where ``--scores p1 p2 p3`` yields ``['p1 p2 p3']`` and
+    ``--scores p1 --scores p2 --scores p3`` yields ``['p1', 'p2', 'p3']``.
+
+    Each path is quoted with `shlex.quote`, because Snakemake splices
+    ``params`` into the shell string verbatim. That is a complete guard where
+    refusing paths that hold a space would be a partial one: a path can also
+    hold ``;``, ``$`` or a glob character, and quoting handles all of them
+    while leaving an ordinary path untouched.
+
+    Here rather than in `workflow/figures.smk` so that it can be tested: a
+    `.smk` is not importable, and `tests/test_rule_inputs.py` cannot see this
+    because the inputs are *declared* correctly and only their spelling on the
+    command line was wrong.
+
+    Raises:
+        ValueError: On an empty path, or on no paths at all. Both callers pass
+            every predictor's scores for every homolog, so neither can happen
+            without a bug upstream -- and a notebook handed no scores fails
+            later, further from the cause.
+    """
+    flags = []
+    for path in paths:
+        text = str(path)
+        if not text:
+            raise ValueError("a score path is the empty string, which names no file")
+        flags.append(f"--scores {shlex.quote(text)}")
+    if not flags:
+        raise ValueError(
+            "no score paths to pass, so the notebook would be handed none and "
+            "fail on an empty table instead of here"
+        )
+    return " ".join(flags)

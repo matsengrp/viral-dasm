@@ -58,6 +58,7 @@ from panel_spec import (
     dms_strata_panel_letters,
     dms_strata_panels,
     homolog_for_slug,
+    scores_flags,
     PROBABILITIES_FIGURE_STEM,
     PROBABILITIES_SCATTER_HOMOLOG,
     PROBABILITIES_PANEL_LETTERS,
@@ -380,6 +381,14 @@ def dms_all_scores(*_):
         for model in DMS_PREDICTORS
         for homolog in dms_homologs()
     ]
+
+
+def repeated_scores_flag(wildcards, input):
+    """The ``--scores`` flags for a notebook, from this job's declared inputs.
+
+    A thin adapter: `panel_spec.scores_flags` holds the reason and the test.
+    """
+    return scores_flags(input.scores)
 
 
 #: `fig:dms_strata`'s slug for each homolog, checked for collisions **here**,
@@ -810,6 +819,12 @@ rule dms_predictor_summary:
     resources:
         mem_mb=PANEL_MEM_MB,
     shell:
+        # **Space-separated is correct here, and must stay.** This runs
+        # `scripts/dms_summary.py`, whose `argparse` declares `--scores` with
+        # `nargs="+"` and so reads every path from one occurrence of the flag.
+        # The marimo rules need the opposite -- `panel_spec.scores_flags` and
+        # one `--scores` per path -- because `mo.cli_args().get_all` counts
+        # occurrences. Converting this one by analogy would break it.
         "python {input.script}"
         " --scores {input.scores}"
         " --output {output.table}"
@@ -850,6 +865,7 @@ rule dms_strata_panels:
         slug=DMS_STRATA_SLUG_PATTERN,
     params:
         homolog=dms_strata_homolog,
+        scores=repeated_scores_flag,
     input:
         notebook="notebooks/dms_strata.py",
         summary="scripts/dms_summary.py",
@@ -888,7 +904,7 @@ rule dms_strata_panels:
         mem_mb=PANEL_MEM_MB,
     shell:
         "marimo export html {input.notebook} -o {output.html} --force"
-        " -- --scores {input.scores}"
+        " -- {params.scores}"
         " --homolog {params.homolog}"
         " > {log} 2>&1"
 
@@ -1007,11 +1023,13 @@ rule probabilities_panels:
         panels=panel_outputs(PROBABILITIES_PANELS, DMS_SELECTION),
     log:
         f"{ARTIFACT_ROOT}/logs/probabilities.log",
+    params:
+        scores=repeated_scores_flag,
     resources:
         mem_mb=PANEL_MEM_MB,
     shell:
         "marimo export html {input.notebook} -o {output.html} --force"
-        " -- --scores {input.scores}"
+        " -- {params.scores}"
         " --table {input.scored_table}"
         " --neutral-archive {input.archive}"
         " > {log} 2>&1"

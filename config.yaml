@@ -286,20 +286,22 @@ smoke_corpus:
 dms:
     root: data/dms
     homologs:
-        # Already filtered by its own study: `spike-analysis.ipynb` writes this
-        # table at `times_seen_threshold = 1` over both replicate fits
-        # (`how="inner"`), at the lasso strength that notebook calls the chosen
-        # one for the final spike model results, 5e-05. BA.1 is the model's
-        # reference condition, which is why its predicted score carries no
-        # homolog suffix.
+        # NOT filtered by its own study, which publishes the per-mutation
+        # table over every mutation it fit. `min_times_seen` below is that
+        # repository's own, from `muteffects_plot_kwargs.addtl_slider_stats`
+        # in its `config.yaml` -- the threshold its own
+        # `notebooks/compare_muteffects.ipynb` applies before correlating
+        # these effects against other datasets, which is this figure's job.
+        # It declares no `effect_std` bound, so none is set here.
+        #
+        # `reference_site` is Wuhan-Hu-1 numbering; `sequential_site` beside
+        # it indexes the construct and is not what this pipeline joins on.
         BA.1:
             clade: 21K
-            file: haddox2023_BA1_mutations_df.csv
-            md5: f0bab6c525807fb8c98f035d8956090c
-            wt_column: wts
-            site_column: sites
-            mutant_column: muts
-            effect_column: avg_predicted_func_score
+            file: dadonaite2023_BA1_muteffects.csv
+            md5: f295a86ec385167fed070a0c196ee985
+            site_column: reference_site
+            min_times_seen: 3
         # Already filtered by its own study: this is the summary that
         # experiment publishes across its assays, and `spike mediated entry`
         # is the phenotype this figure reads.
