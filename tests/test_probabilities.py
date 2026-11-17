@@ -283,18 +283,15 @@ def test_the_figure_does_not_share_fig_dms_panel_stems():
     }
 
 
-def test_each_experiment_has_its_own_colour_and_each_arm_its_own_label():
-    """Colour carries the experiment; the labels carry the arm.
+def test_the_bars_take_one_colour_and_it_is_the_dms_figure_s():
+    """Colour encodes nothing here, as on `fig:dms`; the labels carry the arm.
 
-    Panel B groups by DMS experiment and names the three arms under every bar,
-    so the colour channel is spent on the grouping rather than repeating a
-    distinction the labels already make. That needs one hue per homolog, and
-    one label per arm.
+    Panel B names its three arms under every bar and heads each group with its
+    experiment, so a hue per experiment spent the channel on a distinction the
+    page already makes -- and spent it differently from the bar panel this one
+    is read beside, where every bar is one colour.
     """
-    assert len(set(charts.PROBABILITIES_HOMOLOG_COLORS)) == len(
-        charts.PROBABILITIES_HOMOLOG_COLORS
-    )
-    assert len(charts.PROBABILITIES_HOMOLOG_COLORS) >= len(lib.dms_homologs())
+    assert charts.PROBABILITIES_BAR_COLOR == charts.DMS_ROW_COLORS[0]
     assert set(panel_spec.PROBABILITIES_BAR_ARMS) == set(
         charts.PROBABILITIES_ARM_LABELS
     )
@@ -475,19 +472,3 @@ def test_panel_b_labels_every_bar_to_two_significant_figures():
 
     assert drawn, "no bar value labels in the spec"
     assert all(re.fullmatch(r"0\.\d\d", label) for label in drawn), sorted(drawn)
-
-
-def test_panel_b_refuses_more_homologs_than_it_has_colours():
-    """`zip` would otherwise drop the last group without saying so."""
-    extra = len(charts.PROBABILITIES_HOMOLOG_COLORS) + 1
-    frame = pd.concat(
-        [_toy_bars().assign(homolog=f"H{index}") for index in range(extra)],
-        ignore_index=True,
-    )
-    with pytest.raises(ValueError, match="only"):
-        charts.dms_correlation_bars(
-            frame,
-            homologs=[f"H{index}" for index in range(extra)],
-            arms=panel_spec.PROBABILITIES_BAR_ARMS,
-            bar_height=100,
-        )
