@@ -621,9 +621,14 @@ DMS_PREDICTOR_CORRELATIONS = "predictor_correlations"
 #: conversion exists that does not assume a mutation model" -- which is why the
 #: rows never share a y domain. Two lines each so both titles take the same
 #: width and the cells line up.
+#: **antiGen first, the DASM under it**, which is the order the argument is
+#: made in: the section shows the published model's probability carrying a
+#: nucleotide-accessibility bias, then shows the DASM's fitness effect not
+#: carrying it. A reader meets the claim and then its comparison, rather than
+#: the other way round.
 DMS_STRATA_MODELS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("dasm", ("DASM", "fitness effect")),  # `panel_charts.DMS_AXIS_TITLES`' DASM entry
     ("antigen", ("antiGen", "log probability")),
+    ("dasm", ("DASM", "fitness effect")),  # `panel_charts.DMS_AXIS_TITLES`' DASM entry
 )
 
 #: The columns, left to right. **Not `dms.STRATA`**, which orders the two

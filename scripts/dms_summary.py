@@ -75,6 +75,7 @@ SUMMARY_COLUMNS = (
     "pearson_r",
     "spearman_rho",
     "regression_slope",
+    "median_score",
     "n_mutations",
 )
 
@@ -93,11 +94,41 @@ def _metrics(groups: dict[tuple[str, str, str], pd.DataFrame]):
         [
             within_clade_metrics({homolog: frame}, DMS_COLUMN)
             .drop(columns="clade")
-            .assign(homolog=homolog, predictor=predictor, stratum=stratum)
+            .assign(
+                homolog=homolog,
+                predictor=predictor,
+                stratum=stratum,
+                median_score=_median_score(frame),
+            )
             for (homolog, predictor, stratum), frame in groups.items()
         ],
         ignore_index=True,
     )
+
+
+def _median_score(frame: pd.DataFrame) -> float:
+    """One group's median predictor score, over the rows the metrics used.
+
+    **Not a correlation, and it is here because one claim needs it.** The
+    manuscript reports that antiGen gives systematically higher probabilities
+    to the single-nucleotide stratum than to the multi-nucleotide one -- a
+    difference in level, which a Pearson *r* cannot see and which
+    `fig:dms_strata` shows as the vertical offset between its two hues. The
+    number belongs in this table so the sentence has a tracked source rather
+    than a figure read off by eye.
+
+    **Dropped the same way `within_clade_metrics` drops.** That function takes
+    the rows where neither the measurement nor the score is NaN; a median over
+    the raw subset would be over a different population than the
+    ``n_mutations`` printed beside it, which is exactly the drift this table
+    exists to prevent.
+
+    Returns:
+        NaN on an empty group, as the correlations do -- `dasm_prob` declares
+        no multi-nucleotide stratum, so that row is empty by construction.
+    """
+    rows = frame[[DMS_COLUMN, METRIC_COLUMN]].dropna()
+    return float(rows[METRIC_COLUMN].median()) if len(rows) else float("nan")
 
 
 def summarize(
@@ -241,7 +272,7 @@ def main() -> None:
         print(
             f"  {row.homolog:10s} {row.predictor:14s} {row.stratum:10s} "
             f"pearson={row.pearson_r:+.4f} spearman={row.spearman_rho:+.4f} "
-            f"n={row.n_mutations}"
+            f"median={row.median_score:+.4f} n={row.n_mutations}"
         )
 
 

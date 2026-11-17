@@ -174,10 +174,11 @@ def test_a_predictor_may_declare_one_stratum_without_failing_the_coverage_check(
 def test_the_written_columns_are_the_ones_the_manuscript_reports():
     """A column added here lands in a tracked CSV, so the set is pinned.
 
-    The table carries what ``within_clade_metrics`` returns and the three keys,
-    and nothing else: the site-centred and mutant-observed readouts were cut as
-    outside the manuscript's scope, and a reintroduction should be a decision
-    rather than a diff nobody notices.
+    The table carries what ``within_clade_metrics`` returns, the three keys and
+    ``median_score``, and nothing else: the site-centred and mutant-observed
+    readouts were cut as outside the manuscript's scope, and a reintroduction
+    should be a decision rather than a diff nobody notices. ``median_score`` is
+    here because a claim needs it -- `_median_score` records which.
     """
     table = dms_summary.summarize({"BA.1": _cells()}, _manifests())
     assert tuple(table.columns) == dms_summary.SUMMARY_COLUMNS
@@ -188,5 +189,58 @@ def test_the_written_columns_are_the_ones_the_manuscript_reports():
         "pearson_r",
         "spearman_rho",
         "regression_slope",
+        "median_score",
         "n_mutations",
+    )
+
+
+def test_the_median_is_taken_over_the_rows_the_correlation_used():
+    """`median_score` and `n_mutations` describe one population, or neither does.
+
+    ``within_clade_metrics`` drops a row where either column is NaN. A median
+    over the raw subset would then be over more rows than the `n` printed
+    beside it -- a drift that nothing downstream could see, since both numbers
+    land in the same CSV row and read as if they came from the same cells.
+
+    Unit-level, because `summarize`'s coverage guard refuses a frame with an
+    unscored cell in a declared stratum: the drop this is about happens inside
+    the helper, which is where it can be shown.
+    """
+    frame = pd.DataFrame(
+        {
+            dms_summary.DMS_COLUMN: [-6.0, -3.0, 0.0, float("nan")],
+            dms_summary.METRIC_COLUMN: [-5.0, -2.0, float("nan"), 100.0],
+        }
+    )
+    # Surviving rows are the first two, so the median is -3.5. Either of the
+    # dropped cells would move it: keeping the NaN score makes it NaN, and
+    # keeping the unmeasured 100.0 makes it -2.0.
+    assert dms_summary._median_score(frame) == pytest.approx(-3.5)
+    assert frame[dms_summary.METRIC_COLUMN].median() == pytest.approx(-2.0)
+
+    # Empty is NaN rather than a raise: `dasm_prob` declares no
+    # multi-nucleotide stratum, so that row is empty by construction.
+    assert pd.isna(dms_summary._median_score(frame.iloc[:0]))
+
+
+def test_the_median_lands_in_the_table_per_group():
+    """And it is the group's median, not the homolog's: the strata differ.
+
+    The claim it exists for is a *difference between strata* -- antiGen scores
+    the single-nucleotide cells higher than the multi-nucleotide ones -- so a
+    median computed once per predictor would report the one number the
+    sentence cannot use.
+    """
+    cells = _cells()
+    predictor = DMS_PREDICTORS[0]
+    table = dms_summary.summarize({"BA.1": cells}, _manifests()).set_index(
+        ["predictor", "stratum"]
+    )
+    for stratum in (dms.SINGLE_NT, dms.MULTI_NT):
+        expected = cells.loc[cells["stratum"] == stratum, predictor].median()
+        assert table.loc[(predictor, stratum), "median_score"] == pytest.approx(
+            expected
+        )
+    assert table.loc[(predictor, dms.ALL), "median_score"] == pytest.approx(
+        cells[predictor].median()
     )
