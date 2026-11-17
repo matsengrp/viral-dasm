@@ -764,3 +764,48 @@ def test_the_laid_out_bar_row_carries_no_heading_of_its_own():
     ).to_dict()
     title = _row_title(default)
     assert title is not None and "all mutations" in title["text"]
+
+
+def test_every_bar_carries_its_coefficient():
+    """Panel B prints each `r` over its bar, at the scatter's own precision.
+
+    The differences this row has to show are small -- Delta's DASM and
+    per-clade bars differ by 0.03 -- so the bars are read as numbers and not
+    only as lengths. Formatting them in Python rather than with a Vega
+    `format` is what keeps them the same string as the scatter's corner
+    label: `DMS_R_FORMAT` is the one place either is set.
+    """
+    pearson = [0.6812, 0.4304, 0.6476]
+    correlations = pd.DataFrame(
+        {
+            "homolog": ["KP.3.1.1"] * len(dms.METHODS),
+            "min_count": [panel_spec.DMS_FIGURE_MIN_COUNT] * len(dms.METHODS),
+            "method": [label for _column, label in dms.METHODS],
+            "pearson": pearson,
+            "n": [4289] * len(dms.METHODS),
+        }
+    )
+    spec = panel_charts.dms_bar_row(
+        correlations,
+        min_count=panel_spec.DMS_FIGURE_MIN_COUNT,
+        homologs=["KP.3.1.1"],
+        clades={"KP.3.1.1": "24E"},
+        methods=dms.METHODS,
+        y_domain=[0.0, 1.0],
+        heading="",
+    ).to_dict()
+
+    # The bars live in the group's lower `vconcat` cell, as a layer of the
+    # bar mark and the text mark over it.
+    (group,) = spec["hconcat"]
+    _header, plot = group["vconcat"]
+    marks = [layer["mark"] for layer in plot["layer"]]
+    assert any("bar" in str(mark) for mark in marks)
+    text = next(layer for layer in plot["layer"] if "text" in str(layer["mark"]))
+    assert text["encoding"]["text"]["field"] == "_value"
+
+    # Both layers share the group's one frame, so Altair hoists it onto the
+    # layered spec rather than onto either mark.
+    drawn = [datum["_value"] for datum in spec["datasets"][plot["data"]["name"]]]
+    assert drawn == [f"{r:{panel_charts.DMS_R_FORMAT}}" for r in pearson]
+    assert drawn == ["0.68", "0.43", "0.65"]
