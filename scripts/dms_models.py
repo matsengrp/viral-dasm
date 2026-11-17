@@ -98,7 +98,9 @@ def declared_cell_strata(strata: tuple[str, ...]) -> set[str]:
 
 
 def trained_single_nt_cells(
-    frame: pd.DataFrame, reachable: pd.DataFrame, censored: frozenset
+    frame: pd.DataFrame,
+    reachable: pd.DataFrame,
+    censored: frozenset[tuple[int, str]],
 ) -> pd.DataFrame:
     """The rows of ``frame`` the whichmut loss is defined on.
 
@@ -107,9 +109,12 @@ def trained_single_nt_cells(
     amino-acid mutations one nucleotide change to the founder's codon reaches,
     and drop what the model was told to ignore. Written once because two
     callers need the same three -- `scripts/dms_prob.py` for the probabilities
-    it draws and `scripts/dms_site_mean.py` for the per-site average it takes --
-    and because the censor half was already a second spelling of
-    :func:`homolog_cells`' own.
+    it draws and `scripts/dms_site_mean.py` for the per-site average it takes.
+    The censor test is a third spelling of the one in :func:`homolog_cells`
+    below, deliberately: that function applies the censor *alone*, over a
+    population this one is not allowed to narrow, and folding the two together
+    would put a shared helper on the path of every predictor in the table to
+    save four lines.
 
     **Not** :func:`homolog_cells`, which keeps every measured cell and applies
     the censor alone: that is the population every predictor is *scored* on,
@@ -127,9 +132,10 @@ def trained_single_nt_cells(
         censored: ``dms_censor.censored_mutations``' set, for the same reason.
 
     Returns:
-        The surviving rows in their original order, reindexed from zero. Order
-        is part of the contract: `notebooks/probabilities.py` writes a tracked
-        panel CSV straight from this frame's caller.
+        The surviving rows in their original order, reindexed from zero.
+        Order is part of the contract -- a caller may write this frame
+        straight to a tracked CSV -- so a future implementation must not
+        filter through a merge or a sort.
     """
     keep = [
         mutant != parent

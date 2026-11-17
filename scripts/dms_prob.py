@@ -282,6 +282,8 @@ def founder_frame(
     merged = merged.assign(
         parent_aa=[founder_aa[site - 1] for site in merged["aa_site"]]
     )
+    # Row order survives the helper, which matters here rather than there:
+    # `notebooks/probabilities.py` writes this frame to a tracked panel CSV.
     drawn = dms_models.trained_single_nt_cells(
         merged,
         dms.single_nt_indicator(clade, lib.GENE),

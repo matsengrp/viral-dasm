@@ -21,12 +21,14 @@ for _path in (REPO_ROOT, REPO_ROOT / "scripts"):
         sys.path.insert(0, str(_path))
 
 import dms
+import dms_censor
 import dms_dasm
 import dms_models
 import dms_site_mean
+import lib
 import pandas as pd
 import panel_spec
-from lib import dms_homologs
+from lib import dms_dataset, dms_homologs
 from test_dms_models import needs_dms
 
 from dasm2.sequence.constants import AA_STR_SORTED
@@ -34,6 +36,14 @@ from dasm2.sequence.constants import AA_STR_SORTED
 #: The table the data-gated test reads, spelled as `tests/test_dms_prob.py`
 #: spells it. Never rebuilt here.
 SCORED_TABLE = panel_spec.SCORED_DIR / "selection_factors.parquet"
+
+#: `needs_dms` gates on the published DMS CSVs alone, and the last test here
+#: also reads the scored table off the artifact root. Gated separately for
+#: `tests/test_dms_prob.py`'s reason: without this the test errors rather
+#: than skipping on a host that has the CSVs and not the mount.
+needs_artifacts = pytest.mark.skipif(
+    not SCORED_TABLE.is_file(), reason=f"not readable here: {SCORED_TABLE}"
+)
 
 #: A two-residue founder: site 1 is M, site 2 is A.
 _TOY_FOUNDER = "MA"
@@ -44,8 +54,8 @@ _TOY_FOUNDER = "MA"
 #: something to exclude that is neither synonymous nor censored.
 _REACHABLE = pd.DataFrame(
     {
-        0: [aa in {"C", "D", "E", "M"} for aa in AA_STR_SORTED],
-        1: [aa in {"G"} for aa in AA_STR_SORTED],
+        0: [aa in {"C", "D", "E", "H", "M"} for aa in AA_STR_SORTED],
+        1: [aa in {"G", "S"} for aa in AA_STR_SORTED],
     },
     index=list(AA_STR_SORTED),
 )
@@ -60,10 +70,12 @@ def _toy_grid() -> pd.DataFrame:
     rows = [
         (1, "M", "C", -1.0),  # trained
         (1, "M", "D", -3.0),  # trained
+        (1, "M", "H", -8.0),  # trained, and skews the mean away from the median
         (1, "M", "M", 0.0),  # synonymous, and gauge-fixed to exactly zero
         (1, "M", "E", -50.0),  # censored
         (1, "M", "F", 10.0),  # two base changes away
-        (2, "A", "G", 5.0),  # trained, the only one at its site
+        (2, "A", "G", 5.0),  # trained
+        (2, "A", "S", 1.0),  # trained, so the second site averages too
     ]
     return pd.DataFrame(
         rows, columns=["aa_site", "parent_aa", "mutant_aa", dms_dasm.SCORE_COLUMN]
@@ -79,9 +91,12 @@ def test_the_site_value_averages_the_trained_mutations_and_only_those():
     rather than about the model.
     """
     means = dms_site_mean.site_means(_toy_grid(), _REACHABLE, _CENSORED)
-    assert means.loc[1] == pytest.approx(-2.0)  # (-1 + -3) / 2
-    assert means.loc[2] == pytest.approx(5.0)
+    assert means.loc[1] == pytest.approx(-4.0)  # (-1 + -3 + -8) / 3
+    assert means.loc[2] == pytest.approx(3.0)  # (5 + 1) / 2
     assert set(means.index) == {1, 2}
+    # Site 1's three values have a median of -3, so this also pins the mean
+    # as the aggregate, which the module docstring states as a decision.
+    assert means.loc[1] != pytest.approx(-3.0)
 
 
 def test_a_site_whose_mutations_are_all_untrained_gets_no_value():
@@ -94,7 +109,7 @@ def test_a_site_whose_mutations_are_all_untrained_gets_no_value():
     grid = _toy_grid()
     grid = grid[grid["aa_site"] == 1]
     means = dms_site_mean.site_means(
-        grid, _REACHABLE, frozenset({(1, "C"), (1, "D"), (1, "E")})
+        grid, _REACHABLE, frozenset({(1, "C"), (1, "D"), (1, "E"), (1, "H")})
     )
     assert 1 not in means.index
 
@@ -123,7 +138,7 @@ def test_both_strata_take_the_same_value_at_a_site():
     scored = dms_site_mean.assign_site_means(
         _toy_cells(), dms_site_mean.site_means(_toy_grid(), _REACHABLE, _CENSORED)
     )
-    assert list(scored["score"]) == [-2.0, -2.0]
+    assert list(scored["score"]) == [-4.0, -4.0]
 
 
 def test_a_measured_cell_with_no_site_value_raises_and_names_the_site():
@@ -134,11 +149,16 @@ def test_a_measured_cell_with_no_site_value_raises_and_names_the_site():
     """
     means = dms_site_mean.site_means(_toy_grid(), _REACHABLE, _CENSORED)
     orphan = _toy_cells().assign(aa_site=[1, 7])
-    with pytest.raises(ValueError, match="no trained single-nucleotide mutation"):
+    with pytest.raises(ValueError, match="no value to take") as raised:
         dms_site_mean.assign_site_means(orphan, means)
+    # The site and the homolog both, since a message that named neither would
+    # send a reader to the wrong assay.
+    assert "[7]" in str(raised.value)
+    assert str(raised.value).startswith("toy:")
 
 
 @needs_dms
+@needs_artifacts
 def test_the_arm_scores_every_cell_the_dasm_s_own_column_does():
     """The identical-population property the whole comparison rests on.
 
@@ -164,3 +184,16 @@ def test_the_arm_scores_every_cell_the_dasm_s_own_column_does():
                 f"{homolog}/{stratum}: the join population moved since the "
                 f"table was written"
             )
+
+        # One value as well as the population, recomputed here from the real
+        # grid: the counts above would all pass against a column of constants.
+        clade = dms_dataset(homolog).clade
+        grid = dms_dasm.selection_factor_grid(clade, SCORED_TABLE)
+        trained = dms_models.trained_single_nt_cells(
+            grid,
+            dms.single_nt_indicator(clade, lib.GENE),
+            dms_censor.censored_mutations(clade),
+        )
+        site = int(frame["aa_site"].iloc[0])
+        at_site = trained[trained["aa_site"] == site][dms_dasm.SCORE_COLUMN]
+        assert frame["score"].iloc[0] == pytest.approx(float(at_site.mean()))

@@ -24,8 +24,8 @@ stratum. The arm therefore declares ``dms.STRATA``, like `dms_dasm` and unlike
 **The average is taken over the model's whole grid at the site, not over the
 measured cells there.** Restricting it to measured cells would leave the
 multi-nucleotide cells at a site the assay sampled only multi-nucleotide
-mutations at with no value at all -- there are a few dozen such cells per
-assay -- and `within_clade_metrics` would drop them, so this arm and
+mutations at with no value at all, and `within_clade_metrics` would drop
+them, so this arm and
 `dms_dasm`'s would stop being correlated over the same population. That
 identical population is the one property the comparison rests on.
 `dms_prob.founder_frame` chooses the same way for a related reason.
@@ -43,8 +43,7 @@ is what the plain average means, and it is the one definition both strata can
 share; a reader of this arm's ``single_nt`` row should know it is reading one.
 
 **The mean rather than the median**, because Pearson *r* is what the table
-reports and a mean is the aggregate a linear statistic is about. The two agree
-closely here; nothing rests on the choice.
+reports and a mean is the aggregate a linear statistic is about.
 
 **No inference and no checkpoint.** ``rule score`` did the forward passes and
 `selection_factors.parquet` holds the result, so this is a column-pruned
@@ -84,8 +83,8 @@ def site_means(
 ) -> pd.Series:
     """One value per site: the mean ``log f`` over the trained mutations there.
 
-    Takes frames and returns a frame, reading no file, so the statistic can be
-    tested without the artifact root -- the same split
+    Takes frames and a set and returns a Series, reading no file, so the
+    statistic can be tested without the artifact root -- the same split
     `dms_prob.linear_selection_factors` is written for.
 
     Args:
@@ -122,14 +121,16 @@ def assign_site_means(cells: pd.DataFrame, means: pd.Series) -> pd.DataFrame:
     scored = cells.assign(score=cells["aa_site"].map(means))
     unscored = scored[scored["score"].isna()]
     if len(unscored):
-        sites = sorted({int(site) for site in unscored["aa_site"]})
+        # The homolog comes off the frame, as `homolog_cells` puts it there,
+        # so this reads like every other predictor's failure.
+        who = sorted(set(unscored["homolog"]))
+        sample = sorted({int(site) for site in unscored["aa_site"]})[:5]
         raise ValueError(
-            f"{len(unscored)} of {len(scored)} measured cells sit at sites with "
-            f"no trained single-nucleotide mutation to average over, so the "
-            f"site has no value: sites {sites[:5]}{' ...' if len(sites) > 5 else ''}. "
-            f"Every residue has non-synonymous neighbours one base away, so an "
-            f"empty site means the censor table and the measured cells disagree "
-            f"about what was trained on."
+            f"{'/'.join(who)}: {len(unscored)} of {len(scored)} measured cells "
+            f"sit at sites with no value to take, either because the scored "
+            f"grid does not cover the site or because every single-nucleotide "
+            f"mutation there is synonymous or censored. First few sites: "
+            f"{sample}."
         )
     return scored
 
@@ -141,6 +142,24 @@ def site_mean_scores(
     cells, founder = dms_models.homolog_cells(homolog)
     clade = dms_dataset(homolog).clade
     grid = dms_dasm.selection_factor_grid(clade, table_path)
+
+    # The grid's own parent residues, checked against the founder the cells
+    # were built from. `dms_dasm` can skip this because it never reads
+    # `parent_aa`; this arm takes its synonymous test from that column, so a
+    # grid read for another clade would quietly average a different set --
+    # `dms_prob._check_grid_founder` guards the same thing for the same
+    # reason, and is not imported here because `dms_prob` pulls in torch.
+    declared = [founder[site - 1] for site in grid["aa_site"]]
+    disagree = grid[[a != b for a, b in zip(declared, grid["parent_aa"])]]
+    if len(disagree):
+        row = disagree.iloc[0]
+        raise ValueError(
+            f"{homolog}: the scored grid's parent_aa disagrees with the "
+            f"{clade} founder at {len(disagree)} of {len(grid)} rows, e.g. "
+            f"site {int(row['aa_site'])}: the table says {row['parent_aa']!r} "
+            f"and the founder has {founder[int(row['aa_site']) - 1]!r}. The "
+            f"table was read for a different clade than the founder FASTA."
+        )
 
     means = site_means(
         grid,
@@ -165,7 +184,7 @@ def site_mean_scores(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--homolog", required=True, choices=dms_homologs())
     parser.add_argument("--table", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)

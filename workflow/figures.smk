@@ -356,10 +356,11 @@ rule compose_dms:
 # rebuild it on every edit to the substitution matrix.
 #
 # Most of these need no trained model, which is why they could land before #16.
-# `dms_dasm_scores` and `dms_prob_scores` are the exceptions and read
-# `selection_factors.parquet`: the first is a filter and a rename over a table
-# `rule score` already built, the second exponentiates the same table's grid
-# and weights it by the neutral rates. Neither is a forward pass.
+# `dms_dasm_scores`, `dms_site_mean_scores` and `dms_prob_scores` are the
+# exceptions and read `selection_factors.parquet`: the first is a filter and a
+# rename over a table `rule score` already built, the second averages that
+# table's grid per site, and the third exponentiates it and weights it by the
+# neutral rates. None of the three is a forward pass.
 #
 # Scores and tallies go under the artifact root; only the correlation table is
 # tracked. `panel_spec.DMS_LEAF_COUNT_DIR` records why.
@@ -448,7 +449,8 @@ rule dms_predictors:
     **This target is no longer model-free, and that changed when the DASM
     joined `DMS_PREDICTORS`.** It was: the three reference predictors needed no
     checkpoint, which is why the section header above says they could land
-    before #16. `dms_dasm_scores` and `dms_prob_scores` both read
+    before #16. `dms_dasm_scores`, `dms_site_mean_scores` and
+    `dms_prob_scores` all read
     `selection_factors.parquet`, so this target now sits downstream of
     `rule score` and therefore of `rule train`.
     Building it alone puts the training rules in the plan -- which is a
