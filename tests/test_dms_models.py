@@ -63,7 +63,17 @@ from dasm2.sequence.constants import AA_STR_SORTED
 #: 1395, because the refit's table keeps only the mutations seen in all three
 #: of Delta, BA.1 and BA.2 and the experiment's own table keeps every mutation
 #: it fit. The other two did not move, which is the control.
-EXPECTED_CELLS = {"BA.1": 6808, "XBB.1.5": 6194, "KP.3.1.1": 7014}
+#:
+#: Delta added with the fourth homolog. It is the same experiment as BA.1 --
+#: same preprint, same pipeline, same ``times_seen >= 3`` -- on the Delta
+#: spike, so it is measured the same way and arrives at the same kind of
+#: number. The other three did not move.
+EXPECTED_CELLS = {
+    "Delta": 6143,
+    "BA.1": 6808,
+    "XBB.1.5": 6194,
+    "KP.3.1.1": 7014,
+}
 
 _DMS_PATHS = tuple(lib.dms_dataset(homolog).path for homolog in lib.dms_homologs())
 

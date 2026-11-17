@@ -1,4 +1,7 @@
 homolog,min_count,method,column,pearson,spearman,n,spec_fitness_metric,spec_min_count,spec_clip_lower,spec_min_clade_mutations,spec_exclude_synonymous,spec_count_filter_mode
+Delta,0,DASM,log_selection_factor,0.5447,0.4931,4599,delta_fitness_ratio,0.0,,20,True,or
+Delta,0,per-clade counts,delta_fitness_ratio,0.514,0.4733,4599,delta_fitness_ratio,0.0,,20,True,or
+Delta,0,full-tree counts,delta_fitness_ratio_all,0.5321,0.5115,4599,delta_fitness_ratio,0.0,,20,True,or
 BA.1,0,DASM,log_selection_factor,0.6114,0.5453,4538,delta_fitness_ratio,0.0,,20,True,or
 BA.1,0,per-clade counts,delta_fitness_ratio,0.5502,0.5074,4538,delta_fitness_ratio,0.0,,20,True,or
 BA.1,0,full-tree counts,delta_fitness_ratio_all,0.642,0.5559,4538,delta_fitness_ratio,0.0,,20,True,or

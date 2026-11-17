@@ -50,6 +50,10 @@ from lib import GENE
 #: a rule quietly repointed at them fails the first number here, and a
 #: projection rebuilt on a different deletion convention fails the second.
 EXPECTED_QUERIES = {
+    "Delta": (
+        2,
+        "bbe63422d31d251ec9e4646dea5c99ab1b6a761d7d79a1992665de47c0537634",
+    ),
     "BA.1": (
         6,
         "5f3398d44f945d0b62bed6f8bb602243007a02f0e666696f2aa2ed5cba053140",
@@ -351,11 +355,23 @@ def test_each_scored_parent_is_in_antigens_training_split(homolog: str):
 
     antiGen's grid trains one model per time cutoff on the branches whose
     parent node predates it, so an earlier cutoff would score a DMS parent the
-    model never saw. The last rung was chosen because all three are in sample,
-    and in the *training* split rather than the held-out one. Read out of the
-    authors' own dumped examples, which are not carried here, so this skips
-    where they are unreadable -- and the sequence it looks for is the one
+    model never saw. The last rung was chosen because every one of them is in
+    sample, and in the *training* split rather than the held-out one. Read out
+    of the authors' own dumped examples, which are not carried here, so this
+    skips where they are unreadable -- and the sequence it looks for is the one
     :data:`EXPECTED_QUERIES` pins, so it cannot pass against a different string.
+
+    **One node or several, as long as every one of them trained.** This asked
+    for exactly one occurrence while the roster was three Omicron-era parents,
+    each of which happened to be a unique reconstructed state. Delta's is not:
+    six nodes carry that spike protein, differing elsewhere in the genome. The
+    property the comparison needs is that the string antiGen is fed is one it
+    trained on, and antiGen scores a sequence rather than a node, so a parent
+    the tree reaches by several routes is in sample at least as firmly as one
+    it reaches by a single route. What would be a defect is a parent that is
+    in the examples but held out, or one whose node contributes no gradient --
+    and both are still checked, now on *every* occurrence rather than the only
+    one. A parent found nowhere remains a hard failure.
     """
     examples = (
         _SPEC.checkout.parent
@@ -365,21 +381,34 @@ def test_each_scored_parent_is_in_antigens_training_split(homolog: str):
         pytest.skip(f"antiGen's dumped examples are not readable at {examples}")
 
     query = dms_antigen.read_parents(_SPEC.parents)[homolog]
-    blocks = examples.read_text().split("EXAMPLE_ID: ")
-    hits = [block for block in blocks if f"\n{query}\n" in block]
-    assert len(hits) == 1, (
-        f"{homolog}'s scored parent occurs {len(hits)} times in antiGen's "
-        f"training examples; it must occur exactly once, or the node this "
-        f"model saw is not the node being scored"
+
+    # Split on the line, not the substring: `PARENT_EXAMPLE_ID: ` ends with
+    # `EXAMPLE_ID: `, so splitting on the bare token cuts every record in two
+    # and the "block" a sequence lands in spans into the record after it.
+    records, current = [], []
+    for line in examples.read_text().splitlines():
+        if line.startswith("EXAMPLE_ID:") and current:
+            records.append("\n".join(current))
+            current = []
+        current.append(line)
+    if current:
+        records.append("\n".join(current))
+
+    hits = [record for record in records if f"\n{query}\n" in record]
+    assert hits, (
+        f"{homolog}'s scored parent occurs nowhere in antiGen's examples, so "
+        f"the table would report a sequence this checkpoint never saw"
     )
-    block = hits[0]
-    assert "\nTRAINING\n" in block, (
-        f"{homolog}'s scored parent is in the examples but not in the "
-        f"training split, so the table would report a held-out sequence"
-    )
-    children = block.split("MUTATIONS_TO_CHILDREN:\n")[1].strip()
-    assert children, (
-        f"{homolog}'s scored parent carries no mutations to children, so "
-        f"antiGen's `ignore_dead_ends` drops it and the node contributes no "
-        f"gradient however it is labelled"
-    )
+    for record in hits:
+        identifier = record.splitlines()[0].split(":", 1)[1].strip()
+        assert "\nTRAINING\n" in record, (
+            f"{homolog}'s scored parent is at example {identifier}, which is "
+            f"in the examples but not in the training split, so the table "
+            f"would report a held-out sequence"
+        )
+        children = record.split("MUTATIONS_TO_CHILDREN:\n")[1].strip()
+        assert children, (
+            f"{homolog}'s scored parent at example {identifier} carries no "
+            f"mutations to children, so antiGen's `ignore_dead_ends` drops it "
+            f"and the node contributes no gradient however it is labelled"
+        )

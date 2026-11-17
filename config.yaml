@@ -286,6 +286,21 @@ smoke_corpus:
 dms:
     root: data/dms
     homologs:
+        # The earliest of the four, and the one background from outside the
+        # Omicron lineage. Same experiment as BA.1 -- same preprint, same
+        # pipeline, same declared threshold -- on the Delta spike, which is
+        # why its block is this one's twin.
+        #
+        # Clade 21J, read from the construct rather than from the Pango name:
+        # its wildtype residues disagree with the 21J founder at one masked
+        # site (1253, the construct's own terminator) against two for 21I and
+        # twenty-six for 21K.
+        Delta:
+            clade: 21J
+            file: dadonaite2023_Delta_muteffects.csv
+            md5: 6ab3cce07756569f5864c68c85acd024
+            site_column: reference_site
+            min_times_seen: 3
         # NOT filtered by its own study, which publishes the per-mutation
         # table over every mutation it fit. `min_times_seen` below is that
         # repository's own, from `muteffects_plot_kwargs.addtl_slider_stats`
@@ -337,14 +352,15 @@ dms:
 # `cutoff` identifies which rung of the authors' own time-cutoff grid the
 # checkpoint is from. The grid trains one model per cutoff on the branches
 # whose parent node predates it, and this is its last rung -- chosen because
-# it is the only one whose training split contains all three DMS parent
-# sequences, so every cell the table reports is scored by a model that saw its
+# it is the only one whose training split contains every DMS parent sequence,
+# so every cell the table reports is scored by a model that saw its
 # background. `data/antigen/PROVENANCE.md` records that evidence.
 #
 # `parents` is what the model is fed: the WH1 projection of the construct each
 # assay expressed, not the clade founder the other predictors score against.
-# The two differ at 8 / 6 / 11 columns and `scripts/dms.py` has already
-# dropped every one of them, so the choice moves no measured cell -- it moves
+# The two differ at a handful of columns per homolog and `scripts/dms.py` has
+# already dropped every one of them, so the choice moves no measured cell -- it
+# moves
 # only the 1,273-residue context the transformer conditions on, and the
 # construct is both the sequence the assay measured and the one antiGen saw.
 antigen:
@@ -356,7 +372,7 @@ antigen:
         md5: cd560fda4bd0e151a60d21238ab0514b
     parents:
         file: dms_parents.fasta
-        md5: 87903175ad401a2ff567bbec6221336d
+        md5: ed52ae34f4178f34e5acdb237d893cf4
 
 # The split every reference run held out, and every model in the paper holds
 # out. Only the three numbers every arm shares live here; the resulting fold
