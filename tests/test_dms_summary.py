@@ -218,29 +218,48 @@ def test_the_median_is_taken_over_the_rows_the_correlation_used():
     assert dms_summary._median_score(frame) == pytest.approx(-3.5)
     assert frame[dms_summary.METRIC_COLUMN].median() == pytest.approx(-2.0)
 
+    # An infinity is dropped too, because `within_clade_metrics` sends one to
+    # NaN before it drops. This is the case that tells a plain `dropna` from
+    # that function's filter: no predictor produces an infinity today, so
+    # only this frame holds the two implementations apart.
+    infinite = pd.DataFrame(
+        {
+            dms_summary.DMS_COLUMN: [-6.0, -3.0, 0.0],
+            dms_summary.METRIC_COLUMN: [-5.0, -2.0, float("inf")],
+        }
+    )
+    assert dms_summary._median_score(infinite) == pytest.approx(-3.5)
+
     # Empty is NaN rather than a raise: `dasm_prob` declares no
     # multi-nucleotide stratum, so that row is empty by construction.
     assert pd.isna(dms_summary._median_score(frame.iloc[:0]))
 
 
 def test_the_median_lands_in_the_table_per_group():
-    """And it is the group's median, not the homolog's: the strata differ.
+    """And it is the group's median, not the homolog's.
 
     The claim it exists for is a *difference between strata* -- antiGen scores
     the single-nucleotide cells higher than the multi-nucleotide ones -- so a
     median computed once per predictor would report the one number the
-    sentence cannot use.
+    sentence cannot use. :func:`_cells` scores both strata from the same
+    index, which leaves their medians equal and lets that mistake pass, so
+    this offsets one stratum until the three groups disagree and then pins
+    each one to its own rows.
     """
     cells = _cells()
     predictor = DMS_PREDICTORS[0]
+    multi = cells["stratum"] == dms.MULTI_NT
+    cells.loc[multi, predictor] -= 4.0
+
+    expected = {
+        dms.SINGLE_NT: cells.loc[~multi, predictor].median(),
+        dms.MULTI_NT: cells.loc[multi, predictor].median(),
+        dms.ALL: cells[predictor].median(),
+    }
+    assert len(set(expected.values())) == 3, "the fixture cannot tell the groups apart"
+
     table = dms_summary.summarize({"BA.1": cells}, _manifests()).set_index(
         ["predictor", "stratum"]
     )
-    for stratum in (dms.SINGLE_NT, dms.MULTI_NT):
-        expected = cells.loc[cells["stratum"] == stratum, predictor].median()
-        assert table.loc[(predictor, stratum), "median_score"] == pytest.approx(
-            expected
-        )
-    assert table.loc[(predictor, dms.ALL), "median_score"] == pytest.approx(
-        cells[predictor].median()
-    )
+    for stratum, median in expected.items():
+        assert table.loc[(predictor, stratum), "median_score"] == pytest.approx(median)

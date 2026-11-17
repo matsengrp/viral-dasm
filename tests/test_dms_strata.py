@@ -130,6 +130,23 @@ def test_the_two_panel_stems_match_the_two_models():
         ] == list(letters)
 
 
+def test_antigen_is_the_top_row_and_the_dasm_the_one_below():
+    """The order is the argument's, so it is pinned rather than incidental.
+
+    The section shows the published model's probability carrying a
+    nucleotide-accessibility bias and then shows the DASM's fitness effect
+    not carrying it, so antiGen is row A. Swapping the tuple back would
+    today be caught only because the tracked CSVs are named after it, and
+    regenerating them would silence that.
+    """
+    assert [model for model, _ in panel_spec.DMS_STRATA_MODELS] == ["antigen", "dasm"]
+    for slug in EXPECTED_SLUGS.values():
+        assert panel_spec.dms_strata_panel_letters(slug) == {
+            "A": f"panel_a_antigen_strata_{slug}",
+            "B": f"panel_b_dasm_strata_{slug}",
+        }
+
+
 def test_the_roster_has_no_two_homologs_that_slug_alike():
     """`homolog_slug` strips dots and case, so it is not injective.
 

@@ -48,6 +48,7 @@ assert_dasm2_is_this_repo()
 
 import dms
 import dms_models
+import numpy as np
 import pandas as pd
 from panel_spec import (
     DMS_PREDICTOR_CORRELATIONS,
@@ -117,18 +118,28 @@ def _median_score(frame: pd.DataFrame) -> float:
     number belongs in this table so the sentence has a tracked source rather
     than a figure read off by eye.
 
-    **Dropped the same way `within_clade_metrics` drops.** That function takes
-    the rows where neither the measurement nor the score is NaN; a median over
-    the raw subset would be over a different population than the
-    ``n_mutations`` printed beside it, which is exactly the drift this table
-    exists to prevent.
+    **Dropped the same way `within_clade_metrics` drops.** That function
+    takes the rows where neither the measurement nor the score is NaN, after
+    sending an infinity to NaN first; a median over any other subset would be
+    over a different population than the ``n_mutations`` printed beside it,
+    which is exactly the drift this table exists to prevent. The infinity
+    step is what makes the two agree by construction rather than by luck:
+    no predictor produces one today, and the coverage guard in
+    :func:`summarize` would abort before the table were written if one did,
+    but the guard compares counts and would not see a median taken over a
+    row the correlation had dropped.
 
     Returns:
-        NaN on an empty group, as the correlations do -- `dasm_prob` declares
-        no multi-nucleotide stratum, so that row is empty by construction.
+        NaN on an empty group -- `dasm_prob` declares no multi-nucleotide
+        stratum, so that row is empty by construction. This is not quite the
+        correlations' rule, which is also NaN below ``min_mutations`` or on a
+        constant measurement column; a group of one or two rows gets a median
+        beside a NaN coefficient.
     """
-    rows = frame[[DMS_COLUMN, METRIC_COLUMN]].dropna()
-    return float(rows[METRIC_COLUMN].median()) if len(rows) else float("nan")
+    rows = frame.replace([np.inf, -np.inf], np.nan).dropna(
+        subset=[DMS_COLUMN, METRIC_COLUMN]
+    )
+    return float(rows[METRIC_COLUMN].median())
 
 
 def summarize(
