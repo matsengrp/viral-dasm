@@ -298,9 +298,10 @@ dms:
         # do not saturate. `data/dms/PROVENANCE.md` has the measurement.
         #
         # Clade 21J, read from the construct rather than from the Pango name:
-        # its wildtype residues disagree with the 21J founder at one masked
-        # site (1253, the construct's own terminator) against two for 21I and
-        # twenty-six for 21K.
+        # after the site mask its wildtype residues disagree with the 21J
+        # founder at one site (1253, the construct's own terminator), against
+        # two for 21I, six for 20A and twenty-six for 21K. Site 156 is where
+        # the construct and every founder part company, and it is masked.
         Delta:
             clade: 21J
             file: dadonaite2023_Delta_muteffects.csv
