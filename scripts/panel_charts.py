@@ -2921,25 +2921,12 @@ def arm_ladder_grid(
 # `fig:probabilities`
 # ---------------------------------------------------------------------------
 
-#: Okabe-Ito bluish-green, the third categorical hue: `fig:dms_strata` needed
-#: only two because it draws two populations, and panel B's groups are three.
-OKABE_ITO_BLUISH_GREEN = "#009E73"
-
-#: Okabe-Ito reddish-purple, the fourth, added with the Delta experiment.
-#: Taken ahead of that palette's orange, which neighbours the vermillion above
-#: closely enough that two adjacent bar groups would read as one.
-OKABE_ITO_REDDISH_PURPLE = "#CC79A7"
-
-#: One colour per DMS experiment, taken in group order. **Not one per arm**:
-#: the arms are already named under every bar, so colouring by arm spends the
-#: channel on a distinction the labels carry, while colouring by experiment
-#: makes each group read as one dataset.
-PROBABILITIES_HOMOLOG_COLORS: tuple[str, ...] = (
-    OKABE_ITO_BLUE,
-    OKABE_ITO_VERMILLION,
-    OKABE_ITO_BLUISH_GREEN,
-    OKABE_ITO_REDDISH_PURPLE,
-)
+#: One colour for every bar, and it is `fig:dms`'s: these two bar panels are
+#: read on facing pages and a hue that groups there and not here would read as
+#: an encoding. Nothing is lost by dropping the per-experiment hues, because
+#: the arms are named under every bar and the experiment heads its own group,
+#: so the channel was spending itself on distinctions the labels already make.
+PROBABILITIES_BAR_COLOR = DMS_ROW_COLORS[0]
 
 #: How each arm is named under its bar. Short, because they are set vertically.
 PROBABILITIES_ARM_LABELS: dict[str, str] = {
@@ -3149,13 +3136,6 @@ def dms_correlation_bars(
     )
     ticks = _even_ticks([0.0, top], PROBABILITIES_BAR_TICK_STEP)
     order = [PROBABILITIES_ARM_LABELS[arm] for arm in arms]
-    if len(homologs) > len(PROBABILITIES_HOMOLOG_COLORS):
-        raise ValueError(
-            f"{len(homologs)} homologs but only "
-            f"{len(PROBABILITIES_HOMOLOG_COLORS)} colours; `zip` would drop the "
-            f"last group silently. Add a hue to PROBABILITIES_HOMOLOG_COLORS."
-        )
-    hues = dict(zip(homologs, PROBABILITIES_HOMOLOG_COLORS))
 
     def group(homolog: str, first: bool) -> alt.Chart:
         one = frame[frame["homolog"] == homolog].copy()
@@ -3190,9 +3170,9 @@ def dms_correlation_bars(
                 ),
             ),
         )
-        # One flat colour for the group: the arms are distinguished by their
-        # labels, so the channel says which experiment this is.
-        bars = base.mark_bar(color=hues[homolog]).encode(
+        # One flat colour for every bar, as on `fig:dms`: the arms are
+        # distinguished by their labels and the group by its heading.
+        bars = base.mark_bar(color=PROBABILITIES_BAR_COLOR).encode(
             tooltip=[
                 alt.Tooltip("homolog:N", title="homolog"),
                 alt.Tooltip("_arm:N", title="arm"),

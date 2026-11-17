@@ -48,6 +48,7 @@ assert_dasm2_is_this_repo()
 
 import dms
 import dms_models
+import numpy as np
 import pandas as pd
 from panel_spec import (
     DMS_PREDICTOR_CORRELATIONS,
@@ -75,6 +76,10 @@ SUMMARY_COLUMNS = (
     "pearson_r",
     "spearman_rho",
     "regression_slope",
+    "median_score",
+    "sd_score",
+    "median_dms",
+    "sd_dms",
     "n_mutations",
 )
 
@@ -93,11 +98,59 @@ def _metrics(groups: dict[tuple[str, str, str], pd.DataFrame]):
         [
             within_clade_metrics({homolog: frame}, DMS_COLUMN)
             .drop(columns="clade")
-            .assign(homolog=homolog, predictor=predictor, stratum=stratum)
+            .assign(
+                homolog=homolog,
+                predictor=predictor,
+                stratum=stratum,
+                **_levels(frame),
+            )
             for (homolog, predictor, stratum), frame in groups.items()
         ],
         ignore_index=True,
     )
+
+
+def _valid_rows(frame: pd.DataFrame) -> pd.DataFrame:
+    """The rows the metrics beside these numbers were computed over.
+
+    ``within_clade_metrics`` sends an infinity to NaN and then drops a row
+    where either column is NaN. Every level and spread here is taken over
+    what it keeps, so they describe the same cells as the ``pearson_r`` and
+    ``n_mutations`` printed in the same row rather than a wider population.
+    """
+    return frame.replace([np.inf, -np.inf], np.nan).dropna(
+        subset=[DMS_COLUMN, METRIC_COLUMN]
+    )
+
+
+def _levels(frame: pd.DataFrame) -> dict[str, float]:
+    """One group's level and spread, on both axes.
+
+    **Not correlations, and here because two claims need them.** A Pearson
+    *r* cannot see a difference in level, and the manuscript reports one:
+    antiGen scores the single-nucleotide stratum far above the
+    multi-nucleotide one, which `fig:dms_strata` shows as the vertical offset
+    between its hues. Reading that offset against ``sd_score`` is what makes
+    it comparable with another predictor's, since a log probability and a log
+    selection factor are not otherwise on one scale, and reading the
+    measurements' own offset against ``sd_dms`` is what says whether the data
+    support a difference of that size. The stratum rows give the offsets and
+    the ``all`` row gives the spread to divide by.
+
+    Returns:
+        NaN for a group of no rows -- `dasm_prob` declares no
+        multi-nucleotide stratum, so that row is empty by construction -- and
+        a NaN spread for a group of one. This is not quite the correlations'
+        rule, which is also NaN below ``min_mutations`` or on a constant
+        measurement column.
+    """
+    rows = _valid_rows(frame)
+    return {
+        "median_score": float(rows[METRIC_COLUMN].median()),
+        "sd_score": float(rows[METRIC_COLUMN].std(ddof=1)),
+        "median_dms": float(rows[DMS_COLUMN].median()),
+        "sd_dms": float(rows[DMS_COLUMN].std(ddof=1)),
+    }
 
 
 def summarize(
@@ -241,7 +294,7 @@ def main() -> None:
         print(
             f"  {row.homolog:10s} {row.predictor:14s} {row.stratum:10s} "
             f"pearson={row.pearson_r:+.4f} spearman={row.spearman_rho:+.4f} "
-            f"n={row.n_mutations}"
+            f"median={row.median_score:+.4f} n={row.n_mutations}"
         )
 
 
