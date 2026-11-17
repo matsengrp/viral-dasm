@@ -544,6 +544,19 @@ def dms_count_label(min_count: int) -> str:
     return "all mutations" if min_count == 0 else f"≥ {min_count} counts"
 
 
+def dms_homolog_heading(homolog: str, clade: str, n: int) -> str:
+    """`fig:dms` panel A's heading: which assay the clouds are drawn against.
+
+    What the figure's row needs said, now that it is the only row. The
+    default heading -- :func:`dms_scatter_row`'s -- names the count floor,
+    which is there to tell a row from the one under it; with one row it
+    answers a question nobody asked and leaves the one a reader does ask,
+    "which homolog is this?", to the caption. `n` stays because a panel
+    should be readable on its own terms.
+    """
+    return f"{homolog} (clade {clade}), n = {n:,}"
+
+
 def dms_padded_domain(values: Sequence[float] | pd.Series) -> list[float]:
     """``[min, max]`` padded by 5%, as upstream's `_padded_domain` pads it."""
     array = np.asarray(values, dtype=float)
@@ -680,6 +693,8 @@ def dms_scatter_row(
     x_domain: Sequence[float],
     y_domain: Sequence[float],
     coefficients: Mapping[str, float] | None = None,
+    heading: str | None = None,
+    heading_color: str | None = None,
 ) -> alt.HConcatChart:
     """One row of panel A: three predictors against one homolog's assay.
 
@@ -688,9 +703,16 @@ def dms_scatter_row(
     number in a panel's corner is the same object as the bar beside it rather
     than a second computation of it. Omitted, each panel computes its own.
 
-    The heading names the clade the count floor was applied in -- the floor is
-    on this homolog's *own* clade -- rather than leaving a reader to infer
-    which counts were thresholded.
+    ``heading`` and ``heading_color`` are what the composed figure needs and
+    a standalone panel does not. Left at ``None`` the row heads itself with
+    its count floor, in the row's own colour, which is what tells two stacked
+    rows apart; `fig:dms` draws one row, so there is nothing to tell apart
+    and it passes :func:`dms_homolog_heading` in black instead. ``""``
+    suppresses the heading altogether. See :data:`panel_spec.DMS_FIGURE_ROWS`.
+
+    The default heading names the clade the count floor was applied in -- the
+    floor is on this homolog's *own* clade -- rather than leaving a reader to
+    infer which counts were thresholded.
 
     Titles live inside the chart rather than in markdown above it, as
     upstream: a markdown caption is positioned by the browser against the
@@ -717,19 +739,23 @@ def dms_scatter_row(
         )
         for index, (column, label) in enumerate(methods)
     ]
-    heading = (
-        f"all mutations with estimated fitness effects in clade {clade} "
-        f"(n = {len(frame):,})"
-        if min_count == 0
-        else (
-            f"only mutations with ≥ {min_count} actual or expected counts "
-            f"in clade {clade} (n = {len(frame):,})"
+    if heading is None:
+        heading = (
+            f"all mutations with estimated fitness effects in clade {clade} "
+            f"(n = {len(frame):,})"
+            if min_count == 0
+            else (
+                f"only mutations with ≥ {min_count} actual or expected counts "
+                f"in clade {clade} (n = {len(frame):,})"
+            )
         )
-    )
-    return alt.hconcat(*panels, spacing=DMS_ROW_SPACING).properties(
+    row = alt.hconcat(*panels, spacing=DMS_ROW_SPACING)
+    if not heading:
+        return row
+    return row.properties(
         title=alt.TitleParams(
             text=heading,
-            color=colour,
+            color=colour if heading_color is None else heading_color,
             fontSize=DMS_FONT_SIZE,
             fontWeight="bold",
             anchor="middle",
@@ -996,6 +1022,7 @@ def dms_bar_row(
     clades: dict[str, str],
     methods: Sequence[tuple[str, str]],
     y_domain: Sequence[float],
+    heading: str | None = None,
 ) -> alt.HConcatChart:
     """One row of panel B: the same coefficient, for every homolog.
 
@@ -1007,60 +1034,87 @@ def dms_bar_row(
     Built one homolog at a time and `hconcat`'d rather than with `.facet()`,
     because a Vega-Lite facet header is a single string: it cannot carry the
     homolog's name and that panel's `n` on separate lines.
+
+    **Every bar carries its value**, as `fig:probabilities`' bars do and for
+    the same reason: a reader comparing three methods across four datasets
+    should not have to measure against an axis, and the differences that
+    carry the argument here are small -- Delta's DASM and per-clade bars
+    differ by 0.03, which is where eye-matching fails. The axis stays, since
+    it is what makes a bar in one group comparable to the bar beside it in
+    another; the numbers are what make a pair readable without it.
     """
     colour = DMS_ROW_COLORS[min_count]
     order = [label for _column, label in methods]
     rows = correlations[correlations["min_count"] == min_count]
 
     def panel(homolog: str, first: bool) -> alt.VConcatChart:
-        one = rows[rows["homolog"] == homolog]
+        one = rows[rows["homolog"] == homolog].copy()
+        # Formatted here rather than by a Vega `format`, so the number drawn
+        # over a bar is produced by the same expression as the one in the
+        # scatter's corner and the two cannot drift apart.
+        one["_value"] = [f"{r:{DMS_R_FORMAT}}" for r in one["pearson"]]
         header = _dms_bar_group_header(
             f"{homolog} ({clades[homolog]})", int(one["n"].iloc[0])
         )
-        bar = (
-            alt.Chart(one)
-            .mark_bar(color=colour)
-            .encode(
-                x=alt.X(
-                    "method:N",
-                    title=None,
-                    sort=order,
-                    axis=alt.Axis(labelAngle=-90, labelFontSize=DMS_FONT_SIZE),
+        base = alt.Chart(one).encode(
+            x=alt.X(
+                "method:N",
+                title=None,
+                sort=order,
+                axis=alt.Axis(labelAngle=-90, labelFontSize=DMS_FONT_SIZE),
+            ),
+            y=alt.Y(
+                "pearson:Q",
+                # Axis on the leftmost panel only, as in the scatter row,
+                # so the columns sit a character apart instead of a whole
+                # axis apart. The heading's `dx` compensates.
+                title="Pearson r" if first else None,
+                scale=alt.Scale(domain=list(y_domain)),
+                axis=alt.Axis(
+                    titleFontSize=DMS_FONT_SIZE,
+                    labelFontSize=DMS_FONT_SIZE,
+                    labels=first,
+                    ticks=first,
                 ),
-                y=alt.Y(
-                    "pearson:Q",
-                    # Axis on the leftmost panel only, as in the scatter row,
-                    # so the columns sit a character apart instead of a whole
-                    # axis apart. The heading's `dx` compensates.
-                    title="Pearson r" if first else None,
-                    scale=alt.Scale(domain=list(y_domain)),
-                    axis=alt.Axis(
-                        titleFontSize=DMS_FONT_SIZE,
-                        labelFontSize=DMS_FONT_SIZE,
-                        labels=first,
-                        ticks=first,
-                    ),
-                ),
-                tooltip=[
-                    alt.Tooltip("homolog:N", title="homolog"),
-                    alt.Tooltip("method:N", title="method"),
-                    alt.Tooltip("pearson:Q", title="Pearson r", format=".2f"),
-                    alt.Tooltip("n:Q", title="n", format=","),
-                ],
-            )
-            .properties(width=DMS_BAR_WIDTH, height=DMS_BAR_HEIGHT)
+            ),
+        )
+        bars = base.mark_bar(color=colour).encode(
+            tooltip=[
+                alt.Tooltip("homolog:N", title="homolog"),
+                alt.Tooltip("method:N", title="method"),
+                alt.Tooltip("pearson:Q", title="Pearson r", format=".2f"),
+                alt.Tooltip("n:Q", title="n", format=","),
+            ],
+        )
+        # `dy` sits the value just clear of the bar it belongs to, at
+        # `fig:probabilities`' offset and for its reason: these panels render
+        # at `VEGA_WRITE_PPI`, so a chart-unit offset is multiplied by about
+        # four on the written PNG.
+        values = base.mark_text(
+            dy=-2, fontSize=DMS_FONT_SIZE, baseline="bottom"
+        ).encode(text="_value:N")
+        bar = alt.layer(bars, values).properties(
+            width=DMS_BAR_WIDTH, height=DMS_BAR_HEIGHT
         )
         return alt.vconcat(header, bar, spacing=2)
 
-    heading = (
-        "all mutations with estimated fitness effects"
-        if min_count == 0
-        else f"only mutations with ≥ {min_count} actual or expected counts"
-    )
-    return alt.hconcat(
+    if heading is None:
+        heading = (
+            "all mutations with estimated fitness effects"
+            if min_count == 0
+            else f"only mutations with ≥ {min_count} actual or expected counts"
+        )
+    row = alt.hconcat(
         *[panel(homolog, homolog == homologs[0]) for homolog in homologs],
         spacing=DMS_ROW_SPACING,
-    ).properties(
+    )
+    # Each group already carries its homolog and its `n`, so on the composed
+    # figure -- one row, nothing to tell it apart from -- the row heading
+    # restates the population the caption states. `""` drops it; the
+    # thresholded rung, which is written but not laid out, keeps its own.
+    if not heading:
+        return row
+    return row.properties(
         title=alt.TitleParams(
             text=heading,
             color=colour,

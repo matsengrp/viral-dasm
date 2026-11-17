@@ -4,12 +4,12 @@
 measurements in its own format -- a phenotype column among several, or a
 per-mutation effect table beside the counts it was fit from -- and each
 applies its own filtering before releasing them, or declares thresholds and
-leaves them to the consumer. This module converts all three to the four
+leaves them to the consumer. This module converts all four to the four
 columns the loader wants, ``wildtype,site,mutant,functional_effect``, and
 applies whatever filter the study applies that its released file does not
 already carry.
 
-**The filtering standard is the study's own.** The three experiments set their
+**The filtering standard is the study's own.** The experiments set their
 own thresholds and there is no house rule here: a mutation is kept when the
 authors would keep it, which is read from their configuration and their
 analysis code rather than borrowed from whichever homolog is to hand. What
@@ -62,7 +62,7 @@ OUTPUT_COLUMNS = ("wildtype", "site", "mutant", "functional_effect")
 def normalise_published(raw: pd.DataFrame, spec) -> pd.DataFrame:
     """One study's published file, as the four columns the loader reads.
 
-    The steps are shared by all three studies and every one of them is a
+    The steps are shared by all four studies and every one of them is a
     property of the released file rather than a choice made here:
 
     1. Rename the study's identifier and phenotype columns.

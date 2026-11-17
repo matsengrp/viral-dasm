@@ -16,7 +16,7 @@ def _(mo):
     mo.md(r"""
     # `fig:dms` — estimated fitness effects against deep mutational scanning
 
-    Three full-spike cell-entry assays, each on the clade whose founder the
+    Four full-spike cell-entry assays, each on the clade whose founder the
     model is scored on, against three predictors of the same quantity: the
     **DASM**, mat-pcp's **per-clade** counts estimate, and its **full-tree**
     (all-clade pooled) one.
@@ -24,8 +24,14 @@ def _(mo):
     **Panels A and B** are every mutation the tree could estimate at all;
     **panels C and D** are the subset with at least ten actual or expected
     counts. A and C are one homolog's clouds, B and D the same coefficient for
-    all three at once. Reading across answers "does this hold for the other
+    all four at once. Reading across answers "does this hold for the other
     homologs", reading down answers "does it survive thresholding".
+
+    **`fig:dms` lays out A and B only.** All four are written, with their
+    CSVs; `panel_spec.DMS_FIGURE_ROWS` is what puts two of them on the page.
+    That is also why the two rows head themselves differently — the pair the
+    figure carries names the homolog, in black, and the pair it does not
+    keeps the count floor in its row colour.
 
     **A count floor of 0 is already a restriction.** A mutation mat-pcp never
     estimated carries no counts and no fitness effect, so it is absent from
@@ -165,6 +171,11 @@ def _(CLADES, SELECTION, charts, correlations, dms, frames, panel_spec, panels):
             & (correlations["min_count"] == _min_count)
         ]
         _coefficients = dict(zip(_rows["column"], _rows["pearson"]))
+        # The rung the figure lays out heads itself with the homolog, in
+        # black; the other keeps the count floor in its row colour, which is
+        # what a panel read on its own needs. `panel_spec.DMS_FIGURE_ROWS`
+        # is where the split is recorded.
+        _in_figure = _min_count == panel_spec.DMS_FIGURE_MIN_COUNT
         scatter_panels.append(
             charts.save_panel(
                 charts.dms_scatter_row(
@@ -175,6 +186,14 @@ def _(CLADES, SELECTION, charts, correlations, dms, frames, panel_spec, panels):
                     x_domain=X_DOMAIN,
                     y_domain=Y_DOMAIN,
                     coefficients=_coefficients,
+                    heading=(
+                        charts.dms_homolog_heading(
+                            SCATTER_HOMOLOG, CLADES[SCATTER_HOMOLOG], len(_frame)
+                        )
+                        if _in_figure
+                        else None
+                    ),
+                    heading_color=charts.INK if _in_figure else None,
                 ),
                 _stem,
                 selection=SELECTION,
@@ -215,11 +234,11 @@ def _(scatter_panels):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## Panels B and D — the same coefficient, for all three homologs
+    ## Panels B and D — the same coefficient, for all four homologs
 
     The clouds report *r* in each panel for one homolog; these collect it for
-    all three, so the comparison that matters — how much each method loses
-    when the threshold drops — is one figure rather than three dropdown
+    all four, so the comparison that matters — how much each method loses
+    when the threshold drops — is one figure rather than four dropdown
     settings held in the reader's head.
 
     Both rows share one bar axis, so a bar in the lower row is directly
@@ -243,6 +262,12 @@ def _(CLADES, HOMOLOGS, SELECTION, charts, correlations, dms, panel_spec, panels
                     clades=CLADES,
                     methods=dms.METHODS,
                     y_domain=BAR_DOMAIN,
+                    # Each group already carries its homolog and its `n`, and
+                    # the panel the figure lays out has no second row to be
+                    # told apart from, so it goes bare.
+                    heading=(
+                        "" if _min_count == panel_spec.DMS_FIGURE_MIN_COUNT else None
+                    ),
                 ),
                 _stem,
                 selection=SELECTION,

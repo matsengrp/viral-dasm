@@ -318,7 +318,7 @@ rule dms_correlations:
 
 
 rule compose_dms:
-    """`fig:dms` itself, laid out from its four panels.
+    """`fig:dms` itself, laid out from the panels its spec declares.
 
     No scoring, no assay and no table: it reads PNGs, the split every
     composition here is built on. The manuscript copy is not a declared
