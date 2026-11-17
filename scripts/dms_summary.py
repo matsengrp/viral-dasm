@@ -77,6 +77,9 @@ SUMMARY_COLUMNS = (
     "spearman_rho",
     "regression_slope",
     "median_score",
+    "sd_score",
+    "median_dms",
+    "sd_dms",
     "n_mutations",
 )
 
@@ -99,7 +102,7 @@ def _metrics(groups: dict[tuple[str, str, str], pd.DataFrame]):
                 homolog=homolog,
                 predictor=predictor,
                 stratum=stratum,
-                median_score=_median_score(frame),
+                **_levels(frame),
             )
             for (homolog, predictor, stratum), frame in groups.items()
         ],
@@ -107,39 +110,47 @@ def _metrics(groups: dict[tuple[str, str, str], pd.DataFrame]):
     )
 
 
-def _median_score(frame: pd.DataFrame) -> float:
-    """One group's median predictor score, over the rows the metrics used.
+def _valid_rows(frame: pd.DataFrame) -> pd.DataFrame:
+    """The rows the metrics beside these numbers were computed over.
 
-    **Not a correlation, and it is here because one claim needs it.** The
-    manuscript reports that antiGen gives systematically higher probabilities
-    to the single-nucleotide stratum than to the multi-nucleotide one -- a
-    difference in level, which a Pearson *r* cannot see and which
-    `fig:dms_strata` shows as the vertical offset between its two hues. The
-    number belongs in this table so the sentence has a tracked source rather
-    than a figure read off by eye.
-
-    **Dropped the same way `within_clade_metrics` drops.** That function
-    takes the rows where neither the measurement nor the score is NaN, after
-    sending an infinity to NaN first; a median over any other subset would be
-    over a different population than the ``n_mutations`` printed beside it,
-    which is exactly the drift this table exists to prevent. The infinity
-    step is what makes the two agree by construction rather than by luck:
-    no predictor produces one today, and the coverage guard in
-    :func:`summarize` would abort before the table were written if one did,
-    but the guard compares counts and would not see a median taken over a
-    row the correlation had dropped.
-
-    Returns:
-        NaN on an empty group -- `dasm_prob` declares no multi-nucleotide
-        stratum, so that row is empty by construction. This is not quite the
-        correlations' rule, which is also NaN below ``min_mutations`` or on a
-        constant measurement column; a group of one or two rows gets a median
-        beside a NaN coefficient.
+    ``within_clade_metrics`` sends an infinity to NaN and then drops a row
+    where either column is NaN. Every level and spread here is taken over
+    what it keeps, so they describe the same cells as the ``pearson_r`` and
+    ``n_mutations`` printed in the same row rather than a wider population.
     """
-    rows = frame.replace([np.inf, -np.inf], np.nan).dropna(
+    return frame.replace([np.inf, -np.inf], np.nan).dropna(
         subset=[DMS_COLUMN, METRIC_COLUMN]
     )
-    return float(rows[METRIC_COLUMN].median())
+
+
+def _levels(frame: pd.DataFrame) -> dict[str, float]:
+    """One group's level and spread, on both axes.
+
+    **Not correlations, and here because two claims need them.** A Pearson
+    *r* cannot see a difference in level, and the manuscript reports one:
+    antiGen scores the single-nucleotide stratum far above the
+    multi-nucleotide one, which `fig:dms_strata` shows as the vertical offset
+    between its hues. Reading that offset against ``sd_score`` is what makes
+    it comparable with another predictor's, since a log probability and a log
+    selection factor are not otherwise on one scale, and reading the
+    measurements' own offset against ``sd_dms`` is what says whether the data
+    support a difference of that size. The stratum rows give the offsets and
+    the ``all`` row gives the spread to divide by.
+
+    Returns:
+        NaN for a group of no rows -- `dasm_prob` declares no
+        multi-nucleotide stratum, so that row is empty by construction -- and
+        a NaN spread for a group of one. This is not quite the correlations'
+        rule, which is also NaN below ``min_mutations`` or on a constant
+        measurement column.
+    """
+    rows = _valid_rows(frame)
+    return {
+        "median_score": float(rows[METRIC_COLUMN].median()),
+        "sd_score": float(rows[METRIC_COLUMN].std(ddof=1)),
+        "median_dms": float(rows[DMS_COLUMN].median()),
+        "sd_dms": float(rows[DMS_COLUMN].std(ddof=1)),
+    }
 
 
 def summarize(
