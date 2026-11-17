@@ -777,7 +777,20 @@ def dms_strata_figure_rows(slug: str) -> tuple[tuple[str, ...], ...]:
 #: `fig:dms`'s box. Two rows of three cells each, so the width binds and there
 #: is no reason to overhang the text block.
 DMS_STRATA_BOX_IN: tuple[float, float] = (7.5, 8.0)
-DMS_STRATA_FIGURE_SCALE = 1.0
+
+#: **Shrunk so this figure's type matches its neighbours'.** Every DMS panel is
+#: drawn at :data:`panel_charts.DMS_FONT_SIZE` in chart units, so what sets the
+#: size of a label on the page is how many page inches one rendered pixel gets,
+#: and that follows from how many cells a row has to fit across the text block.
+#: `fig:dms` packs seven cells into one row and this figure three, so at scale
+#: 1.0 its labels came out at 10.9 pt against 6.4 pt there and 7.7 pt in
+#: `fig:probabilities` -- the same figure, printed half again as large.
+#:
+#: 0.7 puts it at 7.6 pt, which is `fig:probabilities`, the figure it is read
+#: beside in this section. Matching `fig:dms` exactly would mean 0.585, and a
+#: 4.4-inch figure is thin for six scatters. The composition is what shrinks,
+#: so `main.tex` includes the PDF at its natural size and scales nothing.
+DMS_STRATA_FIGURE_SCALE = 0.7
 
 #: The type the panels are drawn at. The same size `fig:dms` is drawn at, and
 #: taken from it rather than respelled: both figures are Vega-Lite at
