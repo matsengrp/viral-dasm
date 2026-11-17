@@ -23,30 +23,28 @@ def _(mo):
 
     | panel | what it shows |
     |---|---|
-    | A, C | three predictors against one homolog's cell-entry DMS, one scatter each |
-    | B, D | the same Pearson *r*, for all three homologs at once |
+    | A | three predictors against KP.3.1.1's cell-entry DMS, one scatter each |
+    | B | the same Pearson *r*, for all four homologs at once |
 
-    **The rows are the alignment.** One count threshold per row, its scatters
-    beside its bars: every mutation carrying a counts-based estimate on top in
-    blue (A and B), and the subset with at least ten actual or expected counts
-    below in vermillion (C and D). A and B are the same mutations, and so are
-    C and D. Reading across answers "does this hold for the other homologs",
-    reading down answers "does it survive thresholding".
+    **One row: the scatters and the bars over the same mutations.** Both are
+    drawn on every mutation carrying a counts-based estimate, A as one
+    homolog's clouds and B as the coefficient for all four, so reading across
+    answers "does this hold for the other homologs".
 
-    **The rows line up because the panel rule saves four images rather than
-    two.** One image per column would fix the split between its two subsets at
-    whatever Vega-Lite's `vconcat` produced, and the composition has no way to
-    move it; four images let the layout put the break in the same place on
-    both sides.
+    **`rule dms_correlations` writes four panels and this notebook lays out
+    two.** The other pair is the same figure over the mutations with at least
+    ten actual or expected counts; it is a check on this one rather than part
+    of it, and `main.tex` reports it in prose. `panel_spec.DMS_FIGURE_ROWS`
+    is the only thing that decides which panels reach the page, and the two
+    that do not are still written, with their CSVs, under `figures/dms/`.
 
-    The arrangement is the published figure's, from
+    The arrangement descends from the published figure's, from
     `experiments/2026-09-09-viral-dasm-figure-drafts/notebooks/dms.py` in
-    `dasm2-experiments` -- the notebook `main.tex`'s provenance comment names.
-    What has changed under it is the model and the run: that figure is v11,
-    scored from the `2026-08-14-censored-whichmut-v11` checkpoints against the
-    `s2SpikeGisaidAll-2026-08-06-v11` mat-pcp run, while this one is
-    `dasm-1077k` on v12, the same model and run as every other figure in the
-    paper.
+    `dasm2-experiments`. What has changed under it is the model and the run:
+    that figure is v11, scored from the `2026-08-14-censored-whichmut-v11`
+    checkpoints against the `s2SpikeGisaidAll-2026-08-06-v11` mat-pcp run,
+    while this one is `dasm-1077k` on v12, the same model and run as every
+    other figure in the paper.
 
     **GISAID**: reads four rendered panels and writes a figure. No sequence,
     no per-site table and no count passes through this notebook.
@@ -91,14 +89,15 @@ def _(PANEL_DIR, fl, mo, spec):
         ),
     )
 
+    # Every panel, not only the laid-out ones: the sizes printed below are
+    # how a reader checks that the pair left off the page rendered too.
     PANELS = fl.load_panels(PANEL_DIR, spec.DMS_PANEL_LETTERS)
 
-    # Both rows of a panel draw the same plot area at the same place, so
-    # stacking them left justified is all the alignment they need. The two bar
-    # canvases are not the same width only because the lower row's heading is
-    # the longer string and Vega-Lite lets a centred title widen the view to
-    # the right; that is empty pixels past the plots, and padding it would
-    # move nothing.
+    # Left justified and top aligned is all the alignment one row needs. The
+    # four canvases are not all the same size -- the two rungs head themselves
+    # differently and Vega-Lite lets a centred title widen the view to the
+    # right -- but that is empty pixels past the plots, and only A and B are
+    # laid out.
     mo.md(
         "At the size the panel rule rendered it:\n\n"
         + "\n".join(

@@ -652,3 +652,115 @@ def test_a_padded_domain_covers_its_data_and_survives_a_constant_column():
         _synthetic_frame(), [column for column, _label in dms.METHODS]
     )
     assert grouped[0] < -39.0 and grouped[1] > 39.0
+
+
+def test_the_figure_lays_out_exactly_the_rung_it_declares():
+    """`fig:dms` draws one threshold, and the letters follow from which one.
+
+    Two constants have to agree or the figure quietly mixes rungs: the rung
+    it draws, and the letters it lays out. Spelling the letters out here from
+    `DMS_FIGURE_MIN_COUNT` rather than from the table means that moving the
+    figure to the thresholded rung moves the layout with it, instead of
+    leaving ``("A", "B")`` pointing at the other row's panels.
+    """
+    laid_out = [letter for row in panel_spec.DMS_FIGURE_ROWS for letter in row]
+    stems = [panel_spec.DMS_PANEL_LETTERS[letter] for letter in laid_out]
+    assert sorted(stems) == sorted(
+        stem
+        for stem in panel_spec.DMS_PANELS
+        if stem.endswith(f"min{panel_spec.DMS_FIGURE_MIN_COUNT}")
+    )
+    # And the pair that is not laid out is still written, so its CSVs and
+    # PNGs stay available as the check they are.
+    assert set(stems) < set(panel_spec.DMS_PANELS)
+
+
+def _row_title(spec: dict) -> dict | None:
+    """A concatenated chart's own title, as Altair serialises it."""
+    title = spec.get("title")
+    return title if isinstance(title, dict) else None
+
+
+def test_the_laid_out_scatter_row_is_headed_by_its_homolog_in_black():
+    """Panel A names the assay, not the count floor it shares with nothing.
+
+    The default heading is the floor, which exists to tell two stacked rows
+    apart. `fig:dms` draws one row, so a heading that reads "all mutations
+    with estimated fitness effects" answers a question the figure no longer
+    poses -- and a coloured one reads as an encoding when there is no second
+    hue to contrast with.
+    """
+    frame = _synthetic_frame()
+    heading = panel_charts.dms_homolog_heading("KP.3.1.1", "24E", len(frame))
+    assert heading == f"KP.3.1.1 (clade 24E), n = {len(frame):,}"
+    spec = panel_charts.dms_scatter_row(
+        frame,
+        min_count=panel_spec.DMS_FIGURE_MIN_COUNT,
+        clade="24E",
+        methods=dms.METHODS,
+        x_domain=[0.0, 40.0],
+        y_domain=[0.0, 40.0],
+        coefficients={column: 0.42 for column, _label in dms.METHODS},
+        heading=heading,
+        heading_color=panel_charts.INK,
+    ).to_dict()
+    title = _row_title(spec)
+    assert title is not None and title["text"] == heading
+    assert title["color"] == panel_charts.INK
+
+    # Unasked, it still heads itself with the floor, in the row's colour:
+    # that is what the panel left off the page needs.
+    default = _row_title(
+        panel_charts.dms_scatter_row(
+            frame,
+            min_count=10,
+            clade="24E",
+            methods=dms.METHODS,
+            x_domain=[0.0, 40.0],
+            y_domain=[0.0, 40.0],
+            coefficients={column: 0.42 for column, _label in dms.METHODS},
+        ).to_dict()
+    )
+    assert default is not None
+    assert "10 actual or expected counts" in default["text"]
+    assert default["color"] == panel_charts.DMS_ROW_COLORS[10]
+
+
+def test_the_laid_out_bar_row_carries_no_heading_of_its_own():
+    """Panel B's groups already say which homolog and how many mutations.
+
+    An empty heading has to mean "draw none" rather than "draw the default",
+    which is why the parameter distinguishes ``""`` from ``None``: the rung
+    that is written but not laid out keeps its own heading, and the two go
+    through the same call.
+    """
+    correlations = pd.DataFrame(
+        {
+            "homolog": ["KP.3.1.1"] * len(dms.METHODS),
+            "min_count": [panel_spec.DMS_FIGURE_MIN_COUNT] * len(dms.METHODS),
+            "method": [label for _column, label in dms.METHODS],
+            "pearson": [0.6, 0.4, 0.5],
+            "n": [100, 100, 100],
+        }
+    )
+    kwargs = dict(
+        homologs=["KP.3.1.1"],
+        clades={"KP.3.1.1": "24E"},
+        methods=dms.METHODS,
+        y_domain=[0.0, 1.0],
+    )
+    bare = panel_charts.dms_bar_row(
+        correlations,
+        min_count=panel_spec.DMS_FIGURE_MIN_COUNT,
+        heading="",
+        **kwargs,
+    ).to_dict()
+    assert _row_title(bare) is None
+
+    default = panel_charts.dms_bar_row(
+        correlations,
+        min_count=panel_spec.DMS_FIGURE_MIN_COUNT,
+        **kwargs,
+    ).to_dict()
+    title = _row_title(default)
+    assert title is not None and "all mutations" in title["text"]

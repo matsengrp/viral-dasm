@@ -511,9 +511,10 @@ DMS_PANELS: tuple[str, ...] = (*DMS_SCATTER_PANELS, *DMS_BAR_PANELS)
 DMS_FIGURE_STEM = "dms"
 
 #: Which stem each letter is, reading across and then down: one row per
-#: threshold, scatters then bars. Every plot is lettered in its own right,
-#: because each is drawn on one population and headed with it, so a reader can
-#: take any one of them on its own terms.
+#: threshold, scatters then bars. All four are lettered, including the two
+#: that :data:`DMS_FIGURE_ROWS` no longer lays out: the letter is in the
+#: stem, so renumbering them would rename files and the CSVs beside them for
+#: a change the page does not see.
 DMS_PANEL_LETTERS: dict[str, str] = {
     chr(ord("A") + index): stem
     for index, stem in enumerate(
@@ -523,18 +524,28 @@ DMS_PANEL_LETTERS: dict[str, str] = {
     )
 }
 
-#: Which letter sits where. Reading across answers "does this hold for the
-#: other homologs"; reading down answers "does it survive thresholding".
-#: Rows are top aligned and left justified, so the two bar panels start at the
-#: same x as each other and level with the scatters beside them -- the
-#: alignment a stacked column would give, but with each plot a cell of its own
-#: so that it can take a letter.
-DMS_FIGURE_ROWS: tuple[tuple[str, ...], ...] = (("A", "B"), ("C", "D"))
+#: The threshold the composed figure draws. `rule dms_correlations` writes a
+#: panel at each of :data:`DMS_MIN_COUNTS`, but only this one is laid out, so
+#: only this one's headings are the figure's: see :data:`DMS_FIGURE_ROWS`.
+DMS_FIGURE_MIN_COUNT = 0
+
+#: Which letter sits where: one row, the scatters then the bars, both drawn
+#: over every mutation carrying a counts-based estimate. Reading across
+#: answers "does this hold for the other homologs". Rows are top aligned and
+#: left justified, so the bar panel starts level with the scatters beside it.
+#:
+#: **C and D are still drawn, and are not laid out.** The thresholded rung is
+#: a check on the figure rather than part of it --- at ten counts KP.3.1.1 is
+#: down to 407 mutations --- and `main.tex` reports it in prose instead. Its
+#: panels stay in :data:`DMS_PANELS`, so the rule still writes them and their
+#: CSVs; dropping them from this table is the whole of what takes them off
+#: the page.
+DMS_FIGURE_ROWS: tuple[tuple[str, ...], ...] = (("A", "B"),)
 
 #: `fig:agreement`'s box rather than `fig:within_clade_shifts`'s taller one:
-#: this figure is two plots a row, so it has no reason to overhang the text
-#: block. At scale 1.0 the width binds and the height comes out under 4 in,
-#: so there is nothing to give away.
+#: this figure is two plots on one row, so it has no reason to overhang the
+#: text block. At scale 1.0 the width binds and the height follows from it,
+#: so the second number is a ceiling that is not reached rather than a target.
 DMS_BOX_IN: tuple[float, float] = (7.5, 8.0)
 DMS_FIGURE_SCALE = 1.0
 

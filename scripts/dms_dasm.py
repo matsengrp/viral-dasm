@@ -1,6 +1,6 @@
 """The DASM as a predictor of the spike DMS, through the same join as the rest.
 
-The model the paper is about, scored against the three assays on the same cells
+The model the paper is about, scored against the four assays on the same cells
 and through the same contract as BLOSUM62, the leaf log-frequency ratio and
 antiGen. What it contributes that they cannot is the point of the comparison;
 what this module contributes is only that it arrives in the same shape.

@@ -544,6 +544,19 @@ def dms_count_label(min_count: int) -> str:
     return "all mutations" if min_count == 0 else f"≥ {min_count} counts"
 
 
+def dms_homolog_heading(homolog: str, clade: str, n: int) -> str:
+    """`fig:dms` panel A's heading: which assay the clouds are drawn against.
+
+    What the figure's row needs said, now that it is the only row. The
+    default heading -- :func:`dms_scatter_row`'s -- names the count floor,
+    which is there to tell a row from the one under it; with one row it
+    answers a question nobody asked and leaves the one a reader does ask,
+    "which homolog is this?", to the caption. `n` stays because a panel
+    should be readable on its own terms.
+    """
+    return f"{homolog} (clade {clade}), n = {n:,}"
+
+
 def dms_padded_domain(values: Sequence[float] | pd.Series) -> list[float]:
     """``[min, max]`` padded by 5%, as upstream's `_padded_domain` pads it."""
     array = np.asarray(values, dtype=float)
@@ -680,6 +693,8 @@ def dms_scatter_row(
     x_domain: Sequence[float],
     y_domain: Sequence[float],
     coefficients: Mapping[str, float] | None = None,
+    heading: str | None = None,
+    heading_color: str | None = None,
 ) -> alt.HConcatChart:
     """One row of panel A: three predictors against one homolog's assay.
 
@@ -688,9 +703,16 @@ def dms_scatter_row(
     number in a panel's corner is the same object as the bar beside it rather
     than a second computation of it. Omitted, each panel computes its own.
 
-    The heading names the clade the count floor was applied in -- the floor is
-    on this homolog's *own* clade -- rather than leaving a reader to infer
-    which counts were thresholded.
+    ``heading`` and ``heading_color`` are what the composed figure needs and
+    a standalone panel does not. Left at ``None`` the row heads itself with
+    its count floor, in the row's own colour, which is what tells two stacked
+    rows apart; `fig:dms` draws one row, so there is nothing to tell apart
+    and it passes :func:`dms_homolog_heading` in black instead. ``""``
+    suppresses the heading altogether. See :data:`panel_spec.DMS_FIGURE_ROWS`.
+
+    The default heading names the clade the count floor was applied in -- the
+    floor is on this homolog's *own* clade -- rather than leaving a reader to
+    infer which counts were thresholded.
 
     Titles live inside the chart rather than in markdown above it, as
     upstream: a markdown caption is positioned by the browser against the
@@ -717,19 +739,23 @@ def dms_scatter_row(
         )
         for index, (column, label) in enumerate(methods)
     ]
-    heading = (
-        f"all mutations with estimated fitness effects in clade {clade} "
-        f"(n = {len(frame):,})"
-        if min_count == 0
-        else (
-            f"only mutations with ≥ {min_count} actual or expected counts "
-            f"in clade {clade} (n = {len(frame):,})"
+    if heading is None:
+        heading = (
+            f"all mutations with estimated fitness effects in clade {clade} "
+            f"(n = {len(frame):,})"
+            if min_count == 0
+            else (
+                f"only mutations with ≥ {min_count} actual or expected counts "
+                f"in clade {clade} (n = {len(frame):,})"
+            )
         )
-    )
-    return alt.hconcat(*panels, spacing=DMS_ROW_SPACING).properties(
+    row = alt.hconcat(*panels, spacing=DMS_ROW_SPACING)
+    if not heading:
+        return row
+    return row.properties(
         title=alt.TitleParams(
             text=heading,
-            color=colour,
+            color=colour if heading_color is None else heading_color,
             fontSize=DMS_FONT_SIZE,
             fontWeight="bold",
             anchor="middle",
@@ -996,6 +1022,7 @@ def dms_bar_row(
     clades: dict[str, str],
     methods: Sequence[tuple[str, str]],
     y_domain: Sequence[float],
+    heading: str | None = None,
 ) -> alt.HConcatChart:
     """One row of panel B: the same coefficient, for every homolog.
 
@@ -1052,15 +1079,23 @@ def dms_bar_row(
         )
         return alt.vconcat(header, bar, spacing=2)
 
-    heading = (
-        "all mutations with estimated fitness effects"
-        if min_count == 0
-        else f"only mutations with ≥ {min_count} actual or expected counts"
-    )
-    return alt.hconcat(
+    if heading is None:
+        heading = (
+            "all mutations with estimated fitness effects"
+            if min_count == 0
+            else f"only mutations with ≥ {min_count} actual or expected counts"
+        )
+    row = alt.hconcat(
         *[panel(homolog, homolog == homologs[0]) for homolog in homologs],
         spacing=DMS_ROW_SPACING,
-    ).properties(
+    )
+    # Each group already carries its homolog and its `n`, so on the composed
+    # figure -- one row, nothing to tell it apart from -- the row heading
+    # restates the population the caption states. `""` drops it; the
+    # thresholded rung, which is written but not laid out, keeps its own.
+    if not heading:
+        return row
+    return row.properties(
         title=alt.TitleParams(
             text=heading,
             color=colour,
