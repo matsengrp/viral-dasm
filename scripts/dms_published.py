@@ -1,6 +1,6 @@
 """Each published DMS file, as its own study releases it, in one shape.
 
-`fig:dms` reads three deep mutational scans. Each study publishes its
+`fig:dms` reads four deep mutational scans. Each study publishes its
 measurements in its own format -- a phenotype column among several, or a
 per-mutation effect table beside the counts it was fit from -- and each
 applies its own filtering before releasing them, or declares thresholds and

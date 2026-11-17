@@ -19,8 +19,9 @@ predictors score against the clade founder, which is the frame they were
 trained in. antiGen is fed the WH1 projection of the sequence each assay
 actually expressed, carrying the deletions the lineage really has -- BA.1's
 founder presents ``H69 V70``, ``G142 V143 Y144`` and ``N211`` where the virus
-has none. The two declarations differ at 8 / 6 / 11 columns and ``load_dms``
-has already dropped every one, so this moves no measured cell: it moves only
+has none. The two declarations differ at 3 / 8 / 6 / 11 columns (Delta /
+BA.1 / XBB.1.5 / KP.3.1.1) and ``load_dms`` has already dropped every one, so
+this moves no measured cell: it moves only
 what the transformer conditions on. Nothing in the predictor contract can tell
 the two apart, which is why the gap count is asserted here and the sequence's
 sha256 is what the manifest declares.

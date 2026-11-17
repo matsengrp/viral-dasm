@@ -9,7 +9,7 @@ nothing visible; and a second spelling of the codon mask drifts from the one
 the scored table was built with. None of them raises on its own.
 
 The checks over a hand-built founder run always. The ones that read this
-repository's own mat-pcp run -- the mask sizes, the three DMS files -- skip
+repository's own mat-pcp run -- the mask sizes, the DMS files -- skip
 when it is not readable, so the suite runs off-cluster.
 """
 

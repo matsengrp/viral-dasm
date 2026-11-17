@@ -84,7 +84,12 @@ def test_both_halves_have_a_colour_and_the_union_does_not():
 #: manuscript's filenames and `\\label`s would carry, so a `homolog_slug` that
 #: quietly started returning something else would rename three figures, and a
 #: test that derived its expectation from the function could not see it.
-EXPECTED_SLUGS = {"BA.1": "ba1", "XBB.1.5": "xbb15", "KP.3.1.1": "kp311"}
+EXPECTED_SLUGS = {
+    "Delta": "delta",
+    "BA.1": "ba1",
+    "XBB.1.5": "xbb15",
+    "KP.3.1.1": "kp311",
+}
 
 
 def test_the_slugs_are_what_the_manuscript_would_carry():

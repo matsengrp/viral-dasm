@@ -2,6 +2,9 @@ homolog,predictor,stratum,pearson_r,n_mutations
 BA.1,antigen,single_nt,0.4702363768326358,4538
 BA.1,dasm,single_nt,0.6113771509541424,4538
 BA.1,dasm_prob,single_nt,0.47885411566966496,4538
+Delta,antigen,single_nt,0.38831647958736865,4599
+Delta,dasm,single_nt,0.5447210511353896,4599
+Delta,dasm_prob,single_nt,0.43112098342493804,4599
 KP.3.1.1,antigen,single_nt,0.5250604970004196,4289
 KP.3.1.1,dasm,single_nt,0.6810401714762047,4289
 KP.3.1.1,dasm_prob,single_nt,0.6133707925794752,4289

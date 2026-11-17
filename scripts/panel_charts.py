@@ -997,10 +997,10 @@ def dms_bar_row(
     methods: Sequence[tuple[str, str]],
     y_domain: Sequence[float],
 ) -> alt.HConcatChart:
-    """One row of panel B: the same coefficient, for all three homologs.
+    """One row of panel B: the same coefficient, for every homolog.
 
     The scatter row reports `r` in each panel for one homolog; this collects
-    it for all three, so the comparison that matters -- how much each method
+    them all, so the comparison that matters -- how much each method
     loses when the threshold drops -- is one figure rather than three dropdown
     settings held in the reader's head.
 
@@ -2871,6 +2871,11 @@ def arm_ladder_grid(
 #: only two because it draws two populations, and panel B's groups are three.
 OKABE_ITO_BLUISH_GREEN = "#009E73"
 
+#: Okabe-Ito reddish-purple, the fourth, added with the Delta experiment.
+#: Taken ahead of that palette's orange, which neighbours the vermillion above
+#: closely enough that two adjacent bar groups would read as one.
+OKABE_ITO_REDDISH_PURPLE = "#CC79A7"
+
 #: One colour per DMS experiment, taken in group order. **Not one per arm**:
 #: the arms are already named under every bar, so colouring by arm spends the
 #: channel on a distinction the labels carry, while colouring by experiment
@@ -2879,6 +2884,7 @@ PROBABILITIES_HOMOLOG_COLORS: tuple[str, ...] = (
     OKABE_ITO_BLUE,
     OKABE_ITO_VERMILLION,
     OKABE_ITO_BLUISH_GREEN,
+    OKABE_ITO_REDDISH_PURPLE,
 )
 
 #: How each arm is named under its bar. Short, because they are set vertically.
