@@ -97,6 +97,57 @@ def declared_cell_strata(strata: tuple[str, ...]) -> set[str]:
     return expanded
 
 
+def trained_single_nt_cells(
+    frame: pd.DataFrame,
+    reachable: pd.DataFrame,
+    censored: frozenset[tuple[int, str]],
+) -> pd.DataFrame:
+    """The rows of ``frame`` the whichmut loss is defined on.
+
+    The three filters a predictor derived from the model's own grid has to
+    apply before it aggregates anything: drop the synonymous cells, keep the
+    amino-acid mutations one nucleotide change to the founder's codon reaches,
+    and drop what the model was told to ignore. Written once because two
+    callers need the same three -- `scripts/dms_prob.py` for the probabilities
+    it draws and `scripts/dms_site_mean.py` for the per-site average it takes.
+    The censor test is a third spelling of the one in :func:`homolog_cells`
+    below, deliberately: that function applies the censor *alone*, over a
+    population this one is not allowed to narrow, and folding the two together
+    would put a shared helper on the path of every predictor in the table to
+    save four lines.
+
+    **Not** :func:`homolog_cells`, which keeps every measured cell and applies
+    the censor alone: that is the population every predictor is *scored* on,
+    including the multi-nucleotide half. This is the narrower set a predictor
+    may read *from*.
+
+    Args:
+        frame: Rows carrying ``aa_site``, ``mutant_aa`` and ``parent_aa``.
+            ``parent_aa`` is the founder residue, so ``mutant_aa ==
+            parent_aa`` is the synonymous test.
+        reachable: ``dms.single_nt_indicator``'s frame for the same clade,
+            indexed by residue and 0-indexed position. Passed in rather than
+            built here so this function touches no file and so a caller that
+            needs it twice builds it once -- it is a 20 x L rebuild per call.
+        censored: ``dms_censor.censored_mutations``' set, for the same reason.
+
+    Returns:
+        The surviving rows in their original order, reindexed from zero.
+        Order is part of the contract -- a caller may write this frame
+        straight to a tracked CSV -- so a future implementation must not
+        filter through a merge or a sort.
+    """
+    keep = [
+        mutant != parent
+        and bool(reachable.loc[mutant, site - 1])
+        and (int(site), mutant) not in censored
+        for site, mutant, parent in zip(
+            frame["aa_site"], frame["mutant_aa"], frame["parent_aa"]
+        )
+    ]
+    return frame[keep].reset_index(drop=True)
+
+
 #: The footer key one predictor's manifest is stored under. A top-level
 #: key-value entry, which is what `dasm2/data/parquet_backend.py` says every
 #: metadata reader goes through -- not pandas' ``DataFrame.attrs``, whose

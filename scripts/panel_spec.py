@@ -567,12 +567,18 @@ DMS_TITLE_PX = 15
 #: conservation statistic already explain, then the model the paper claims to
 #: beat, and only last the one making the claim.
 #:
-#: The last two are that same model read a different way, which is why they come
-#: after it rather than among the other arms: `scripts/dms_prob.py` scores the
-#: DASM's mutation *probability*, and the neutral rate by which that differs
-#: from the selection factor. Both are defined on the single-nucleotide stratum
-#: alone, so their `multi_nt` rows carry `n = 0` by declaration rather than by
-#: accident -- see `dms_models.Manifest`.
+#: The last three are that same model read a different way, which is why they
+#: come after it rather than among the other arms: `scripts/dms_prob.py` scores
+#: the DASM's mutation *probability*, and the neutral rate by which that differs
+#: from the selection factor. Both of those are defined on the single-nucleotide
+#: stratum alone, so their `multi_nt` rows carry `n = 0` by declaration rather
+#: than by accident -- see `dms_models.Manifest`.
+#:
+#: `dasm_site_mean` is the third such reading and the one exception to that:
+#: `scripts/dms_site_mean.py` collapses the selection factors to one value per
+#: site, which is defined for every cell, so it declares every stratum as `dasm`
+#: does. It is the null the paper's extrapolation claim is read against, and
+#: both of its stratum rows are load-bearing -- #60.
 DMS_PREDICTORS: tuple[str, ...] = (
     "blosum62",
     "leaf_logfreq",
@@ -580,6 +586,7 @@ DMS_PREDICTORS: tuple[str, ...] = (
     "dasm",
     "dasm_prob",
     "neutral_rate",
+    "dasm_site_mean",
 )
 
 #: Every predictor's correlation with the DMS, per homolog and per stratum.

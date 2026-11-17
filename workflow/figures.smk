@@ -356,10 +356,11 @@ rule compose_dms:
 # rebuild it on every edit to the substitution matrix.
 #
 # Most of these need no trained model, which is why they could land before #16.
-# `dms_dasm_scores` and `dms_prob_scores` are the exceptions and read
-# `selection_factors.parquet`: the first is a filter and a rename over a table
-# `rule score` already built, the second exponentiates the same table's grid
-# and weights it by the neutral rates. Neither is a forward pass.
+# `dms_dasm_scores`, `dms_site_mean_scores` and `dms_prob_scores` are the
+# exceptions and read `selection_factors.parquet`: the first is a filter and a
+# rename over a table `rule score` already built, the second averages that
+# table's grid per site, and the third exponentiates it and weights it by the
+# neutral rates. None of the three is a forward pass.
 #
 # Scores and tallies go under the artifact root; only the correlation table is
 # tracked. `panel_spec.DMS_LEAF_COUNT_DIR` records why.
@@ -434,18 +435,22 @@ def dms_strata_figure_paths(*_):
 rule dms_predictors:
     """The DMS predictor comparison: every predictor's correlation, per stratum.
 
-    The two reference predictors, antiGen, the DASM, and the DASM read as a
+    The two reference predictors, antiGen, the DASM, the DASM read as a
     probability (`dasm_prob`) beside the neutral rate it differs from the
-    selection factor by (`neutral_rate`) -- all through one join onto one
-    population. `fig:dms_strata` is what draws the first four; `rule dms_strata`
-    builds that, and this target is the table alone. The last two are drawn by
+    selection factor by (`neutral_rate`), and the DASM collapsed to one value
+    per site (`dasm_site_mean`) -- all through one join onto one population.
+    `fig:dms_strata` is what draws the first four; `rule dms_strata` builds
+    that, and this target is the table alone. The last three are drawn by
     nothing: a probability is defined only on the single-nucleotide stratum, so
-    it is a row of the table rather than a column of the figure.
+    it is a row of the table rather than a column of the figure, and the site
+    mean is a null the manuscript reads against `dasm` rather than a model to
+    plot.
 
     **This target is no longer model-free, and that changed when the DASM
     joined `DMS_PREDICTORS`.** It was: the three reference predictors needed no
     checkpoint, which is why the section header above says they could land
-    before #16. `dms_dasm_scores` and `dms_prob_scores` both read
+    before #16. `dms_dasm_scores`, `dms_site_mean_scores` and
+    `dms_prob_scores` all read
     `selection_factors.parquet`, so this target now sits downstream of
     `rule score` and therefore of `rule train`.
     Building it alone puts the training rules in the plan -- which is a
@@ -551,6 +556,64 @@ rule dms_dasm_scores:
         scores=str(dms_score_path("dasm", "{homolog}")),
     log:
         f"{ARTIFACT_ROOT}/logs/dms_scores_dasm_{{homolog}}.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "python {input.script}"
+        " --homolog {wildcards.homolog}"
+        " --table {input.table}"
+        " --output {output.scores}"
+        " > {log} 2>&1"
+
+
+rule dms_site_mean_scores:
+    """The DASM collapsed to one log selection factor per site.
+
+    The null `rule dms_predictors`' table reads the DASM's own rows against:
+    the mean over the mutations the model is trained on at a site, given to
+    every measured cell there, in both strata. Reads the same
+    `selection_factors.parquet` as `dms_dasm_scores`, through the same grid
+    reader, so like that rule it claims no GPU and loads no checkpoint.
+
+    Declares `scripts/dms_dasm.py` because this script imports it for the grid
+    read -- `dms_dasm_scores` does not have to, that file being its own script
+    -- and declares no neutral archive, which is what separates it from
+    `rule dms_prob_scores` below.
+
+    Declares no leaf tally, for `dms_blosum_scores`' reason.
+    """
+    wildcard_constraints:
+        homolog="|".join(re.escape(homolog) for homolog in dms_homologs()),
+    input:
+        script="scripts/dms_site_mean.py",
+        dasm="scripts/dms_dasm.py",
+        models="scripts/dms_models.py",
+        dms="scripts/dms.py",
+        published="scripts/dms_published.py",
+        censor="scripts/dms_censor.py",
+        panels="scripts/panels.py",
+        spec="scripts/panel_spec.py",
+        founder_reader="scripts/founders.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        scov2_rates="dasm2/neutral/scov2_rates.py",
+        constants="dasm2/sequence/constants.py",
+        conversion="dasm2/sequence/conversion.py",
+        masking="dasm2/sequence/masking.py",
+        codon_table="dasm2/codon_table.py",
+        parquet_backend="dasm2/data/parquet_backend.py",
+        dasm2_init="dasm2/__init__.py",
+        dms_csv=lambda w: str(dms_dataset(w.homolog).path),
+        clade_founders=clade_founder_fastas,
+        censored=str(mat_pcp_path("censored_mutations_file")),
+        clades=str(mat_pcp_path("censored_clades_file")),
+        masked=str(mat_pcp_path("masked_nt_sites_file")),
+        reference=str(mat_pcp_path("reference_sequence_file")),
+        table=SCORED_TABLE,
+    output:
+        scores=str(dms_score_path("dasm_site_mean", "{homolog}")),
+    log:
+        f"{ARTIFACT_ROOT}/logs/dms_scores_dasm_site_mean_{{homolog}}.log",
     resources:
         mem_mb=PANEL_MEM_MB,
     shell:

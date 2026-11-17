@@ -274,17 +274,21 @@ def founder_frame(
         validate="one_to_one",
     )
 
-    reachable = dms.single_nt_indicator(clade, lib.GENE)
-    censored = dms_censor.censored_mutations(clade)
-    keep = [
-        not synonymous
-        and bool(reachable.loc[mutant, site - 1])
-        and (int(site), mutant) not in censored
-        for site, mutant, synonymous in zip(
-            merged["aa_site"], merged["mutant_aa"], merged["is_synonymous"]
-        )
-    ]
-    drawn = merged[keep].reset_index(drop=True)
+    # `parent_aa` before the filter rather than after it, because
+    # `trained_single_nt_cells` reads the synonymous test off it. The two
+    # spellings agree: `build_probability_dataframe` sets `is_synonymous` from
+    # the same founder this column is taken from, and `_check_grid_founder`
+    # has already refused a grid whose parent residues are another clade's.
+    merged = merged.assign(
+        parent_aa=[founder_aa[site - 1] for site in merged["aa_site"]]
+    )
+    # Row order survives the helper, which matters here rather than there:
+    # `notebooks/probabilities.py` writes this frame to a tracked panel CSV.
+    drawn = dms_models.trained_single_nt_cells(
+        merged,
+        dms.single_nt_indicator(clade, lib.GENE),
+        dms_censor.censored_mutations(clade),
+    )
 
     probability = SCORED_COLUMNS[DASM_PROB]
     positive = drawn[probability] > 0
@@ -297,7 +301,6 @@ def founder_frame(
         )
 
     return drawn.assign(
-        parent_aa=[founder_aa[site - 1] for site in drawn["aa_site"]],
         dasm=drawn[dms_dasm.SCORE_COLUMN],
         dasm_prob=np.log(drawn[probability]),
         neutral_rate=np.log(drawn[SCORED_COLUMNS[NEUTRAL_RATE]]),

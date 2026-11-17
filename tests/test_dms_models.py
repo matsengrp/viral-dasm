@@ -33,6 +33,7 @@ import dms_dasm
 import dms_leaf_scores
 import dms_models
 import dms_prob
+import dms_site_mean
 import founders
 import panel_spec
 
@@ -243,6 +244,7 @@ def test_the_predictor_ids_the_rules_resolve_are_the_ones_the_modules_score():
         dms_dasm.DASM,
         dms_prob.DASM_PROB,
         dms_prob.NEUTRAL_RATE,
+        dms_site_mean.DASM_SITE_MEAN,
     )
 
 
