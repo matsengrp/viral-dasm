@@ -145,7 +145,7 @@ def _(BASE, MODELS, SPEC, mo, panels, pd):
             for model, clades in PAIRED_BY_MODEL.items()
         )
     )
-    return SHIFT_LADDER, WITHIN_LADDER
+    return PAIRED_BY_MODEL, SHIFT_LADDER, WITHIN_LADDER
 
 
 @app.cell
@@ -210,6 +210,133 @@ def _(SELECTION, SHIFT_LADDER, SPEC, charts, panels):
         spec=SPEC,
     )
     panel_e
+    return
+
+
+@app.cell
+def _(BASE, MODELS, PAIRED_BY_MODEL, SPEC, panels, pd):
+    # `si.tex`'s shift-error figure, and the sentence it answers: *the two
+    # approaches were also in strong agreement when expanding from these four
+    # clade pairs to all pairwise combinations of the 22 clades*. Panel D
+    # draws six pairs; this draws every pair of the adequate set.
+    #
+    # The clade set is `PAIRED_BY_MODEL` — the clades that clear the mutation
+    # floor at *every* rung, which is the set panels C and E are drawn over.
+    # `adequate_clades` at a single cutoff would give a larger set and a
+    # plausible-looking figure drawn over the wrong pairs.
+    #
+    # Nothing is reduced to a correlation here: the rows are kept per mutation
+    # and per pair, and only the binned summary below reaches the chart.
+    # Correlation would be the wrong statistic anyway — most pairs hold few
+    # mutations whose effects shift appreciably, and an r over shifts that are
+    # all near zero is noise.
+    _frames = []
+    for _model in MODELS:
+        _clades = list(PAIRED_BY_MODEL.get(_model, []))
+        if len(_clades) < 2:
+            continue
+        _base = panels.by_clade(BASE, _model)
+        # With the adequate set, never bare: `shift_pair_founders` defaults to
+        # the four `SHIFT_CLADES`, and `identical_founder_pairs` indexes the
+        # dict it is given without a guard, so the default raises `KeyError`
+        # over 22 clades.
+        _founders = panels.shift_pair_founders(_clades)
+        for _rung in panels.COUNT_LADDER:
+            _at_cutoff = {
+                _clade: panels.apply_count_threshold(_base[_clade], _rung)
+                for _clade in _clades
+            }
+            _frames.append(
+                panels.shift_error_frame(
+                    _at_cutoff,
+                    _clades,
+                    SPEC.fitness_metric,
+                    founders=_founders,
+                ).assign(model=_model, min_count=_rung)
+            )
+    SHIFT_ERRORS = pd.concat(_frames, ignore_index=True) if _frames else pd.DataFrame()
+    return (SHIFT_ERRORS,)
+
+
+@app.cell
+def _(SHIFT_ERRORS, mo, panels, pd):
+    # One windowed frame for the whole figure, with the rung as a column, so
+    # the three panels are three filters on one grid rather than three grids.
+    #
+    # `min_rows=1` draws every window that holds a row: the axis then covers
+    # the data, and a thin window is marked by the `n` in its tooltip and in
+    # the panel's CSV rather than by an opacity a reader would have to decode.
+    # `start=0.0` because the windowed quantity is a magnitude; the library's
+    # own anchor is for a figure windowed along the effect axis, where the
+    # clip at -4 is what the anchor keeps clear of.
+    #
+    # Models are pooled inside a rung, as panels C and E pool them: a
+    # selection's models are two readings of one approach, not two series.
+    SHIFT_ERROR_WINDOWS = (
+        pd.concat(
+            [
+                panels.shift_error_quantiles(
+                    _rows,
+                    value_col="abs_fitness_shift",
+                    start=0.0,
+                    width=panels.SHIFT_ERROR_WINDOW_WIDTH,
+                    min_rows=1,
+                ).assign(min_count=_rung)
+                for _rung in sorted(SHIFT_ERRORS["min_count"].unique())
+                if len(_rows := SHIFT_ERRORS[SHIFT_ERRORS["min_count"] == _rung])
+            ],
+            ignore_index=True,
+        )
+        if len(SHIFT_ERRORS)
+        else pd.DataFrame()
+    )
+    mo.md(
+        f"""
+        ### The shift-error windows
+
+        {len(SHIFT_ERRORS):,} (pair, mutation) rows over
+        {SHIFT_ERRORS["pair_label"].nunique() if len(SHIFT_ERRORS) else 0}
+        clade pairs and {len(panels.COUNT_LADDER)} rungs, summarised into
+        {len(SHIFT_ERROR_WINDOWS)} windows.
+        """
+    )
+    return (SHIFT_ERROR_WINDOWS,)
+
+
+@app.cell
+def _(SELECTION, SHIFT_ERROR_WINDOWS, SPEC, charts, mo, panels):
+    # The figure `si.tex` includes. It is written as a panel rather than
+    # composed: `figure_layout` exists to pack several PNGs into one page box
+    # and solve a shared dpi for them, and a supplement that is one chart has
+    # nothing to compose. The PDF is what the manuscript includes, which is
+    # the one format `save_panel` does not write by default.
+    SHIFT_ERROR_PANEL = charts.save_panel(
+        charts.shift_error_row(SHIFT_ERROR_WINDOWS),
+        panels.SHIFT_ERROR_PANELS[0],
+        selection=SELECTION,
+        formats=panels.SUPPLEMENT_FORMATS,
+    )
+    panels.write_panel_csv(
+        SHIFT_ERROR_WINDOWS,
+        panels.SHIFT_ERROR_PANELS[0],
+        selection=SELECTION,
+        spec=SPEC,
+    )
+    _copied = charts.copy_panel_to_manuscript(
+        panels.SHIFT_ERROR_PANELS[0], selection=SELECTION
+    )
+    mo.vstack(
+        [
+            mo.md(
+                f"Manuscript copy: `{_copied}`"
+                if _copied is not None
+                else "Manuscript copy skipped: "
+                f"`{SELECTION}` is not a published selection, or no "
+                "manuscript is checked out beside this repository."
+            ),
+            SHIFT_ERROR_PANEL,
+        ]
+    )
     return
 
 

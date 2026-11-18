@@ -84,7 +84,10 @@ from panel_spec import (
     POOL_SHIFTS,
     POOL_SUMMARY,
     SELECTIONS,
+    PANEL_FORMATS,
     SHIFT_CLADES,
+    SHIFT_ERROR_PANELS,
+    SUPPLEMENT_FORMATS,
     SUBSAMPLING_FIGURE_STEM,
     SUBSAMPLING_LADDER_CLADES,
     SUBSAMPLING_PANEL_LETTERS,
@@ -115,19 +118,20 @@ def clade_founder_fastas(*_):
     return sorted(str(path) for path in mat_pcp_path("clade_founders_dir").glob("*.fa"))
 
 
-def panel_outputs(stems, selection):
+def panel_outputs(stems, selection, extensions=PANEL_FORMATS):
     """One selection's panel images and tables, as a rule's outputs.
 
-    Both image formats are declared, not just the PNG. `save_panel` writes a
+    Every image format is declared, not just the PNG. `save_panel` writes a
     vector copy of every panel, and an undeclared output is one snakemake will
     not clean up after a failed job -- so a half-written SVG would survive a
-    rerun that replaced its PNG.
+    rerun that replaced its PNG. A supplementary panel passes
+    `SUPPLEMENT_FORMATS`, which adds the PDF `si.tex` includes.
     """
     directory = figure_dir(selection)
     return [
         str(directory / f"{stem}.{extension}")
         for stem in stems
-        for extension in ("png", "svg")
+        for extension in extensions
     ] + [str(panel_csv_path(selection, stem)) for stem in stems]
 
 
@@ -163,10 +167,18 @@ def ladder_arm_fitness_files(*_):
 
 
 rule panels:
-    """Every panel of `fig:agreement`, for the model the paper publishes."""
+    """Every panel of `fig:agreement`, and the supplement drawn beside them.
+
+    The supplement is named here because nothing else names it: `rule figures`
+    and `rule all` request composed figures, and `shift_error` is not composed
+    into one. It is built today only as a side effect of `agreement_ladders`
+    running for panels C and E, which is true but accidental -- a target no
+    rule asks for is one nobody can ask for either.
+    """
     input:
         panel_outputs(MUTATION_PANELS, DEFAULT_SELECTION),
         panel_outputs(LADDER_PANELS, DEFAULT_SELECTION),
+        panel_outputs(SHIFT_ERROR_PANELS, DEFAULT_SELECTION, SUPPLEMENT_FORMATS),
 
 
 rule subsampling:
@@ -1310,7 +1322,14 @@ rule agreement_mutations:
 
 
 rule agreement_ladders:
-    """Panels C and E: both correlations against the count cutoff."""
+    """Panels C and E, and `si.tex`'s shift-error figure.
+
+    Every panel here sweeps the count ladder. The supplement joins them
+    because it is the same sweep over the same frames: the clade set it pairs
+    is the one panels C and E are drawn over, computed once in the notebook,
+    and pairing it is a loop over frames already in memory rather than a
+    second read of the table.
+    """
     wildcard_constraints:
         selection="|".join(SELECTIONS),
     input:
@@ -1341,6 +1360,14 @@ rule agreement_ladders:
     output:
         html=f"{NOTEBOOK_DIR}/agreement_ladders_{{selection}}.html",
         panels=panel_outputs(LADDER_PANELS, "{selection}"),
+        # The supplement, declared apart from the composed panels because it
+        # is written in a third format: `si.tex` includes its PDF directly,
+        # where a composed panel's PDF comes from `save_figure`. Its copy in
+        # the manuscript is deliberately undeclared; see
+        # `copy_panel_to_manuscript`.
+        supplement=panel_outputs(
+            SHIFT_ERROR_PANELS, "{selection}", SUPPLEMENT_FORMATS
+        ),
     log:
         f"{ARTIFACT_ROOT}/logs/agreement_ladders_{{selection}}.log",
     resources:

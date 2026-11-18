@@ -219,7 +219,7 @@ already did the forward passes, so a panel rule reads
 | rule | what it produces |
 |---|---|
 | `agreement_mutations` | panels A, B and D: one mutation across the clades, one clade's cloud, the shift grid |
-| `agreement_ladders` | panels C and E: both correlations against the count cutoff |
+| `agreement_ladders` | panels C and E: both correlations against the count cutoff, and `si.tex`'s shift-error figure |
 | `compose_agreement` | the figure itself, laid out from those five PNGs |
 
 `snakemake dms` draws `fig:dms` the same way, from the same scored table plus
