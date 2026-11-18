@@ -167,10 +167,18 @@ def ladder_arm_fitness_files(*_):
 
 
 rule panels:
-    """Every panel of `fig:agreement`, for the model the paper publishes."""
+    """Every panel of `fig:agreement`, and the supplement drawn beside them.
+
+    The supplement is named here because nothing else names it: `rule figures`
+    and `rule all` request composed figures, and `shift_error` is not composed
+    into one. It is built today only as a side effect of `agreement_ladders`
+    running for panels C and E, which is true but accidental -- a target no
+    rule asks for is one nobody can ask for either.
+    """
     input:
         panel_outputs(MUTATION_PANELS, DEFAULT_SELECTION),
         panel_outputs(LADDER_PANELS, DEFAULT_SELECTION),
+        panel_outputs(SHIFT_ERROR_PANELS, DEFAULT_SELECTION, SUPPLEMENT_FORMATS),
 
 
 rule subsampling:

@@ -647,16 +647,33 @@ def test_a_window_summarises_its_own_rows():
     assert list(windows["n"]) == [4, 4]
     assert windows.loc["0–1", "error_p50"] == pytest.approx(2.5)
     assert windows.loc["1–2", "error_p50"] == pytest.approx(25.0)
+    # The median alone cannot see a mislabelled quantile: it is the symmetric
+    # one, so swapping q for 1 - q leaves it where it was and moves every
+    # other column. These four are what the box and the whisker draw.
+    for label, (p5, p25, p75, p95) in {
+        "0–1": (1.15, 1.75, 3.25, 3.85),
+        "1–2": (11.5, 17.5, 32.5, 38.5),
+    }.items():
+        assert windows.loc[label, "error_p5"] == pytest.approx(p5)
+        assert windows.loc[label, "error_p25"] == pytest.approx(p25)
+        assert windows.loc[label, "error_p75"] == pytest.approx(p75)
+        assert windows.loc[label, "error_p95"] == pytest.approx(p95)
+    # The window's own edges, which the x axis labels and the caption quotes.
+    assert list(windows["value_lo"]) == [0.0, 1.0]
+    assert list(windows["value_hi"]) == [1.0, 2.0]
 
 
 def test_predicting_no_shift_scores_the_shift_itself(frames):
-    """The identity the error is defined by, as a check on its sign.
+    """The identity the error is defined by: predicting no shift scores |shift|.
 
     ``shift_error`` is ``sf_shift - fitness_shift``, so a model whose estimate
-    does not move between two clades scores ``|error| = |shift|`` exactly. A
-    flipped subtraction still gives a positive, plausible absolute error
-    everywhere else; here it gives the same number, which is why this is the
-    test that catches it.
+    does not move between two clades scores ``|error| = |shift|`` exactly.
+    That is the line the figure is read against -- a box below it is the model
+    beating the null of predicting no shift at all.
+
+    This test cannot see a flipped subtraction: it asserts on the absolute
+    error, and ``|a - b| == |b - a|``. The sign is
+    :func:`test_the_error_is_the_model_s_shift_minus_the_counts_shift`'s job.
     """
     base = panels.by_clade(frames, FAKE_MODELS[0])
     # One flat model: the same selection factor in every clade, so every
@@ -670,6 +687,46 @@ def test_predicting_no_shift_scores_the_shift_itself(frames):
     assert rows["abs_shift_error"].to_numpy() == pytest.approx(
         rows["abs_fitness_shift"].to_numpy()
     )
+
+
+def test_the_error_is_the_model_s_shift_minus_the_counts_shift(frames):
+    """The signed column, on a model whose shift between clades is known.
+
+    Every other test here asserts on ``abs_shift_error``, where a flipped
+    subtraction is invisible because ``|a - b| == |b - a|``. The error would
+    then keep its magnitude and lose its direction, and the figure -- drawn
+    from absolute values -- would look exactly the same.
+
+    The model here is constant within a clade and steps by one between them,
+    so ``sf_shift`` is known from the pair label alone: ``21J→21L`` is
+    ``1 - 0``. A subtraction the other way round shows up at once.
+    """
+    base = panels.by_clade(frames, FAKE_MODELS[0])
+    steps = {clade: float(index) for index, clade in enumerate(FAKE_CLADES)}
+    stepped = {
+        clade: frame.assign(log_selection_factor=steps[clade])
+        for clade, frame in base.items()
+    }
+    rows = panels.shift_error_frame(stepped, list(FAKE_CLADES), "delta_fitness_ratio")
+    assert len(rows)
+
+    # The model's own shift, read off the pair label: b - a, the direction
+    # `compute_cross_clade_shift` joins in.
+    expected_sf = [
+        steps[label.split("\u2192")[1]] - steps[label.split("\u2192")[0]]
+        for label in rows["pair_label"]
+    ]
+    assert rows["sf_shift"].to_numpy() == pytest.approx(expected_sf)
+    assert rows["shift_error"].to_numpy() == pytest.approx(
+        (rows["sf_shift"] - rows["fitness_shift"]).to_numpy()
+    )
+
+    # And that the assertion above could have failed: it only pins the
+    # direction where the two shifts differ, so at least one row must.
+    differ = rows[rows["sf_shift"] != rows["fitness_shift"]]
+    assert len(differ), "every row has sf_shift == fitness_shift; the sign is untested"
+    flipped = (differ["fitness_shift"] - differ["sf_shift"]).to_numpy()
+    assert differ["shift_error"].to_numpy() != pytest.approx(flipped)
 
 
 def test_the_y_title_fits_the_panel_it_is_drawn_beside():
