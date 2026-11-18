@@ -439,7 +439,7 @@ PUBLISHED_SELECTIONS: frozenset[str] = frozenset(
 ECDF_CLADES: dict[str, str] = {"21J": "21J (Delta)", "25C": "25C (XFG)"}
 
 #: The counts panel B's eCDF is evaluated at. Linear and stopping at 20: the
-#: accuracy threshold is 10, so this is the range either side of the cutoff the
+#: counts threshold is 10, so this is the range either side of the cutoff the
 #: rest of the paper reads everything at, and a log axis would spend most of
 #: its width past the point where the curves have flattened.
 ECDF_MAX_COUNT = 20
