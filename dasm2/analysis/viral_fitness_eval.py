@@ -25,7 +25,11 @@ What this module owns:
   :func:`count_ladder_adequacy`), which clade pairs no model can answer
   (:func:`identical_founder_pairs`), and the band a count supports under
   Poisson noise (:func:`poisson_effect_interval`,
-  :func:`poisson_effect_p_value`).
+  :func:`poisson_effect_p_value`),
+* how far a predicted shift sits from the measured one, per mutation and per
+  pair, and that error summarised in fixed windows of the measured shift
+  (:func:`shift_error_frame`, :func:`shift_error_quantiles`,
+  :func:`shift_error_trend`), which is `si.tex`'s shift-error figure.
 
 Fitness effects are read, never recomputed. mat-pcp publishes
 ``delta_fitness_ratio`` (the raw log count ratio,
@@ -935,6 +939,472 @@ def shift_pair_count_ladder(
     if not frames:
         return pd.DataFrame()
     return pd.concat(frames, ignore_index=True)
+
+
+# ---------------------------------------------------------------------------
+# Error of the estimated shift, per mutation and per clade pair
+# ---------------------------------------------------------------------------
+
+# The five levels the box and whisker are drawn from: the median, the quartiles
+# that make the box, and the 5th and 95th that make the whisker.
+#
+# Tail quantiles rather than the full range, because sample extremes grow with
+# n and this figure's windows differ in n by orders of magnitude: the window
+# holding the smallest shifts holds a quarter of a million mutations where the
+# window holding the largest holds a few hundred, and a full-range whisker
+# would make the first look wider than the second for that reason alone.
+SHIFT_ERROR_QUANTILES = (0.05, 0.25, 0.50, 0.75, 0.95)
+
+# The whisker's two ends, as a (low, high) pair out of
+# `SHIFT_ERROR_QUANTILES`. Named apart from the five so that the drawn whisker
+# and anything that asks which rows fall outside it cannot disagree about where
+# the tail starts.
+SHIFT_ERROR_WHISKER_QUANTILES = (0.05, 0.95)
+
+# The window grid: fixed-width windows stated in the windowed axis's own units,
+# rather than equal-count bins. Equal-count edges move with the data, so two
+# runs are not comparable and no edge names anything a reader can state, where
+# a fixed window is "the mutations whose counts-based shift was between 2 and 3
+# nats", which is a sentence.
+#
+# The -2.5 anchor is upstream's, for a figure that windows along the effect
+# axis, where both axes are clipped at -4 and the anchor keeps the windows
+# clear of the floor. **This figure overrides it with 0.0**, because it windows
+# along `abs_fitness_shift`, which is non-negative by construction, so the
+# anchor is never reached. It is carried because it is the signature default of
+# the function below, and dropping it would make that signature a second
+# version of upstream's.
+SHIFT_ERROR_WINDOW_START = -2.5
+SHIFT_ERROR_WINDOW_WIDTH = 1.0
+
+# The default below which a window is omitted, as sampling noise rather than a
+# distribution. **This figure overrides it with 1**, so its windows are the
+# whole range of the data and every one is drawn alike however thin, with its
+# row count in the panel's table. That puts the weight on a number a reader can
+# read rather than on an opacity they would have to decode -- but it does mean
+# a window at the far end can rest on a handful of mutations, and this constant
+# is the line below which that is true.
+SHIFT_ERROR_MIN_WINDOW_ROWS = 100
+
+
+def shift_error_frame(
+    merged_by_clade: dict[str, pd.DataFrame],
+    clades: Sequence[str],
+    fitness_col: str,
+    *,
+    founders: Optional[dict[str, str]] = None,
+    min_shift_magnitude: float = 0.0,
+) -> pd.DataFrame:
+    """Per-mutation, per-pair error of the model's shift against the counts'.
+
+    :func:`shift_pair_metrics` reduces each pair to one correlation. This keeps
+    the rows behind it, so the error can be read against a property of the
+    mutation rather than of the pair.
+
+    ``shift_error`` is ``sf_shift - fitness_shift``: the model's predicted
+    change in effect between the two clades minus the change mat-pcp's counts
+    measured, in nats. Both are differences of log selection factors -- the
+    model's from its head, mat-pcp's from a log count ratio -- so the
+    subtraction is between commensurable quantities. It is **not** a residual
+    from a fit: no slope or intercept is estimated, so a model that ranked
+    every shift perfectly but at twice the amplitude would still show a large
+    error here. That is the intended reading (the shift is meant to be an
+    effect size, not a score), but it means the level of this error is not
+    comparable to a regression residual.
+
+    ``max_clade_effect`` is ``max(delta_fitness_a, delta_fitness_b)``: the more
+    positive of the two counts-based per-clade effects whose difference *is* the
+    measured shift. A mutation that is beneficial in at least one of the two
+    clades scores high here however the shift itself came out.
+
+    ``abs_fitness_shift`` is ``|fitness_shift|``, how far the counts say the
+    mutation moved regardless of direction. It is the second axis the figures
+    window along, and it is one of the error's own two inputs: a model
+    predicting no shift at all scores ``abs_shift_error == abs_fitness_shift``
+    exactly, so a rise against this axis is only a finding above that line.
+
+    Args:
+        merged_by_clade: ``{clade: filtered merged frame}``. The count filter
+            must already be applied; this reads what it is given.
+        clades: Clades to draw unordered pairs from, ``(a, b)`` with ``a``
+            first in this sequence. Fewer than two gives an empty frame with
+            the full column set.
+        fitness_col: One of :data:`FITNESS_METRICS`.
+        founders: ``{clade: founder sequence}``; identical-founder pairs are
+            dropped exactly as :func:`shift_pair_metrics` drops them, since no
+            model can show a shift across them and their error is therefore a
+            property of the clade set rather than of the model.
+        min_shift_magnitude: Keep only mutations that moved at least this far
+            under **either** approach -- ``|fitness_shift| >= m`` or
+            ``|sf_shift| >= m``. 0 (the default) keeps everything, and is
+            what this repository's figure passes. The bar is an ``or`` so
+            that the model's false alarms -- a shift it predicted that never
+            happened -- stay in the same frame as its misses. Note that
+            conditioning on either quantity removes the rows where both are
+            near zero, which are the easiest rows there are, so the level of
+            the error rises under any nonzero bar and only the comparison
+            across windows survives it.
+
+    Returns:
+        One row per (pair, shared mutation): ``clade_a``, ``clade_b``,
+        ``pair_label``, ``mutation_label``, ``aa_site``, ``mutant_aa``,
+        ``sf_shift``, ``fitness_shift``, ``shift_error``, ``abs_shift_error``,
+        ``abs_fitness_shift``, ``max_clade_effect``, ``min_clade_effect``,
+        and -- when the inputs
+        carried counts -- ``min_actual_count`` and ``min_expected_count``, the
+        weaker of the two clades' counts, which is what limits the pair.
+
+    Raises:
+        ValueError: If ``clades`` repeats a clade, names one absent from
+            ``merged_by_clade``, or if ``min_shift_magnitude`` is negative.
+    """
+    clades = list(clades)
+    if min_shift_magnitude < 0.0:
+        raise ValueError(
+            f"min_shift_magnitude must be >= 0, got {min_shift_magnitude!r}."
+        )
+    if len(set(clades)) != len(clades):
+        duplicated = sorted({c for c in clades if clades.count(c) > 1})
+        raise ValueError(
+            f"clades contains duplicates {duplicated}; a repeated clade would "
+            "pair with itself and report zero error."
+        )
+    absent = [c for c in clades if c not in merged_by_clade]
+    if absent:
+        raise ValueError(f"clades not in merged_by_clade: {absent}")
+
+    columns = [
+        "clade_a",
+        "clade_b",
+        "pair_label",
+        "mutation_label",
+        "aa_site",
+        "mutant_aa",
+        "sf_shift",
+        "fitness_shift",
+        "shift_error",
+        "abs_shift_error",
+        "abs_fitness_shift",
+        "max_clade_effect",
+        "min_clade_effect",
+    ]
+    count_columns = ["min_actual_count", "min_expected_count"]
+
+    skipped = (
+        set(identical_founder_pairs(founders, clades))
+        if founders is not None
+        else set()
+    )
+
+    frames = []
+    for index, clade_a in enumerate(clades):
+        for clade_b in clades[index + 1 :]:
+            if (clade_a, clade_b) in skipped:
+                continue
+            shift = shift_frame(
+                merged_by_clade[clade_a],
+                merged_by_clade[clade_b],
+                clade_a,
+                clade_b,
+                fitness_col,
+            )
+            if min_shift_magnitude > 0.0 and len(shift):
+                # `or`, not `and`, so a shift the model predicted that never
+                # happened is kept. Applied before the derived columns so the
+                # kept rows are decided by the two shifts alone.
+                shift = shift[
+                    (shift["fitness_shift"].abs() >= min_shift_magnitude)
+                    | (shift["sf_shift"].abs() >= min_shift_magnitude)
+                ]
+            if not len(shift):
+                continue
+            effects = shift[["delta_fitness_a", "delta_fitness_b"]].to_numpy(float)
+            row = shift.assign(
+                clade_a=clade_a,
+                clade_b=clade_b,
+                pair_label=f"{clade_a}→{clade_b}",
+                shift_error=shift["sf_shift"] - shift["fitness_shift"],
+                abs_shift_error=(shift["sf_shift"] - shift["fitness_shift"]).abs(),
+                abs_fitness_shift=shift["fitness_shift"].abs(),
+                max_clade_effect=effects.max(axis=1),
+                min_clade_effect=effects.min(axis=1),
+            )
+            # `predicted_count` is the canonical spelling
+            # `normalize_fitness_columns` writes; `expected_count` is mat-pcp's
+            # own, carried through unchanged. Either is read, the canonical one
+            # first, so a frame that has only the original still gets the
+            # column.
+            for name, prefixes in zip(
+                count_columns,
+                (("actual_count",), ("predicted_count", "expected_count")),
+            ):
+                for prefix in prefixes:
+                    sides = [f"{prefix}_a", f"{prefix}_b"]
+                    if all(side in shift.columns for side in sides):
+                        row[name] = shift[sides].to_numpy(float).min(axis=1)
+                        break
+            frames.append(row[[c for c in columns + count_columns if c in row.columns]])
+
+    if not frames:
+        return pd.DataFrame(columns=columns)
+    return pd.concat(frames, ignore_index=True)
+
+
+def window_label(lo: float, hi: float) -> str:
+    """A window's range, as the string a discrete axis labels it with.
+
+    The figure's x axis is discrete -- one band per window -- so each band has
+    to name the interval it summarises. A quantitative axis with a point at
+    the window centre invites reading between windows and reading the centre
+    as a measurement; neither is what a window is.
+
+    Rendered as ``"0-1"`` with an en dash, and with spaces around the dash
+    when either edge is negative, since ``"-2.5--1.5"`` is unreadable.
+
+    Args:
+        lo: Left edge, inclusive.
+        hi: Right edge, exclusive.
+    """
+    dash = " \u2013 " if lo < 0 or hi < 0 else "\u2013"
+    return f"{lo:g}{dash}{hi:g}"
+
+
+def shift_error_quantiles(
+    error_df: pd.DataFrame,
+    *,
+    value_col: str = "max_clade_effect",
+    error_col: str = "abs_shift_error",
+    start: float = SHIFT_ERROR_WINDOW_START,
+    width: float = SHIFT_ERROR_WINDOW_WIDTH,
+    step: Optional[float] = None,
+    stop: Optional[float] = None,
+    min_rows: int = SHIFT_ERROR_MIN_WINDOW_ROWS,
+) -> pd.DataFrame:
+    """Summarise the error inside fixed windows along the effect axis.
+
+    The distribution per window rather than its mean: the error is a
+    heavy-tailed positive quantity, so a mean moves with a handful of rows and a
+    difference of means between windows says less than the quantiles do.
+
+    Windows are **fixed-width and stated in the effect's own units** --
+    ``[start, start + width)``, then the same window advanced by ``step``,
+    until the data runs out. Every window therefore means something a reader
+    can name ("mutations whose more positive clade effect was between -0.5 and
+    +0.5"), the edges do not move with the sample, and the window a mutation
+    falls in does not depend on the other mutations. Intervals are half-open on
+    the right, so with ``step == width`` (the default) each row lands in
+    exactly one.
+
+    ``step`` below ``width`` gives overlapping windows -- a genuine sliding
+    window, smoother but with neighbouring points sharing rows, which is worth
+    knowing before reading a trend off them.
+
+    Rows below ``start`` are **not** binned. See
+    :data:`SHIFT_ERROR_WINDOW_START`: the counts-based effect and the model's
+    log SF are clipped at the same bound, so near it both axes are compressed
+    and the error narrows for a reason that is not the model. The caller has
+    the frame and can count what the floor left out; this function does not
+    hide it, it declines to draw it.
+
+    Args:
+        error_df: Rows from :func:`shift_error_frame`. An empty frame, or one
+            with no usable rows at or above ``start``, gives an empty result
+            rather than raising, so a notebook can draw nothing without a
+            guard.
+        value_col: The column windowed along x.
+        error_col: The column summarised in each window.
+        start: Left edge of the first window.
+        width: Window width, in the units of ``value_col``.
+        step: Distance between consecutive left edges. Defaults to ``width``
+            (adjacent, non-overlapping windows).
+        stop: Stop once a window's left edge reaches this; defaults to the
+            largest usable ``value_col``, so the grid covers the data.
+        min_rows: Windows holding fewer rows than this are omitted.
+
+    Returns:
+        One row per drawn window, ascending: ``bin`` (the window's index in the
+        grid, so a gap is visible as a skipped index), ``n``, ``value_lo``,
+        ``value_hi``, ``value_label`` (the range as
+        :func:`window_label` renders it, for a discrete axis),
+        ``value_center``, ``value_median``, ``error_min``,
+        ``error_max``, and one ``error_p{q}`` column per entry of
+        :data:`SHIFT_ERROR_QUANTILES` (``error_p5``, ``error_p25``,
+        ``error_p50``, ``error_p75``, ``error_p95``). ``error_min`` and
+        ``error_max`` are the window's extremes, kept for reference; the
+        drawn whisker is ``error_p5`` to ``error_p95``. The figure draws one
+        band per window, labelled ``value_label``. ``value_center`` is the
+        window's midpoint, which with a fixed grid *is* the window's
+        definition, and ``value_median`` is kept beside it so a window whose
+        mass sits off-centre can be spotted.
+
+    Raises:
+        KeyError: If either column is absent, naming both.
+        ValueError: If ``width`` or ``step`` is not positive, or if ``stop`` is
+            below ``start`` -- an empty grid is a mistake, not an empty figure.
+    """
+    quantile_columns = [f"error_p{int(q * 100)}" for q in SHIFT_ERROR_QUANTILES]
+    columns = [
+        "bin",
+        "n",
+        "value_lo",
+        "value_hi",
+        "value_label",
+        "value_center",
+        "value_median",
+        "error_min",
+        "error_max",
+    ] + quantile_columns
+    usable, windows = _shift_error_windows(
+        error_df,
+        value_col=value_col,
+        error_col=error_col,
+        start=start,
+        width=width,
+        step=step,
+        stop=stop,
+        min_rows=min_rows,
+    )
+    if not windows:
+        return pd.DataFrame(columns=columns)
+
+    values = usable[value_col].to_numpy(float)
+    errors = usable[error_col].to_numpy(float)
+    rows = []
+    for index, lo, hi, inside in windows:
+        window_errors = errors[inside]
+        row = {
+            "bin": index,
+            "n": int(inside.sum()),
+            "value_lo": lo,
+            "value_hi": hi,
+            "value_label": window_label(lo, hi),
+            "value_center": lo + width / 2.0,
+            "value_median": float(np.median(values[inside])),
+            # The extremes are kept for the tooltip, not for the whisker:
+            # the whisker is `error_p5` to `error_p95` and the rows outside
+            # it are drawn one by one. See `SHIFT_ERROR_QUANTILES`.
+            "error_min": float(window_errors.min()),
+            "error_max": float(window_errors.max()),
+        }
+        for name, q in zip(quantile_columns, SHIFT_ERROR_QUANTILES):
+            row[name] = float(np.quantile(window_errors, q))
+        rows.append(row)
+    return pd.DataFrame(rows, columns=columns)
+
+
+def _shift_error_windows(
+    error_df: pd.DataFrame,
+    *,
+    value_col: str,
+    error_col: str,
+    start: float,
+    width: float,
+    step: Optional[float],
+    stop: Optional[float],
+    min_rows: int,
+) -> tuple[pd.DataFrame, list[tuple[int, float, float, np.ndarray]]]:
+    """The window grid shared by the quantiles and the outlier points.
+
+    Returns the usable rows -- finite in both columns and at or above
+    ``start`` -- and one ``(index, lo, hi, mask)`` per window holding at least
+    ``min_rows`` of them, where ``mask`` indexes those rows positionally.
+    Shared rather than duplicated so the drawn box and the drawn points are
+    guaranteed to describe the same windows.
+    """
+    step = width if step is None else step
+    if width <= 0:
+        raise ValueError(f"width must be positive, got {width!r}.")
+    if step <= 0:
+        raise ValueError(f"step must be positive, got {step!r}.")
+    if stop is not None and stop < start:
+        raise ValueError(
+            f"stop {stop!r} is below start {start!r}; the window grid would be empty."
+        )
+    if not len(error_df):
+        return error_df, []
+    for column in (value_col, error_col):
+        if column not in error_df.columns:
+            raise KeyError(
+                f"{column!r} is not a column of error_df; columns are "
+                f"{sorted(error_df.columns)}."
+            )
+
+    finite = (
+        error_df[[value_col, error_col]]
+        .replace([np.inf, -np.inf], np.nan)
+        .notna()
+        .all(axis=1)
+    )
+    usable = error_df[finite & (error_df[value_col] >= start)]
+    if not len(usable):
+        return usable, []
+
+    values = usable[value_col].to_numpy(float)
+    last = float(values.max()) if stop is None else float(stop)
+    windows, index, lo = [], 0, float(start)
+    while lo <= last:
+        hi = lo + width
+        # Half-open on the right. The largest effect in the data is never lost
+        # by that: it either falls inside a window, or sits exactly on an edge
+        # and opens the next one, since the loop runs while `lo <= last`.
+        inside = (values >= lo) & (values < hi)
+        if int(inside.sum()) >= min_rows:
+            windows.append((index, lo, hi, inside))
+        index += 1
+        lo += step
+    return usable, windows
+
+
+def shift_error_trend(
+    error_df: pd.DataFrame,
+    *,
+    value_col: str = "max_clade_effect",
+    error_col: str = "abs_shift_error",
+) -> dict[str, float]:
+    """Spearman correlation between the windowed axis and the error itself.
+
+    The number the figure is a picture of, computed on the unbinned rows so it
+    does not depend on the window grid. Spearman rather than Pearson because
+    the error is heavy-tailed and the hypothesis is monotone, not linear.
+
+    Every row given is used, including any below
+    :data:`SHIFT_ERROR_WINDOW_START`. Restricting to the drawn range is the
+    caller's choice and the caller's to report -- both numbers are worth
+    seeing, since they differ by exactly the clip artifact the window floor
+    exists to exclude.
+
+    Returns:
+        ``{"spearman_rho", "p_value", "n"}``. ``rho`` and ``p_value`` are NaN
+        with fewer than three usable rows or when either column is constant,
+        which is the same convention :func:`shift_pair_metrics` uses.
+    """
+    if not len(error_df):
+        return {"spearman_rho": float("nan"), "p_value": float("nan"), "n": 0.0}
+    for column in (value_col, error_col):
+        if column not in error_df.columns:
+            raise KeyError(
+                f"{column!r} is not a column of error_df; columns are "
+                f"{sorted(error_df.columns)}."
+            )
+    usable = (
+        error_df[[value_col, error_col]].replace([np.inf, -np.inf], np.nan).dropna()
+    )
+    constant = len(usable) and (
+        np.ptp(usable[value_col].to_numpy()) == 0
+        or np.ptp(usable[error_col].to_numpy()) == 0
+    )
+    if len(usable) < 3 or constant:
+        return {
+            "spearman_rho": float("nan"),
+            "p_value": float("nan"),
+            "n": float(len(usable)),
+        }
+    result = stats.spearmanr(usable[value_col], usable[error_col])
+    return {
+        "spearman_rho": float(result[0]),
+        "p_value": float(result[1]),
+        "n": float(len(usable)),
+    }
 
 
 # Coverage of the count-noise interval below. 0.95 because the question it

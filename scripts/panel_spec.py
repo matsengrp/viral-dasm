@@ -1165,6 +1165,30 @@ FIGURE_STEM = "agreement"
 #: embeds; the SVG is what a journal asks for.
 COMPOSED_FORMATS: tuple[str, ...] = ("png", "pdf", "svg")
 
+#: `si.tex`'s shift-error figure, which `rule agreement_ladders` writes beside
+#: `fig:agreement`'s own panels.
+#:
+#: **Not in `PANEL_LETTERS`, and not in `LADDER_PANELS`.** Those two name the
+#: five panels `compose_agreement` lays out, and `tests/test_panels.py` pins
+#: them against each other; this one is a figure in its own right, drawn by
+#: the same rule because it is the same sweep over the same frames. A stem
+#: added to `LADDER_PANELS` instead would be composed into `fig:agreement` as
+#: a sixth panel with no letter.
+#:
+#: The stem is the file name in both repositories: the manuscript includes
+#: `figures/shift_error.pdf`, so there is one spelling rather than two.
+SHIFT_ERROR_PANELS: tuple[str, ...] = ("shift_error",)
+
+#: What a panel writes when it is one panel of a composed figure, which is
+#: every panel but the supplement's.
+PANEL_FORMATS: tuple[str, ...] = ("png", "svg")
+
+#: What a supplementary panel writes instead. The PDF is the extra one, and it
+#: is the extra one because `si.tex` includes it directly: a composed figure
+#: gets its PDF from `save_figure`, and a panel that is a figure in its own
+#: right has no composition to get one from.
+SUPPLEMENT_FORMATS: tuple[str, ...] = PANEL_FORMATS + ("pdf",)
+
 #: Which panels sit on which row of the composed figure, left to right. Two
 #: rows: the lookup and the within-clade pair on top, the shift grid and its
 #: ladder beneath. Rows are left justified and top aligned, so row 2 being

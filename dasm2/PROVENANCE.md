@@ -441,7 +441,7 @@ source commit, and a fourth followed with the figures:
 |---|---:|---:|---|
 | `analysis/__init__.py` | 1 | 1 | verbatim |
 | `analysis/viral.py` | 1,077 | 1,089 | every definition; comments revised |
-| `analysis/viral_fitness_eval.py` | 2,711 | 1,121 | 21 of its definitions, in two passes |
+| `analysis/viral_fitness_eval.py` | 2,711 | 1,584 | 26 of its definitions, in three passes |
 | `analysis/charts.py` | 2,083 | 223 | 1 of its 15 chart builders |
 
 `viral.py` arrives whole because it is frame-in, frame-out: its only `dasm2`
@@ -469,7 +469,8 @@ knows this pipeline's layout and raises instead of guessing.
 
 The run axis and the effect-error family are not here. They compute readouts
 for figures this repository has not written yet, so they arrive with those
-figures -- which is what the second pass did for the shift family.
+figures -- which is what the second pass did for the shift family and the
+third did for its error.
 
 **The second pass, with `fig:agreement` (issue #19).** Nine more definitions
 came across, each code-identical to the source commit: `identical_founder_pairs`,
@@ -485,6 +486,32 @@ large-shift count, so the threshold is reported and never filtered on, and the
 constants' comments say so rather than pointing at a function this tree does not
 carry.
 
+**The third pass, with `si.tex`'s shift-error figure (issue #34).** Five more
+definitions, each code-identical to the source commit: `shift_error_frame`,
+`window_label`, `shift_error_quantiles`, `_shift_error_windows` and
+`shift_error_trend`, with `SHIFT_ERROR_QUANTILES`,
+`SHIFT_ERROR_WHISKER_QUANTILES`, `SHIFT_ERROR_WINDOW_START`,
+`SHIFT_ERROR_WINDOW_WIDTH` and `SHIFT_ERROR_MIN_WINDOW_ROWS`. Between them
+they take the per-mutation error of a predicted shift against the counts'
+measured one and summarise it in fixed windows, which is the whole of that
+figure.
+
+`shift_error_outliers` and `aligned_window_start` are **not** here, and that
+is this pass's one departure from naming parity. The figure is a box and
+whisker read against zero: it draws no individual points, so the function that
+returns them has no caller, and it windows along a magnitude that is
+non-negative by construction, so the function that walks the grid's anchor
+below the data has nothing to walk to. `aligned_window_start` is also the
+module's only caller of `math`, which this fork does not import.
+
+Two of the constants are carried for their signatures rather than their
+values. `shift_error_quantiles` defaults `start` to `SHIFT_ERROR_WINDOW_START`
+and `min_rows` to `SHIFT_ERROR_MIN_WINDOW_ROWS`, and the figure overrides both
+-- 0.0 and 1 -- so dropping them would have meant editing the signature, which
+is the one thing code-identity does not permit. Their comments say so, and say
+what the figure passes instead. `SHIFT_ERROR_MIN_SHIFT` and
+`SHIFT_ERROR_WINDOW_STEP` are *not* carried, since nothing here reads them.
+
 **`charts.py` came 1 builder of 15.** The figure makes five chart calls and only
 one of them is a library chart, `mutation_lookup_line`; the other four are built
 inline in the notebooks that lay them out, because a scatter with a diagonal and
@@ -499,7 +526,8 @@ extra, which this repository's `pyproject.toml` does not have.
 Measured the same way as the fourth cut: comparing the two files' definitions
 as ASTs with docstrings stripped, **all 34 are code-identical to the source
 commit** — 22 in `viral.py`, 12 in `viral_fitness_eval.py`. Every change is a
-comment or a docstring.
+comment or a docstring. The third pass's ten were measured the same way, and
+are code-identical too.
 
 No private issue reference survived: `viral.py` carried none, and of
 `viral_fitness_eval.py`'s nine, two sat in its module docstring and six in

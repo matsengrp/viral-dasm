@@ -530,6 +530,148 @@ def test_identical_founders_drop_the_pair_rather_than_scoring_it(frames):
     assert set(partial["pair_label"]) == {"21J\u219223A", "21L\u219223A"}
 
 
+# ---------------------------------------------------------------------------
+# `si.tex`'s shift-error figure
+# ---------------------------------------------------------------------------
+
+
+def shift_error_rows(frames, founders=None):
+    """The supplement's frame over the fake table's clades."""
+    return panels.shift_error_frame(
+        panels.by_clade(frames, FAKE_MODELS[0]),
+        list(FAKE_CLADES),
+        "delta_fitness_ratio",
+        founders=founders,
+    )
+
+
+def test_the_supplement_pairs_every_clade_it_is_given(frames):
+    """Every pair, against panel D's four clades and six pairs.
+
+    This is the whole point of the figure: `main.tex` claims the agreement
+    holds over *all pairwise combinations of the 22 clades*, where panel D
+    draws the six pairs of four well-separated ones. A cell that reached for
+    `SHIFT_CLADES` out of habit would draw a plausible figure of the claim the
+    paper already makes elsewhere.
+    """
+    rows = shift_error_rows(frames)
+    assert set(rows["pair_label"]) == {
+        "21J→21L",
+        "21J→23A",
+        "21L→23A",
+    }
+
+    # And the pairs no model can answer are dropped, not scored: two clades
+    # with one founder are the same input twice, so every shift is zero by
+    # construction. `shift_pair_founders` defaults to the four `SHIFT_CLADES`,
+    # and `identical_founder_pairs` indexes what it is handed without a guard,
+    # so the caller that forgets to pass its own set gets a `KeyError` rather
+    # than a quietly wrong figure.
+    shared = dict.fromkeys(FAKE_CLADES, "A" * 10)
+    shared["23A"] = "C" + "A" * 9
+    kept = shift_error_rows(frames, founders=shared)
+    assert set(kept["pair_label"]) == {"21J→23A", "21L→23A"}
+
+
+def test_the_clade_set_is_the_ladder_intersection_not_one_cutoff(frames):
+    """Adequate at every rung, which is a smaller set than adequate at ten.
+
+    The figure is drawn over the clades panels C and E are drawn over, and
+    those are pinned across the rungs so a thin clade dropping out at 50 does
+    not make the sweep survivorship. `adequate_clades` at the lowest rung
+    returns a larger set and would draw a full-looking figure over the wrong
+    pairs, which is why this asserts the two differ rather than that either
+    one is non-empty.
+    """
+    base = panels.by_clade(frames, FAKE_MODELS[0])
+    # One clade thinned until it clears the floor at 10 and nowhere above it.
+    thin = base["23A"].copy()
+    ceiling = (panels.COUNT_LADDER[0] + panels.COUNT_LADDER[1]) / 2
+    for column in ("actual_count", "predicted_count"):
+        thin[column] = ceiling
+    base = {**base, "23A": thin}
+
+    at_lowest, _ = panels.count_ladder_adequacy(
+        base, thresholds=[panels.COUNT_LADDER[0]], min_mutations=1
+    )
+    across_rungs, _ = panels.count_ladder_adequacy(
+        base, thresholds=panels.COUNT_LADDER, min_mutations=1
+    )
+    assert "23A" in set(at_lowest)
+    assert "23A" not in set(across_rungs)
+
+
+def test_the_windows_hold_every_row_once(frames):
+    """The window grid partitions the rows it is given.
+
+    ``n`` summed over the windows is the row count, so no mutation is binned
+    twice and none is dropped. A `start` above zero, or `min_rows` left at its
+    default of 100, thins the figure while still drawing one -- the panels
+    look right and the caption's `n` is wrong.
+    """
+    rows = shift_error_rows(frames)
+    windows = panels.shift_error_quantiles(
+        rows,
+        value_col="abs_fitness_shift",
+        start=0.0,
+        width=panels.SHIFT_ERROR_WINDOW_WIDTH,
+        min_rows=1,
+    )
+    assert int(windows["n"].sum()) == len(rows)
+    # Half-open on the right, so the edges do not double count: every row's
+    # own window is the one whose range contains it.
+    for _, window in windows.iterrows():
+        inside = rows["abs_fitness_shift"].between(
+            window["value_lo"], window["value_hi"], inclusive="left"
+        )
+        assert int(inside.sum()) == int(window["n"])
+
+
+def test_a_window_summarises_its_own_rows():
+    """Two windows with known, different medians, each in its own row.
+
+    An off-by-one in the window assignment is otherwise invisible: the figure
+    draws, the quantiles are plausible, and every box is one window out.
+    """
+    rows = pd.DataFrame(
+        {
+            # Four rows at a shift of 0.5 with |error| 1, 2, 3, 4 (median 2.5),
+            # and four at 1.5 with |error| 10, 20, 30, 40 (median 25).
+            "abs_fitness_shift": [0.5] * 4 + [1.5] * 4,
+            "abs_shift_error": [1.0, 2.0, 3.0, 4.0, 10.0, 20.0, 30.0, 40.0],
+        }
+    )
+    windows = panels.shift_error_quantiles(
+        rows, value_col="abs_fitness_shift", start=0.0, width=1.0, min_rows=1
+    ).set_index("value_label")
+    assert list(windows["n"]) == [4, 4]
+    assert windows.loc["0–1", "error_p50"] == pytest.approx(2.5)
+    assert windows.loc["1–2", "error_p50"] == pytest.approx(25.0)
+
+
+def test_predicting_no_shift_scores_the_shift_itself(frames):
+    """The identity the error is defined by, as a check on its sign.
+
+    ``shift_error`` is ``sf_shift - fitness_shift``, so a model whose estimate
+    does not move between two clades scores ``|error| = |shift|`` exactly. A
+    flipped subtraction still gives a positive, plausible absolute error
+    everywhere else; here it gives the same number, which is why this is the
+    test that catches it.
+    """
+    base = panels.by_clade(frames, FAKE_MODELS[0])
+    # One flat model: the same selection factor in every clade, so every
+    # `sf_shift` is zero and the error is the counts' shift alone.
+    flat = {
+        clade: frame.assign(log_selection_factor=0.0) for clade, frame in base.items()
+    }
+    rows = panels.shift_error_frame(flat, list(FAKE_CLADES), "delta_fitness_ratio")
+    assert len(rows)
+    assert (rows["sf_shift"] == 0.0).all()
+    assert rows["abs_shift_error"].to_numpy() == pytest.approx(
+        rows["abs_fitness_shift"].to_numpy()
+    )
+
+
 def test_the_ladder_is_the_library_ladder():
     """`scripts/panel_spec.py`'s rungs against the ones the filter applies.
 

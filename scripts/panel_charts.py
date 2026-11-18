@@ -16,6 +16,7 @@ pipeline runs only where ``snakemake`` is installed.
 
 from __future__ import annotations
 
+import shutil
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -34,7 +35,7 @@ import altair as alt
 import matplotlib.figure
 import numpy as np
 import pandas as pd
-from panels import figure_dir
+from panels import PANEL_FORMATS, figure_dir, tex_figure_dir
 
 # Re-exported, like the statistics through `scripts/panels.py`: a notebook then
 # imports its charts from one module and never names `dasm2` itself, which is
@@ -110,9 +111,13 @@ Y_AXIS_TITLE = "counts approach"
 
 
 def save_panel(
-    chart: alt.TopLevelMixin, stem: str, *, selection: str
+    chart: alt.TopLevelMixin,
+    stem: str,
+    *,
+    selection: str,
+    formats: Sequence[str] = PANEL_FORMATS,
 ) -> alt.TopLevelMixin:
-    """Write one chart to this selection's figure directory as PNG and SVG.
+    """Write one chart to this selection's figure directory.
 
     Returns the chart, so a call can wrap an expression without restructuring
     it.
@@ -122,14 +127,54 @@ def save_panel(
     pipeline rules, and a swallowed failure leaves a rule "complete" with no
     panel written.
 
-    PNG *and* SVG. The composition is raster, but a vector copy costs nothing
-    here and is what a journal asks for if the figure is ever rebuilt.
+    PNG *and* SVG by default. The composition is raster, but a vector copy
+    costs nothing here and is what a journal asks for if the figure is ever
+    rebuilt. A panel that is a figure in its own right passes
+    ``panel_spec.SUPPLEMENT_FORMATS`` and gets a PDF as well, which is what a
+    manuscript includes; see :func:`copy_panel_to_manuscript`.
+
+    Args:
+        chart: The chart to write.
+        stem: Its file name, without an extension.
+        selection: Which figure directory it belongs to.
+        formats: Extensions to write. Every one must be a format
+            ``vl-convert`` renders.
     """
     directory = figure_dir(selection)
     directory.mkdir(parents=True, exist_ok=True)
-    for extension in ("png", "svg"):
+    for extension in formats:
         chart.save(str(directory / f"{stem}.{extension}"), ppi=VEGA_WRITE_PPI)
     return chart
+
+
+def copy_panel_to_manuscript(
+    stem: str, *, selection: str, extension: str = "pdf"
+) -> Path | None:
+    """Put one panel's PDF where the manuscript includes it from.
+
+    The panel equivalent of what `figure_layout.save_figure` does for a
+    composed figure, and for its reason: a stale figure in the paper is the
+    failure this pipeline exists to prevent, so copying is part of writing the
+    panel rather than a step someone remembers.
+
+    **The copy is deliberately not a rule output.** Snakemake deletes a job's
+    declared outputs when it fails, so naming a path inside the manuscript
+    would hand a failed export the power to delete the figure currently in the
+    paper. `rule compose_agreement` says the same of its own copy.
+
+    Returns the path written, or ``None`` when there is nothing to write to:
+    an unpublished selection, or a manuscript that is not checked out beside
+    this repository. Both are reported by the caller rather than raised, since
+    a panel is still a panel without a manuscript to put it in.
+    """
+    destination = tex_figure_dir(selection)
+    if destination is None or not destination.parent.is_dir():
+        return None
+    source = figure_dir(selection) / f"{stem}.{extension}"
+    destination.mkdir(exist_ok=True)
+    copied = destination / source.name
+    shutil.copy2(source, copied)
+    return copied
 
 
 def stat_label(row: pd.Series | None, n_plotted: int) -> str:
@@ -1454,6 +1499,157 @@ def ladder_clade_count(long_df: pd.DataFrame, unit_field: str) -> int:
 #: needs legible axes far more than it needs area, and the two series are far
 #: enough apart that the extra pixels only bought whitespace.
 LOOKUP_PANEL_SCALE = 0.8
+
+#: `shift_error`'s panels, one per count rung, drawn side by side. Wider than
+#: a ladder panel and no taller: the x axis holds up to eight labelled windows
+#: rather than three rungs, so width is what keeps the labels legible, while
+#: the quantity in y is read to one decimal rather than two.
+#:
+#: 340 is where the lowest rung's eight labels stop running together. The
+#: rungs do not all draw the same number of windows -- a higher cutoff keeps
+#: fewer mutations, so its largest shifts thin out first -- and the widest
+#: panel is what sets this, since all three are drawn at one width.
+SHIFT_ERROR_PANEL_WIDTH = 340
+SHIFT_ERROR_PANEL_HEIGHT = 190
+
+#: Hand-wrapped, as `LADDER_X_TITLE` is and for the same reason: Vega-Lite
+#: will not wrap an axis title, and either of these runs past the panel on one
+#: line. The x axis names the counts approach because the windows are *its*
+#: measurement of how far a mutation moved; the error in y is the DASM's
+#: departure from it.
+SHIFT_ERROR_X_TITLE = ["shift measured by the", "counts approach (nats)"]
+SHIFT_ERROR_Y_TITLE = ["absolute error of the DASM's", "estimated shift (nats)"]
+
+#: The box's width in pixels, and the median tick's length. One constant, so
+#: the tick spans the box exactly: a median drawn narrower reads as a separate
+#: mark sitting inside the box rather than as the box's own middle.
+SHIFT_ERROR_BOX_WIDTH = 20
+
+
+def shift_error_panel(
+    windows: pd.DataFrame,
+    *,
+    title: str,
+    y_title: list[str] | None = None,
+    width: int = SHIFT_ERROR_PANEL_WIDTH,
+    height: int = SHIFT_ERROR_PANEL_HEIGHT,
+) -> alt.LayerChart:
+    """One rung's windows: the box, its whisker, and the median across it.
+
+    A box and whisker and nothing else. The quantity drawn is an absolute
+    error, so the axis is read against zero, and anything further -- a
+    reference line for the error of predicting no shift, the tail as
+    individual points, a fitted trend -- is deliberately absent. #34 settles
+    that: the figure says how far the model's shift sits from the counts' and
+    leaves the reading to the caption.
+
+    The median is a **tick** spanning the box, not a marker: a box plot's
+    median is a level, and a mark with area invites being read as a spread it
+    is not. This is `ladder_row`'s reasoning for the same decision.
+
+    Args:
+        windows: One rung's rows from ``panels.shift_error_quantiles``.
+        title: The panel's heading, which names the rung.
+        y_title: The y axis title, or ``None`` for ticks and labels without
+            one. The row shares one y scale, so only its leftmost panel
+            carries the title; repeating it three times states the same
+            quantity three times and takes the width from the data.
+        width: Panel width in pixels.
+        height: Panel height in pixels.
+    """
+    # Sorted by the window's left edge rather than by its label: the labels
+    # are strings, so "10-11" would sort before "2-3" on a discrete axis.
+    order = list(windows.sort_values("value_lo")["value_label"])
+    x_enc = alt.X(
+        "value_label:N",
+        title=SHIFT_ERROR_X_TITLE,
+        sort=order,
+        axis=alt.Axis(
+            labelFontSize=PANEL_FONT_SIZE,
+            titleFontSize=PANEL_FONT_SIZE,
+            labelAngle=0,
+        ),
+    )
+    # Restated on every layer. A lone `axis=None` among a panel's layers
+    # disables that panel's merged axis outright, ticks and labels included.
+    y_kwargs = {
+        "title": y_title,
+        "axis": alt.Axis(
+            labelFontSize=PANEL_FONT_SIZE, titleFontSize=PANEL_FONT_SIZE, tickCount=5
+        ),
+        "scale": alt.Scale(zero=True),
+    }
+    tooltips = [
+        alt.Tooltip("value_label:N", title="Counts-based shift"),
+        alt.Tooltip("n:Q", title="Mutations", format=","),
+        alt.Tooltip("error_p50:Q", title="Median |error|", format=".3f"),
+        alt.Tooltip("error_p25:Q", title="25th percentile", format=".3f"),
+        alt.Tooltip("error_p75:Q", title="75th percentile", format=".3f"),
+        alt.Tooltip("error_p5:Q", title="5th percentile", format=".3f"),
+        alt.Tooltip("error_p95:Q", title="95th percentile", format=".3f"),
+        alt.Tooltip("error_max:Q", title="Largest |error|", format=".3f"),
+    ]
+    whisker = (
+        alt.Chart(windows)
+        .mark_rule(color=LADDER_MEDIAN_COLOR, strokeWidth=1.5, opacity=0.9)
+        .encode(x=x_enc, y=alt.Y("error_p5:Q", **y_kwargs), y2=alt.Y2("error_p95"))
+    )
+    box = (
+        alt.Chart(windows)
+        .mark_bar(color=POINT_BLUE, opacity=0.35, width=SHIFT_ERROR_BOX_WIDTH)
+        .encode(
+            x=x_enc,
+            y=alt.Y("error_p25:Q", **y_kwargs),
+            y2=alt.Y2("error_p75"),
+            tooltip=tooltips,
+        )
+    )
+    median = (
+        alt.Chart(windows)
+        .mark_tick(
+            color=POINT_BLUE, thickness=3, size=SHIFT_ERROR_BOX_WIDTH, opacity=1.0
+        )
+        .encode(x=x_enc, y=alt.Y("error_p50:Q", **y_kwargs))
+    )
+    return (whisker + box + median).properties(
+        width=width,
+        height=height,
+        title=alt.TitleParams(
+            title, fontSize=PANEL_FONT_SIZE, offset=4, anchor="middle"
+        ),
+    )
+
+
+def shift_error_row(
+    windows: pd.DataFrame, *, cutoff_field: str = "min_count"
+) -> alt.HConcatChart:
+    """One panel per count rung, ascending, on a shared y axis.
+
+    Shared rather than independent: the rungs are the same statistic over a
+    better-measured subset of the same mutations, so the panels are only worth
+    putting side by side if a reader can carry a height from one to the next.
+
+    Raises:
+        ValueError: If ``windows`` is empty. An empty figure is a rule that
+            reported success and wrote nothing a caption could describe.
+    """
+    if not len(windows):
+        raise ValueError(
+            "no windows to draw: `shift_error_quantiles` returned nothing for "
+            "any rung, which means no pair contributed a usable row."
+        )
+    rungs = sorted(windows[cutoff_field].unique())
+    return alt.hconcat(
+        *(
+            shift_error_panel(
+                windows[windows[cutoff_field] == rung],
+                title=f"cutoff {int(rung)}",
+                y_title=SHIFT_ERROR_Y_TITLE if index == 0 else None,
+            )
+            for index, rung in enumerate(rungs)
+        )
+    ).resolve_scale(y="shared")
+
 
 #: Height separately from width, because the two are constrained by different
 #: things. The width has to hold a few dozen rotated clade labels; the height
