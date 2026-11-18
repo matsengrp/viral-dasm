@@ -1510,15 +1510,53 @@ LOOKUP_PANEL_SCALE = 0.8
 #: fewer mutations, so its largest shifts thin out first -- and the widest
 #: panel is what sets this, since all three are drawn at one width.
 SHIFT_ERROR_PANEL_WIDTH = 340
-SHIFT_ERROR_PANEL_HEIGHT = 190
+
+#: Tall enough to hold the y axis title, which is the binding constraint and
+#: not the data. That title is rotated, so its longest *line* runs down the
+#: panel; a line longer than the panel is high overflows above the plot, and
+#: Vega-Lite then sets that panel's heading above the overflow rather than
+#: above the plot -- which lifts the leftmost heading out of line with the
+#: other two, since it is the only panel that carries a y title at all.
+#: :func:`shift_error_title_fits` states the relation and
+#: `tests/test_panels.py` holds this pair to it.
+SHIFT_ERROR_PANEL_HEIGHT = 290
 
 #: Hand-wrapped, as `LADDER_X_TITLE` is and for the same reason: Vega-Lite
 #: will not wrap an axis title, and either of these runs past the panel on one
 #: line. The x axis names the counts approach because the windows are *its*
 #: measurement of how far a mutation moved; the error in y is the DASM's
-#: departure from it.
-SHIFT_ERROR_X_TITLE = ["shift measured by the", "counts approach (nats)"]
-SHIFT_ERROR_Y_TITLE = ["absolute error of the DASM's", "estimated shift (nats)"]
+#: departure from it. Neither says "nats": the windows and the error are both
+#: in them, and the caption says so once.
+#:
+#: Where the y title is broken decides whether the headings line up, so the
+#: wrap is load-bearing rather than cosmetic; see
+#: :data:`SHIFT_ERROR_PANEL_HEIGHT`.
+SHIFT_ERROR_X_TITLE = ["shift measured by the", "counts approach"]
+SHIFT_ERROR_Y_TITLE = ["absolute error of the", "DASM's estimated shift"]
+
+#: Width of one character of the panel font, as a fraction of its point size,
+#: for the bold sans Vega-Lite sets axis titles in. An estimate, used only to
+#: keep the y title clear of the panel's top edge with room to spare, so it is
+#: deliberately generous: over-estimating the width costs a taller panel,
+#: where under-estimating it puts the headings back out of line.
+TITLE_CHAR_WIDTH = 0.62
+
+
+def shift_error_title_fits(
+    title: list[str],
+    height: int = SHIFT_ERROR_PANEL_HEIGHT,
+    font_size: int = PANEL_FONT_SIZE,
+) -> bool:
+    """Whether a rotated y title fits inside a panel of this height.
+
+    The rotated title is as long as its longest line, so this compares that
+    line's estimated length against the height it has to sit in. A title that
+    does not fit does not merely crowd the panel: it breaks the row's heading
+    alignment, which is :data:`SHIFT_ERROR_PANEL_HEIGHT`'s whole subject.
+    """
+    longest = max(len(line) for line in title)
+    return longest * font_size * TITLE_CHAR_WIDTH <= height
+
 
 #: The box's width in pixels, and the median tick's length. One constant, so
 #: the tick spans the box exactly: a median drawn narrower reads as a separate
@@ -1643,7 +1681,7 @@ def shift_error_row(
         *(
             shift_error_panel(
                 windows[windows[cutoff_field] == rung],
-                title=f"cutoff {int(rung)}",
+                title=f"counts ≥ {int(rung)}",
                 y_title=SHIFT_ERROR_Y_TITLE if index == 0 else None,
             )
             for index, rung in enumerate(rungs)

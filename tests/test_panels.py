@@ -672,6 +672,31 @@ def test_predicting_no_shift_scores_the_shift_itself(frames):
     )
 
 
+def test_the_y_title_fits_the_panel_it_is_drawn_beside():
+    """The supplement's headings line up only while this holds.
+
+    The y axis title is rotated, so its longest line runs down the panel. A
+    line longer than the panel is high overflows above the plot, and
+    Vega-Lite sets that panel's heading above the overflow -- lifting the
+    leftmost heading out of line with the other two, since it is the only
+    panel carrying a y title. The figure still draws, which is why this is a
+    test rather than something a reader would be warned about.
+    """
+    import panel_charts as charts
+
+    assert charts.shift_error_title_fits(charts.SHIFT_ERROR_Y_TITLE), (
+        f"the y title's longest line, "
+        f"{max(charts.SHIFT_ERROR_Y_TITLE, key=len)!r}, does not fit in "
+        f"{charts.SHIFT_ERROR_PANEL_HEIGHT}px at {charts.PANEL_FONT_SIZE}px: "
+        f"re-wrap it or raise the panel."
+    )
+    # The pair before this one was fixed: one line of 28 characters, which is
+    # what put the headings out of line in the first place.
+    assert not charts.shift_error_title_fits(
+        ["absolute error of the DASM's", "estimated shift"]
+    )
+
+
 def test_the_ladder_is_the_library_ladder():
     """`scripts/panel_spec.py`'s rungs against the ones the filter applies.
 
