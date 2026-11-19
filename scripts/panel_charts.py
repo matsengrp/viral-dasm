@@ -2126,7 +2126,7 @@ def save_mpl_panel(
 DEPTH_INK = "#1a1a1a"
 CAP_BLUES = ("#6baed6", "#3182bd", "#08519c")
 
-#: The accuracy threshold's rule, in the one hue neither the depth ramp nor the
+#: The counts threshold's rule, in the one hue neither the depth ramp nor the
 #: scatter roles use.
 THRESHOLD_ACCENT = "#d95f02"
 
@@ -2464,7 +2464,7 @@ def count_ecdf_panel(
 
     Each curve is the share of a clade's mutations carrying **at least** *x*
     counts, so it falls from 1.0 rather than rising to it. A labelled rule
-    marks the accuracy threshold, and a curve's height where it crosses is the
+    marks the counts threshold, and a curve's height where it crosses is the
     share that depth still puts at or above it.
 
     One frame with a ``role`` column and each layer filtering to its own role,
@@ -2571,7 +2571,7 @@ def count_ecdf_panel(
             color=FIT_FIREBRICK,
         )
         .transform_filter(alt.datum.role == "threshold")
-        .transform_calculate(note='"accuracy|threshold"')
+        .transform_calculate(note='"counts|threshold"')
         .encode(x=x_enc, y=alt.value(4), text="note:N"),
     ]
     # Narrow views with the legend to their right. The width is set so that the

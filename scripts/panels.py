@@ -985,7 +985,7 @@ def count_ecdf_frame(
 
     **The population is the whole amino-acid grid**, every non-synonymous
     amino-acid mutation away from the clade founder, and not the subset that
-    clears the accuracy threshold. The subset is *defined* by a threshold on
+    clears the counts threshold. The subset is *defined* by a threshold on
     these counts,
     so its own curve would pass through 1.0 at exactly that threshold and be
     truncated by construction -- it could not show what share of a clade's

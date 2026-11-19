@@ -126,7 +126,7 @@ def _(mo):
     ## Panel B — how many mutations have enough counts
 
     The share of each clade's spike mutations carrying at least X actual or
-    expected counts. The dotted rule is the accuracy threshold of 10, so where
+    expected counts. The dotted rule is the counts threshold of 10, so where
     a curve crosses it is the share of that clade's mutations with at least
     that many counts — an upper bound on what is estimable, since scoring also
     drops masked and censored mutations.
