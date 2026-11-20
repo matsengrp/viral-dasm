@@ -37,7 +37,16 @@ dasm2/        a vendored fork of the model-training code (see its PROVENANCE.md)
 tests/        what has to hold for the rest of it to mean anything
 data/         input the pipeline reads and never writes
 results/      the publishable tables it writes, tracked
+exploratory/  side analyses that are not part of the pipeline
 ```
+
+`exploratory/` is the one directory the pipeline neither reads nor writes. Each
+subdirectory is a question asked off to the side, with its own README, the
+scripts that answer it and the small tables they produced. They import
+`scripts/` and the vendored `dasm2`, so they measure what the pipeline
+measures, but they never invoke snakemake, never write under `artifact_root`
+and never train: scoring reads the published checkpoint. Nothing the paper
+says depends on anything here.
 
 The two data directories split by direction, not by provenance. `data/` holds
 input a reader may edit -- the era template, the shift candidates and the

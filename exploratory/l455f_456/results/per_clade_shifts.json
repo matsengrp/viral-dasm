@@ -1,0 +1,322 @@
+{
+  "23D": {
+    "L455F": {
+      "clade": "23D",
+      "backgrounds": {
+        "founder": "F456",
+        "derived": "L456"
+      },
+      "counts_shift": 1.7541403713547354,
+      "dasm_shift": 2.4412518354599566,
+      "p_value": 9.999000099990002e-05,
+      "p_at_floor": true,
+      "n_permutations": 10000,
+      "pools": {
+        "founder": {
+          "label": "F456",
+          "n_pcps": 18389,
+          "synonymous": 6995,
+          "n_haplotypes": 691,
+          "counts_effect": 0.7094954250477142,
+          "dasm_effect": 0.3523832226646526
+        },
+        "derived": {
+          "label": "L456",
+          "n_pcps": 5870,
+          "synonymous": 2300,
+          "n_haplotypes": 263,
+          "counts_effect": 2.46363579640245,
+          "dasm_effect": 2.793635058124609
+        }
+      },
+      "branch_fractions": [
+        {
+          "contrast": "L455F|derived",
+          "pool_name": "L455F|founder",
+          "role": "founder",
+          "n_pcps": 18389,
+          "of_eligible": 0.7580279483902881,
+          "of_clade": 0.744463786891219,
+          "n_eligible": 24259,
+          "n_clade": 24701
+        },
+        {
+          "contrast": "L455F|derived",
+          "pool_name": "L455F|derived",
+          "role": "marker",
+          "n_pcps": 5870,
+          "of_eligible": 0.24197205160971186,
+          "of_clade": 0.2376422007206186,
+          "n_eligible": 24259,
+          "n_clade": 24701
+        },
+        {
+          "contrast": "L455F|derived",
+          "pool_name": "(neither)",
+          "role": "unassigned",
+          "n_pcps": 0,
+          "of_eligible": 0.0,
+          "of_clade": 0.0,
+          "n_eligible": 24259,
+          "n_clade": 24701
+        }
+      ]
+    }
+  },
+  "23A": {
+    "L455F": {
+      "clade": "23A",
+      "backgrounds": {
+        "founder": "F456",
+        "derived": "L456"
+      },
+      "counts_shift": 2.1227822129372815,
+      "dasm_shift": 2.362373098274966,
+      "p_value": 9.999000099990002e-05,
+      "p_at_floor": true,
+      "n_permutations": 10000,
+      "pools": {
+        "founder": {
+          "label": "F456",
+          "n_pcps": 46063,
+          "synonymous": 17940,
+          "n_haplotypes": 1239,
+          "counts_effect": 0.10440437632806791,
+          "dasm_effect": 0.3843634058030587
+        },
+        "derived": {
+          "label": "L456",
+          "n_pcps": 2383,
+          "synonymous": 997,
+          "n_haplotypes": 98,
+          "counts_effect": 2.2271865892653495,
+          "dasm_effect": 2.746736504078025
+        }
+      },
+      "branch_fractions": [
+        {
+          "contrast": "L455F|derived",
+          "pool_name": "L455F|founder",
+          "role": "founder",
+          "n_pcps": 46063,
+          "of_eligible": 0.9508112124840028,
+          "of_clade": 0.8882867941993212,
+          "n_eligible": 48446,
+          "n_clade": 51856
+        },
+        {
+          "contrast": "L455F|derived",
+          "pool_name": "L455F|derived",
+          "role": "marker",
+          "n_pcps": 2383,
+          "of_eligible": 0.049188787515997194,
+          "of_clade": 0.04595418080839247,
+          "n_eligible": 48446,
+          "n_clade": 51856
+        },
+        {
+          "contrast": "L455F|derived",
+          "pool_name": "(neither)",
+          "role": "unassigned",
+          "n_pcps": 0,
+          "of_eligible": 0.0,
+          "of_clade": 0.0,
+          "n_eligible": 48446,
+          "n_clade": 51856
+        }
+      ]
+    }
+  },
+  "23B": {
+    "L455F": {
+      "clade": "23B",
+      "backgrounds": {
+        "founder": "F456",
+        "derived": "L456"
+      },
+      "counts_shift": 2.132453364030395,
+      "dasm_shift": 2.339110320340415,
+      "p_value": 0.0005999400059994001,
+      "p_at_floor": false,
+      "n_permutations": 10000,
+      "pools": {
+        "founder": {
+          "label": "F456",
+          "n_pcps": 16265,
+          "synonymous": 6599,
+          "n_haplotypes": 592,
+          "counts_effect": 0.5451186078055733,
+          "dasm_effect": 0.3690463286571055
+        },
+        "derived": {
+          "label": "L456",
+          "n_pcps": 3077,
+          "synonymous": 1369,
+          "n_haplotypes": 105,
+          "counts_effect": 2.6775719718359685,
+          "dasm_effect": 2.7081566489975204
+        }
+      },
+      "branch_fractions": [
+        {
+          "contrast": "L455F|derived",
+          "pool_name": "L455F|founder",
+          "role": "founder",
+          "n_pcps": 16265,
+          "of_eligible": 0.8409161410402234,
+          "of_clade": 0.8106559011164274,
+          "n_eligible": 19342,
+          "n_clade": 20064
+        },
+        {
+          "contrast": "L455F|derived",
+          "pool_name": "L455F|derived",
+          "role": "marker",
+          "n_pcps": 3077,
+          "of_eligible": 0.15908385895977664,
+          "of_clade": 0.15335925039872408,
+          "n_eligible": 19342,
+          "n_clade": 20064
+        },
+        {
+          "contrast": "L455F|derived",
+          "pool_name": "(neither)",
+          "role": "unassigned",
+          "n_pcps": 0,
+          "of_eligible": 0.0,
+          "of_clade": 0.0,
+          "n_eligible": 19342,
+          "n_clade": 20064
+        }
+      ]
+    }
+  },
+  "22F": {
+    "L455F": {
+      "clade": "22F",
+      "backgrounds": {
+        "founder": "F456",
+        "derived": "L456"
+      },
+      "counts_shift": 2.9095517201659997,
+      "dasm_shift": 2.493430188370495,
+      "p_value": 9.999000099990002e-05,
+      "p_at_floor": true,
+      "n_permutations": 10000,
+      "pools": {
+        "founder": {
+          "label": "F456",
+          "n_pcps": 16570,
+          "synonymous": 6422,
+          "n_haplotypes": 718,
+          "counts_effect": 0.10181425693789141,
+          "dasm_effect": 0.26309333392921064
+        },
+        "derived": {
+          "label": "L456",
+          "n_pcps": 1029,
+          "synonymous": 420,
+          "n_haplotypes": 49,
+          "counts_effect": 3.011365977103891,
+          "dasm_effect": 2.7565235222997053
+        }
+      },
+      "branch_fractions": [
+        {
+          "contrast": "L455F|derived",
+          "pool_name": "L455F|founder",
+          "role": "founder",
+          "n_pcps": 16570,
+          "of_eligible": 0.9415307687936815,
+          "of_clade": 0.9239948697931188,
+          "n_eligible": 17599,
+          "n_clade": 17933
+        },
+        {
+          "contrast": "L455F|derived",
+          "pool_name": "L455F|derived",
+          "role": "marker",
+          "n_pcps": 1029,
+          "of_eligible": 0.05846923120631854,
+          "of_clade": 0.0573802487035075,
+          "n_eligible": 17599,
+          "n_clade": 17933
+        },
+        {
+          "contrast": "L455F|derived",
+          "pool_name": "(neither)",
+          "role": "unassigned",
+          "n_pcps": 0,
+          "of_eligible": 0.0,
+          "of_clade": 0.0,
+          "n_eligible": 17599,
+          "n_clade": 17933
+        }
+      ]
+    }
+  },
+  "23C": {
+    "L455F": {
+      "clade": "23C",
+      "backgrounds": {
+        "founder": "F456",
+        "derived": "L456"
+      },
+      "counts_shift": -0.5838138227237711,
+      "dasm_shift": 0.47629350706561135,
+      "p_value": 0.9881011898810119,
+      "p_at_floor": false,
+      "n_permutations": 10000,
+      "pools": {
+        "founder": {
+          "label": "F456",
+          "n_pcps": 8484,
+          "synonymous": 3604,
+          "n_haplotypes": 358,
+          "counts_effect": 0.578226763868311,
+          "dasm_effect": 0.5064112515784926
+        },
+        "derived": {
+          "label": "L456",
+          "n_pcps": 2,
+          "synonymous": 2,
+          "n_haplotypes": 1,
+          "counts_effect": -0.005587058855460148,
+          "dasm_effect": 0.982704758644104
+        }
+      },
+      "branch_fractions": [
+        {
+          "contrast": "L455F|derived",
+          "pool_name": "L455F|founder",
+          "role": "founder",
+          "n_pcps": 8484,
+          "of_eligible": 0.9997643176997407,
+          "of_clade": 0.9103981113853418,
+          "n_eligible": 8486,
+          "n_clade": 9319
+        },
+        {
+          "contrast": "L455F|derived",
+          "pool_name": "L455F|derived",
+          "role": "marker",
+          "n_pcps": 2,
+          "of_eligible": 0.00023568230025925054,
+          "of_clade": 0.00021461530207103768,
+          "n_eligible": 8486,
+          "n_clade": 9319
+        },
+        {
+          "contrast": "L455F|derived",
+          "pool_name": "(neither)",
+          "role": "unassigned",
+          "n_pcps": 0,
+          "of_eligible": 0.0,
+          "of_clade": 0.0,
+          "n_eligible": 8486,
+          "n_clade": 9319
+        }
+      ]
+    }
+  }
+}
