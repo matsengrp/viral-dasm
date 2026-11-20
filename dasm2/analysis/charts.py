@@ -45,6 +45,9 @@ def mutation_lookup_line(
     extra_tooltips: Optional[dict[str, str]] = None,
     series_colors: tuple[str, str] = ("steelblue", "coral"),
     series_shapes: tuple[str, str] = ("circle", "circle"),
+    reference_value: Optional[float] = None,
+    reference_label: Optional[str] = None,
+    reference_font_size: Optional[int] = None,
 ) -> alt.LayerChart:
     """Build a line chart tracking a mutation's metrics across clades.
 
@@ -96,10 +99,29 @@ def mutation_lookup_line(
             when the figure is printed in black and white, so a caller
             preparing a figure distinguishes the series twice. The default
             is a circle for both.
+        reference_value: Optional horizontal rule, for one estimate of the
+            same quantity the series carry that is not per clade -- a
+            tree-wide number against a per-clade series. Drawn **under** the
+            series, so it cannot hide a point, and in ``series_colors[0]``
+            rather than in grey, because the one caller that wants it is
+            drawing a counts quantity and the first series is the counts one.
+            It is deliberately not the zero rule's grey ``[3, 3]``: two dashed
+            grey horizontals on one panel cannot be told apart.
+        reference_label: What the rule is, set on the panel beside it rather
+            than in the legend. A reference line is not a series, so it does
+            not belong in the colour scale; and a rule a reader has to find
+            the caption to name is a rule they will read as the zero line.
+            Ignored when ``reference_value`` is None.
+        reference_font_size: Point size for that label. ``None`` leaves
+            Vega-Lite's default, which is right for a chart at default size
+            and far too small for a figure panel -- a caller sizing a panel
+            passes its own type size, since this module has no opinion about
+            what a panel is.
 
     Returns:
-        Layered chart: the optional grey interval band, a two-line overlay
-        (delta_fitness, log_sf), and a zero reference line.
+        Layered chart: the optional grey interval band, the optional
+        reference rule and its label, a two-line overlay (delta_fitness,
+        log_sf), and a zero reference line.
     """
     # Melt to long form
     id_vars = ["clade"]
@@ -175,6 +197,46 @@ def mutation_lookup_line(
                 )
             )
 
+    # Before the series, so the rule and its label sit under the points
+    # rather than over them. Anchored to the first clade on the axis: the
+    # value is not per clade, but Vega-Lite needs somewhere definite to put
+    # the text, and the left edge is where a reader starts.
+    reference = None
+    reference_text = None
+    if reference_value is not None:
+        reference_rows = pd.DataFrame(
+            {"y": [float(reference_value)], "clade": [sort_order[0]]}
+        )
+        reference = (
+            alt.Chart(reference_rows)
+            .mark_rule(
+                strokeDash=[6, 4],
+                color=series_colors[0],
+                strokeWidth=1.5,
+                opacity=0.9,
+            )
+            .encode(y=alt.Y("y:Q", title=y_title))
+        )
+        if reference_label is not None:
+            text_mark: dict[str, object] = {
+                "align": "left",
+                "baseline": "bottom",
+                "dx": 3,
+                "dy": -3,
+                "color": series_colors[0],
+            }
+            if reference_font_size is not None:
+                text_mark["fontSize"] = reference_font_size
+            reference_text = (
+                alt.Chart(reference_rows.assign(label=reference_label))
+                .mark_text(**text_mark)
+                .encode(
+                    x=alt.X("clade:N", title=x_title, sort=sort_order),
+                    y=alt.Y("y:Q", title=y_title),
+                    text="label:N",
+                )
+            )
+
     line_chart = (
         alt.Chart(long)
         .mark_line(point=alt.OverlayMarkDef(size=80))
@@ -213,7 +275,12 @@ def mutation_lookup_line(
     # Size and title on the *outer* layer rather than on one child: with the
     # band present the line is no longer the first child, and a title set on a
     # child that is not first has no defined place to render.
-    layers = ([band] if band is not None else []) + [line_chart, zero_line]
+    layers = (
+        ([band] if band is not None else [])
+        + ([reference] if reference is not None else [])
+        + ([reference_text] if reference_text is not None else [])
+        + [line_chart, zero_line]
+    )
     # `alt.layer` is typed, unlike the `a + b` overloads used elsewhere here, so
     # its `.properties` is declared to return `LayerChart | FacetChart`.
     return alt.layer(*layers).properties(  # type: ignore[no-any-return, return-value]

@@ -1130,11 +1130,117 @@ SHIFT_PANEL_LETTERS: dict[str, str] = {
 SHIFT_BOX_IN: tuple[float, float] = (7.5, 9.0)
 SHIFT_FIGURE_SCALE = 1.0
 
+
+# ---------------------------------------------------------------------------
+# fig:l455f -- one mutation, between clades and within them
+# ---------------------------------------------------------------------------
+
+#: The mutation `fig:l455f` is about. Spelled separately from
+#: :data:`LOOKUP_MUTATION` rather than aliased to it, on the precedent of
+#: :data:`SUBSAMPLING_SCATTER_CLADE` beside :data:`SCATTER_CLADE`: the two
+#: figures look up different mutations for different reasons, and a shared
+#: name would make one figure's choice look like the other's.
+L455F_MUTATION = "L455F"
+
+#: The site the mutation is at, and the site whose residue splits each clade's
+#: branches into the two backgrounds panel B contrasts.
+#:
+#: **This split is specified by hand, which is a deviation from
+#: `fig:within_clade_shifts` and must be reported as one.** That figure takes
+#: each clade's split from branch frequencies, unaided, through
+#: `rule clade_backgrounds` -- which is what makes its panels a property of
+#: the tree rather than of a choice. Here the split cannot come from there:
+#: for 23A the unaided marker is F456L but it arrives with L455F itself at
+#: 59% of marker branches as a co-traveller, which puts the mutation under
+#: test inside the background that defines the contrast and leaves the cell
+#: unscoreable; and for 22F the unaided marker is not site 456 at all but
+#: S486P. Measured, not assumed: see `_ignore/step_zero_clade_backgrounds.csv`
+#: and the PR body. For 23B the unaided marker *is* F456L with no
+#: co-travellers, so there the hand specification confirms rather than
+#: overrides.
+L455F_SITE = 455
+L455F_MARKER_SITE = 456
+L455F_MARKER_AA = "L"
+
+#: The clades the pools are measured over -- every XBB clade in the roster.
+#: Six measured, four drawn, and the two that drop out do so for reasons the
+#: panel can state rather than by being left off a list:
+#:
+#: * 23E fails the evidence gate, 6/5.36 actual-or-expected counts on its
+#:   456F pool and 1/0.063 on its 456L pool against
+#:   :data:`PANEL_MIN_COUNT`. Its pools are written and not drawn.
+#: * 23F is refused before its pools are built, by the founder check at
+#:   :data:`L455F_MARKER_SITE`: EG.5.1's founder already carries 456L, so the
+#:   derived pool's predicate matches the founder's and the two pools would be
+#:   the same branches. It is the clade panel A singles out, so the caption
+#:   says why it cannot appear in B.
+#:
+#: Deliberately **not** :data:`CANDIDATE_CLADES`, which is
+#: `fig:within_clade_shifts`' row set: adding a clade there would add a row to
+#: that figure, and a fourth would raise `IndexError` in
+#: :data:`SHIFT_PANEL_LETTERS` at module scope -- which is parse time for
+#: `workflow/figures.smk`.
+L455F_CLADES: tuple[str, ...] = ("22F", "23A", "23B", "23D", "23E", "23F")
+
+#: Where the pools this figure measures land. Its own tables rather than rows
+#: in `rule pool_counts`' output, because that rule's roster is
+#: :data:`CANDIDATE_CLADES` and its candidates are `shift_candidates.csv`.
+L455F_POOL_CELLS = POOL_DIR / "l455f_pool_cells.parquet"
+L455F_POOL_SHIFTS = POOL_DIR / "l455f_pool_shifts.parquet"
+L455F_POOL_SUMMARY = POOL_DIR / "l455f_pool_summary.json"
+
+#: Panel stems. Its own, not :data:`MUTATION_PANELS`': panel A here is the
+#: same chart as `fig:agreement`'s panel A at a different mutation, and
+#: reusing that stem would overwrite the tracked CSV that figure is drawn
+#: from.
+L455F_PANELS: tuple[str, ...] = (
+    "panel_a_l455f_lookup",
+    "panel_b_l455f_backgrounds",
+)
+
+#: `fig:l455f`'s stem, which is its LaTeX label: `main.tex` includes
+#: `figures/l455f.pdf`. One spelling, so the file the manuscript includes and
+#: the file this pipeline writes cannot drift.
+L455F_FIGURE_STEM = "l455f"
+
+#: Two rows of one. Panel B is a single image of four sub-panels, unlike
+#: `fig:within_clade_shifts`' one image per clade, because here the clade is
+#: the sub-panel rather than the row.
+L455F_FIGURE_ROWS: tuple[tuple[str, ...], ...] = (("A",), ("B",))
+
+#: Which panel stem each letter is. Derived nowhere: a letter is a caption
+#: fact and a stem is a filename, and nothing in either implies the other.
+L455F_PANEL_LETTERS: dict[str, str] = {
+    "A": L455F_PANELS[0],
+    "B": L455F_PANELS[1],
+}
+
+#: The box this figure has to fit inside, in inches. Shorter than
+#: `fig:within_clade_shifts`': two rows rather than three, and the top row is
+#: one wide panel rather than a scatter whose square aspect sets the height.
+L455F_BOX_IN: tuple[float, float] = (7.5, 7.0)
+L455F_FIGURE_SCALE = 1.0
+
+#: Panel A's own size, in Vega-Lite pixels. Not :data:`LOOKUP_PANEL_HEIGHT`
+#: and :data:`LOOKUP_PANEL_SCALE`, which are tuned so that `fig:agreement`'s
+#: panel A sits level with two neighbours in a three-across row and are
+#: pinned there by `tests/test_panels.py`. Here panel A has the row to
+#: itself and carries 23 clades on its x axis rather than 15.
+L455F_LOOKUP_WIDTH = 900
+L455F_LOOKUP_HEIGHT = 330
+
 #: The columns the panels read. Named rather than taken whole: the table is
 #: 1,425,760 rows per run over 24 columns, and the pooled `*_all` half,
 #: `uncertainty` and `censored_directional` are read by no panel here.
 #: `delta_fitness_bayesian` is, barely -- it is the other member of
 #: :data:`FITNESS_METRICS`, so a spec that names it must find it.
+#:
+#: A figure that does want one of the `*_all` columns widens this tuple at
+#: its own call to `panels.read_scored_table`, as `scripts/dms.py` does with
+#: `POOLED_METRIC` and `fig:l455f`'s panel A does with
+#: :data:`panels.pooled_metric_column`. Widening it here instead would make
+#: every panel's read, and every test fixture, carry a column one figure
+#: wants.
 TABLE_COLUMNS: tuple[str, ...] = (
     "clade",
     "model",

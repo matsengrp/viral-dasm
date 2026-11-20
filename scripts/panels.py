@@ -554,6 +554,25 @@ LOOKUP_COLUMNS = (
     "censored_here",
 )
 
+#: The extra column :func:`lookup_frame` emits when asked for the clade-pooled
+#: estimate, appended to :data:`LOOKUP_COLUMNS`.
+LOOKUP_POOLED_COLUMN = "pooled_fitness"
+
+
+def pooled_metric_column(spec: FilterSpec = BASE_SPEC) -> str:
+    """The scored table's clade-pooled twin of the spec's fitness metric.
+
+    `rule score` joins mat-pcp's clade-pooled fitness table onto every row
+    under an ``_all`` suffix, so the pooled estimate of the quantity a panel
+    plots is already in the table beside it. Derived from the spec rather
+    than written out, so a figure drawing the pooled value does not also
+    decide which metric it is drawing.
+
+    It is **not** in :data:`panel_spec.TABLE_COLUMNS`: a caller that wants it
+    widens its own read, as ``scripts/dms.py`` does.
+    """
+    return f"{spec.fitness_metric}_all"
+
 
 def lookup_frame(
     table: pd.DataFrame,
@@ -562,6 +581,7 @@ def lookup_frame(
     model: str,
     min_count: float = PANEL_MIN_COUNT,
     spec: FilterSpec = BASE_SPEC,
+    pooled: bool = False,
 ) -> pd.DataFrame:
     """One mutation across every clade that carries an estimate of it.
 
@@ -609,6 +629,14 @@ def lookup_frame(
             empty frame would be indistinguishable from a misspelled label --
             which is what a mutation absent from the table returns.
     """
+    pooled_column = pooled_metric_column(spec)
+    if pooled and pooled_column not in table.columns:
+        raise KeyError(
+            f"lookup_frame(pooled=True) needs {pooled_column!r}, which is not "
+            f"in the table. It is not in `panel_spec.TABLE_COLUMNS`; widen the "
+            f"`columns` passed to `read_scored_table` with "
+            f"`panels.pooled_metric_column(spec)`."
+        )
     rows = table[(table["model"] == model) & (table["aa_mutation"] == mutation)]
     if len(rows) and rows["is_synonymous"].all():
         raise ValueError(
@@ -640,8 +668,9 @@ def lookup_frame(
         count_filter_mode=COUNT_FILTER_MODE,
     )
     if rows.empty:
-        return pd.DataFrame(columns=list(LOOKUP_COLUMNS))
-    return pd.DataFrame(
+        empty = list(LOOKUP_COLUMNS) + ([LOOKUP_POOLED_COLUMN] if pooled else [])
+        return pd.DataFrame(columns=empty)
+    frame = pd.DataFrame(
         {
             "clade": rows["clade"],
             "delta_fitness": rows[spec.fitness_metric].astype(float),
@@ -651,6 +680,16 @@ def lookup_frame(
             "censored_here": rows["censored"],
         }
     ).reset_index(drop=True)
+    if pooled:
+        # The clade-pooled estimate of the same quantity `delta_fitness`
+        # carries per clade: mat-pcp's counts summed over every clade whose
+        # founder carries this parent residue at this site. It is constant
+        # down the frame by construction -- the join key does not include the
+        # clade -- and it is carried per row rather than returned as a scalar
+        # so that a panel CSV records what the panel drew, and so a caller can
+        # assert that constancy rather than trust it.
+        frame[LOOKUP_POOLED_COLUMN] = rows[pooled_column].astype(float).to_numpy()
+    return frame
 
 
 def with_count_noise_interval(

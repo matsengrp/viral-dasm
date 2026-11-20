@@ -1834,6 +1834,9 @@ def background_panel(
     y_domain: tuple[float, float],
     columns: int,
     h_params: tuple[float, float, float] | None = None,
+    group_column: str = "candidate",
+    value_label: str | None = None,
+    x_gloss: str = BACKGROUND_X_GLOSS,
 ) -> matplotlib.figure.Figure:
     """One clade's row of `fig:within_clade_shifts`: panel B, D or F.
 
@@ -1870,6 +1873,28 @@ def background_panel(
             ``tight_layout`` sizes each figure's margins from its own tick
             labels, and a row whose empty right-hand slots carry none comes
             out with wider panels than the first.
+        group_column: Which column makes a sub-panel. ``"candidate"`` is one
+            clade's row of several mutations, which is
+            `fig:within_clade_shifts`. ``"cluster"`` is one mutation's row of
+            several clades, which is `fig:l455f`'s panel B.
+
+            **It has to be a parameter rather than a relabelled column.**
+            Handing this function four clades' rows for one candidate under
+            the default draws *one* sub-panel with eight x positions,
+            alternating between the two backgrounds -- and the two-background
+            check below does not catch it, because the backgrounds are named
+            by residue and all four clades name the same pair. A silent wrong
+            picture is what the argument exists to prevent.
+        value_label: The value axis' label. ``None`` keeps
+            ``f"fitness effect in\nclade {clade} subset"``, which names the
+            one clade every sub-panel of the row belongs to. A row whose
+            sub-panels are *different* clades has no such clade and must pass
+            its own.
+        x_gloss: The second line of the x label, under
+            :data:`BACKGROUND_X_TITLE`. The default names the two sides as
+            clade-founder against derived identities, which is what a
+            frequency-derived split is; a split specified by hand at one site
+            is not that, and says so instead.
 
     Returns:
         The row, as a matplotlib figure, ordered left to right by decreasing
@@ -1884,6 +1909,12 @@ def background_panel(
     if missing:
         raise KeyError(f"background_panel needs column(s) {missing}.")
 
+    if group_column not in frame.columns:
+        raise KeyError(
+            f"background_panel groups sub-panels by {group_column!r}, which is "
+            f"not a column of the frame. Columns are {sorted(frame.columns)}."
+        )
+
     order = (
         frame.sort_values("background_order")["background"].drop_duplicates().tolist()
     )
@@ -1893,21 +1924,39 @@ def background_panel(
             f"draws a contrast, so a third would be plotted with nothing "
             f"saying which pair the slope belongs to."
         )
+    # Exactly two rows per sub-panel, which the check above does not
+    # establish. It counts distinct background *names* over the whole frame,
+    # and the names here are residues -- so a frame holding four clades under
+    # one `candidate` still shows two of them, and the sub-panel is then drawn
+    # as a single line through eight points alternating between the two
+    # backgrounds. That is the wrong picture, and nothing about it looks
+    # wrong, which is what makes this worth a line of code: a sub-panel draws
+    # one contrast, so it is two points.
+    sizes = frame.groupby(group_column).size()
+    wrong = {str(member): int(n) for member, n in sizes.items() if n != 2}
+    if wrong:
+        raise ValueError(
+            f"{clade}: grouping by {group_column!r} gives {wrong} rows per "
+            f"sub-panel, not 2. A sub-panel draws one contrast between two "
+            f"backgrounds. More than two rows usually means the frame holds "
+            f"several groups of another column -- pass that column as "
+            f"`group_column`."
+        )
 
     # Steepest first, measured on counts rather than on the DASM: counts is
     # the observation the model is being checked against, so the order is set
     # by the data and not by the thing under test.
-    def shift_of(candidate: str) -> float:
-        part = frame[frame["candidate"] == candidate].sort_values("background_order")
+    def shift_of(member: str) -> float:
+        part = frame[frame[group_column] == member].sort_values("background_order")
         return abs(
             float(part.iloc[-1]["counts_effect"]) - float(part.iloc[0]["counts_effect"])
         )
 
-    members = sorted(frame["candidate"].unique(), key=shift_of, reverse=True)
+    members = sorted(frame[group_column].unique(), key=shift_of, reverse=True)
     if len(members) > columns - 1:
         raise ValueError(
-            f"{clade} has {len(members)} candidates and the row is {columns} "
-            f"slots wide, which leaves no slot for the legend."
+            f"{clade} has {len(members)} {group_column} groups and the row is "
+            f"{columns} slots wide, which leaves no slot for the legend."
         )
 
     figure, axes = plt.subplots(
@@ -1923,9 +1972,9 @@ def background_panel(
     for empty in axes[0][len(members) :]:
         empty.set_axis_off()
 
-    for slot, candidate in enumerate(members):
+    for slot, member in enumerate(members):
         axis = axes[0][slot]
-        part = frame[frame["candidate"] == candidate].sort_values("background_order")
+        part = frame[frame[group_column] == member].sort_values("background_order")
         x = list(range(len(part)))
         for label, column, colour, marker in BACKGROUND_SERIES:
             axis.plot(
@@ -1954,7 +2003,7 @@ def background_panel(
         # "in clade 20B" would be the same five words on every one of them --
         # and on a two-candidate row they are wide enough to collide. The
         # clade is on the value-axis label instead, once.
-        axis.set_title(candidate, fontsize=BACKGROUND_FONT_PT, fontweight="bold")
+        axis.set_title(member, fontsize=BACKGROUND_FONT_PT, fontweight="bold")
         axis.tick_params(axis="y", labelsize=BACKGROUND_FONT_PT)
         # On every sub-panel, not only the one carrying the ticks: the grid is
         # how a reader carries a level across a row, and `sharey` hides the
@@ -1972,7 +2021,7 @@ def background_panel(
     # names what membership requires rather than the parent's whole
     # background.
     placed_xlabel = figure.supxlabel(
-        f"{BACKGROUND_X_TITLE}\n{BACKGROUND_X_GLOSS}",
+        f"{BACKGROUND_X_TITLE}\n{x_gloss}",
         fontsize=BACKGROUND_FONT_PT,
         fontweight="bold",
         ma="center",
@@ -1986,7 +2035,7 @@ def background_panel(
     # default, which for a vertical label means the lines align along their
     # lower edge and the shorter one hangs off the top.
     placed_ylabel = figure.supylabel(
-        f"fitness effect in\nclade {clade} subset",
+        value_label if value_label is not None else f"fitness effect in\nclade {clade} subset",
         fontsize=BACKGROUND_FONT_PT,
         fontweight="bold",
         ma="center",
