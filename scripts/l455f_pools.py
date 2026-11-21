@@ -238,7 +238,12 @@ def derived_pool_only(
         aa_site=site,
         mutant_aa=mutant,
     )
-    cells = join_dasm_effects(cells, {spec.name: average.log_sf})
+    cells = join_dasm_effects(
+        cells,
+        {spec.name: average.log_sf},
+        # As the paired clades are measured; see `clade_counts(spread=True)`.
+        spread_by_pool={spec.name: average.spread},
+    )
     cells.insert(0, "candidate", L455F_MUTATION)
     cells["background"] = background_label(SPLIT_DERIVED)
 
@@ -371,6 +376,10 @@ def main() -> None:
             permutations=args.permutations,
             chunk_rows=PCP_CHUNK_ROWS,
             max_chunks=args.max_chunks,
+            # The whiskers the panel draws: how far the model's estimate moves
+            # between the parents of one pool, at the weight-weighted 5th and
+            # 95th percentiles.
+            spread=True,
         )
         # Both frames already carry the clade as `cluster` -- `pool_cell_table`
         # is handed it and `shift_table` keys on it -- so nothing is inserted

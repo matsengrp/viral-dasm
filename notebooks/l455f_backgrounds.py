@@ -54,6 +54,13 @@ def _(mo):
     an expected 0.06, which is below the cutoff the rest of the figure is
     drawn at.
 
+    **The whiskers.** The purple triangle is the pool average, and the
+    whisker on it is the 5th to 95th percentile of the same haplotypes'
+    effects under the same weights -- how far the model's estimate moves
+    between the parents of one pool. It is *not* an uncertainty: it does not
+    shrink as the pool grows, and a pool of a thousand parents that agree
+    will show a shorter whisker than a pool of fifty that do not.
+
     **Both estimates, and what makes them comparable.** The counts estimate is
     `log(actual / expected)` over the branches in that pool. The DASM estimate
     is the pool average: the mean log selection factor over the distinct
@@ -153,19 +160,41 @@ def _(CELLS_PATH, SELECTION, SHIFTS_PATH, mo, panels, pd, spec):
     # the derived residue and so has no founder-side pool to measure. The row
     # is added **here and not by the producer**: the pools file records what
     # was measured, and a row of NaNs is a drawing instruction rather than a
-    # measurement. `n.a.` rather than `F456` because the distinction is the
-    # point -- this clade has no 456F background, as against one that was
-    # measured and came out thin.
+    # measurement.
+    #
+    # The tick keeps the background's name, and `n.a.` is written inside the
+    # plot instead (`absent_label` below). Naming the tick `n.a.` hid what the
+    # sub-panel is missing: the reader could see that something was absent but
+    # not that it was the F456 side, which is the comparison every other
+    # sub-panel is making. The label is taken from the clades that do have
+    # that pool rather than spelled again here.
     ONE_POOL = [
         clade
         for clade, n in FOCAL.groupby("cluster").size().items()
         if n == 1
     ]
     if ONE_POOL:
+        _founder_labels = sorted(
+            FOCAL.loc[FOCAL["background_order"] == 0, "background"].dropna().unique()
+        )
+        if len(_founder_labels) != 1:
+            raise ValueError(
+                f"the drawn clades name their founder-side pool "
+                f"{_founder_labels}; one name is needed for the tick the "
+                f"one-pool clade borrows."
+            )
         _placeholder = FOCAL[FOCAL["cluster"].isin(ONE_POOL)].copy()
-        _placeholder["background"] = "n.a."
+        _placeholder["background"] = _founder_labels[0]
         _placeholder["background_order"] = 0
-        for _column in ("counts_effect", "dasm_effect", "se", "actual", "expected"):
+        for _column in (
+            "counts_effect",
+            "dasm_effect",
+            "dasm_low",
+            "dasm_high",
+            "se",
+            "actual",
+            "expected",
+        ):
             _placeholder[_column] = float("nan")
         FOCAL = pd.concat([FOCAL, _placeholder], ignore_index=True)
 
@@ -204,7 +233,11 @@ def _(CELLS_PATH, SELECTION, SHIFTS_PATH, mo, panels, pd, spec):
 def _(DRAWN, FOCAL, SELECTION, charts, mo, panels, spec):
     # One y domain across every sub-panel, so a steep line means a large shift
     # rather than a narrow axis -- the claim the panel makes.
-    _y_domain = charts.background_y_domain(FOCAL)
+    # The whiskers' ends as well as the points, so an interval reaching past
+    # its dot is drawn whole rather than clipped at the axis.
+    _y_domain = charts.background_y_domain(
+        FOCAL, extra_columns=("dasm_low", "dasm_high")
+    )
 
     # One slot per clade, plus one for the legend, exactly as a background row
     # is sized in `fig:within_clade_shifts`. There is only one row here, so
@@ -237,6 +270,14 @@ def _(DRAWN, FOCAL, SELECTION, charts, mo, panels, spec):
         # diameter in points, so a factor of two here is a factor of two on
         # the page.
         marker_size=14,
+        # The spread of the DASM's estimate over the pool's own parent
+        # haplotypes, weighted as the pool average is. Only the DASM side has
+        # one: the counts estimate is a ratio of sums over the whole pool and
+        # has no per-parent value to spread.
+        spread_columns={"DASM": ("dasm_low", "dasm_high")},
+        # Written at the F456 position of the one-pool clade, just above the
+        # floor of the shared axis.
+        absent_label="n.a.",
         # One line. The two-line form exists because
         # `fig:within_clade_shifts`' label names a clade as well as a
         # quantity and is too long for its panels; this one is short enough
@@ -269,6 +310,8 @@ def _(DRAWN, FOCAL, SELECTION, charts, mo, panels, spec):
                 "counts_effect",
                 "se",
                 "dasm_effect",
+                "dasm_low",
+                "dasm_high",
                 "p_label",
             ]
         ].rename(columns={"cluster": "clade"}),

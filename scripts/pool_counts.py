@@ -194,6 +194,7 @@ def clade_counts(
     permutations: int,
     chunk_rows: int,
     max_chunks: int | None = None,
+    spread: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """One clade's cell table, shift table and summary.
 
@@ -201,6 +202,14 @@ def clade_counts(
     :func:`tally_pools` serves every spec at once and :func:`tally_pcps` every
     candidate at once. The second pass exists because the point estimate sums
     the branches away and the randomization test has to keep them apart.
+
+    ``spread`` adds ``dasm_low`` and ``dasm_high`` to the cell table, the
+    weighted quantiles of :data:`within_clade_pools.POOL_SPREAD_QUANTILES`
+    over the pool's own haplotypes. Off by default, and asked for by
+    `fig:l455f` alone: the pool average is what every caller here plots, and
+    the interval around it is a second quantity -- how much the model's
+    estimate moves between the parents of one pool -- that only a panel
+    drawing whiskers has a use for.
     """
     founder_aa = founder_aa_sequence(clade, GENE)
     annotations = load_annotations(annotations_path, [clade], GENE)
@@ -264,7 +273,13 @@ def clade_counts(
             for spec in (pool0, pool1)
         }
         cells = join_dasm_effects(
-            cells, {name: value.log_sf for name, value in averages.items()}
+            cells,
+            {name: value.log_sf for name, value in averages.items()},
+            spread_by_pool=(
+                {name: value.spread for name, value in averages.items()}
+                if spread
+                else None
+            ),
         )
         cells.insert(0, "candidate", mutation)
         cells["background"] = cells["pool_name"].map(

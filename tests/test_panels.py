@@ -2045,14 +2045,98 @@ def test_the_background_row_draws_the_members_it_is_given():
         )
 
 
+def test_the_spread_whisker_is_drawn_only_where_there_is_one():
+    """`fig:l455f`'s whiskers: on the DASM series, and not on an empty pool.
+
+    A whisker is two line collections -- the stem, and its two caps in one
+    call -- so counting them separates "drawn" from "drawn at zero height",
+    which is what a pool whose parents agree would look like. The unmeasured
+    background has NaN ends and has to draw none at all: a whisker there
+    would be a bounded interval on a pool that was never measured.
+    """
+    import matplotlib.pyplot as plt
+
+    import panel_charts as charts
+
+    frame = pd.DataFrame(
+        {
+            "cluster": ["22F", "22F", "23F", "23F"],
+            "candidate": ["L455F"] * 4,
+            "background": ["F456", "L456", "n.a.", "L456"],
+            "background_order": [0, 1, 0, 1],
+            "counts_effect": [0.1, 3.0, float("nan"), 3.4],
+            "dasm_effect": [0.3, 2.7, float("nan"), 3.7],
+            "dasm_low": [0.2, 2.6, float("nan"), 3.4],
+            "dasm_high": [0.5, 2.8, float("nan"), 3.9],
+        }
+    )
+    kwargs = dict(
+        y_domain=(-1.0, 4.5),
+        columns=3,
+        group_column="cluster",
+        members=[("22F", "22F"), ("23F", "23F")],
+    )
+    plain = charts.background_panel(frame, "L455F", **kwargs)
+    plain_counts = [len(axis.collections) for axis in plain.axes if axis.get_title()]
+    plt.close(plain)
+
+    whiskered = charts.background_panel(
+        frame, "L455F", spread_columns={"DASM": ("dasm_low", "dasm_high")}, **kwargs
+    )
+    counts = [len(axis.collections) for axis in whiskered.axes if axis.get_title()]
+    plt.close(whiskered)
+
+    assert plain_counts == [0, 0], (
+        f"the panel already draws {plain_counts} collections without being "
+        f"asked for whiskers, so this test counts something else."
+    )
+    assert counts == [4, 2], (
+        f"collections per sub-panel are {counts}; 22F has two measured pools "
+        f"and 23F one, at two collections each."
+    )
+
+    with pytest.raises(KeyError, match="does not draw"):
+        charts.background_panel(
+            frame, "L455F", spread_columns={"counts!": ("dasm_low", "dasm_high")}, **kwargs
+        )
+    with pytest.raises(KeyError, match="interval column"):
+        charts.background_panel(
+            frame, "L455F", spread_columns={"DASM": ("nope", "dasm_high")}, **kwargs
+        )
+
+
+def test_the_y_domain_contains_the_whiskers_it_is_shown():
+    """An interval reaching past its dot still has to fit on the axis."""
+    import panel_charts as charts
+
+    frame = pd.DataFrame(
+        {
+            "cluster": ["22F", "22F"],
+            "candidate": ["L455F"] * 2,
+            "background": ["F456", "L456"],
+            "background_order": [0, 1],
+            "counts_effect": [0.1, 3.0],
+            "dasm_effect": [0.3, 2.7],
+            "dasm_low": [0.2, 2.6],
+            "dasm_high": [0.5, 3.9],
+        }
+    )
+    narrow = charts.background_y_domain(frame)
+    wide = charts.background_y_domain(frame, extra_columns=("dasm_low", "dasm_high"))
+    assert narrow[1] < 3.9, "the points alone already reach the whisker's top."
+    assert wide[1] > 3.9, f"the domain {wide} clips a whisker ending at 3.9."
+
+
 def test_a_background_with_nothing_measured_is_a_tick_and_not_a_third_pool():
     """23F's case: a named x position with no point behind it.
 
     Its founder already carries 456L, so there is no F456 subset of that
     clade to measure -- which is different from one that was measured and
-    came out thin, and the panel says so by naming the tick `n.a.`. That
-    label must not read as a third background: the two-background check
-    counts the backgrounds that carry a value.
+    came out thin. The tick goes on naming the background, so that what is
+    missing is legible as the F456 side rather than as an anonymous gap, and
+    ``absent_label`` writes the note inside the axes. A row carrying no value
+    must not reach the two-background check either way: that check counts the
+    backgrounds that carry a value.
     """
     import matplotlib
 
@@ -2065,7 +2149,7 @@ def test_a_background_with_nothing_measured_is_a_tick_and_not_a_third_pool():
         {
             "cluster": ["22F", "22F", "23F", "23F"],
             "candidate": ["L455F"] * 4,
-            "background": ["F456", "L456", "n.a.", "L456"],
+            "background": ["F456", "L456", "F456", "L456"],
             "background_order": [0, 1, 0, 1],
             "counts_effect": [0.1, 3.0, float("nan"), 3.2],
             "dasm_effect": [0.3, 2.8, float("nan"), 3.8],
@@ -2078,18 +2162,46 @@ def test_a_background_with_nothing_measured_is_a_tick_and_not_a_third_pool():
         columns=3,
         group_column="cluster",
         members=[("22F", "22F"), ("23F", "23F")],
+        absent_label="n.a.",
     )
     titled = [axis for axis in figure.axes if axis.get_title()]
     labels = {
         axis.get_title(): [text.get_text() for text in axis.get_xticklabels()]
         for axis in titled
     }
+    notes = {
+        axis.get_title(): [text.get_text() for text in axis.texts] for axis in titled
+    }
+    series_labels = {label for label, _, _, _ in charts.BACKGROUND_SERIES}
+    lines = {
+        axis.get_title(): [
+            line.get_ydata()
+            for line in axis.lines
+            if line.get_label() in series_labels
+        ]
+        for axis in titled
+    }
     plt.close(figure)
-    assert labels["23F"] == ["n.a.", "L456"], (
-        f"23F's ticks are {labels['23F']}; the unmeasured side must keep its "
-        f"own name rather than borrow the other clades'."
+    assert labels["23F"] == ["F456", "L456"], (
+        f"23F's ticks are {labels['23F']}; the side it does not have is still "
+        f"the F456 side, and the tick is what says so."
     )
     assert labels["22F"] == ["F456", "L456"]
+    assert notes["23F"] == ["n.a."], (
+        f"23F's in-plot text is {notes['23F']}; the clade with no F456 pool "
+        f"is the one that needs the note."
+    )
+    assert notes["22F"] == [], (
+        f"22F carries a note ({notes['22F']}) although both its pools were "
+        f"measured, so the note does not mean what it says."
+    )
+    # And neither series puts a point at the F456 position of 23F, which
+    # would be a measurement of a pool that does not exist. The zero rule is
+    # excluded above; it is drawn across every sub-panel.
+    assert all(numpy.isnan(series[0]) for series in lines["23F"]), (
+        f"23F's series start at {[series[0] for series in lines['23F']]}; the "
+        f"unmeasured side must stay empty."
+    )
 
 
 def test_a_third_measured_background_is_still_refused():

@@ -1785,6 +1785,17 @@ BACKGROUND_SERIES = (
     ("DASM", "dasm_effect", DASM_PURPLE, "^"),
 )
 
+#: Where :func:`background_panel` writes its ``absent_label``, as a fraction
+#: of the value axis above its floor. Clear of the axis line, and low enough
+#: that the note cannot be mistaken for a point.
+BACKGROUND_ABSENT_LIFT = 0.04
+
+#: Half the width of the cap on a spread whisker, in x-axis units -- the x
+#: positions are 0 and 1, so this is a fourteenth of the gap between the two
+#: backgrounds. Wide enough to read as a cap rather than as a tick of the
+#: line, narrow enough that two pools' caps cannot meet.
+BACKGROUND_SPREAD_CAP = 0.07
+
 #: What the x axis of a row is called, and the gloss under it saying which
 #: side is which. Two strings rather than one, because they are drawn at two
 #: sizes and two weights; see :func:`background_panel`.
@@ -1797,7 +1808,9 @@ def _em_in() -> float:
     return BACKGROUND_FONT_PT / 72.0
 
 
-def background_y_domain(frame: pd.DataFrame) -> tuple[float, float]:
+def background_y_domain(
+    frame: pd.DataFrame, *, extra_columns: Sequence[str] = ()
+) -> tuple[float, float]:
     """The value axis every sub-panel of every background row shares.
 
     One domain across all three clades, so a steep line means a large shift
@@ -1810,12 +1823,19 @@ def background_y_domain(frame: pd.DataFrame) -> tuple[float, float]:
 
     Args:
         frame: Every row that will be drawn, by every clade.
+        extra_columns: Further columns the axis has to contain -- the ends of
+            a spread whisker, which can reach past the points it belongs to.
+            A domain that does not see them clips the whisker at the axis and
+            draws a bounded interval as an open one.
 
     Returns:
         ``(low, high)``, the data range padded by :data:`BACKGROUND_FOOTROOM`
         below and :data:`BACKGROUND_HEADROOM` above.
     """
-    columns = [column for _, column, _, _ in BACKGROUND_SERIES]
+    columns = [column for _, column, _, _ in BACKGROUND_SERIES] + list(extra_columns)
+    missing = sorted(set(columns) - set(frame.columns))
+    if missing:
+        raise KeyError(f"background_y_domain was asked to scale against {missing}.")
     drawn = frame[columns].to_numpy(dtype=float)
     drawn = drawn[np.isfinite(drawn)]
     if drawn.size == 0:
@@ -1838,6 +1858,8 @@ def background_panel(
     members: Sequence[tuple[str, str]] | None = None,
     series_labels: Mapping[str, str] | None = None,
     marker_size: float = 7,
+    spread_columns: Mapping[str, tuple[str, str]] | None = None,
+    absent_label: str | None = None,
     value_label: str | None = None,
     x_gloss: str = BACKGROUND_X_GLOSS,
 ) -> matplotlib.figure.Figure:
@@ -1914,6 +1936,22 @@ def background_panel(
             so a figure wanting its two renderers' dots to match has to
             convert between the two conventions rather than pass one number
             to both.
+        spread_columns: ``{series label: (low column, high column)}``, drawn
+            as a capped vertical whisker under that series' marker. For the
+            DASM series this is the spread of the model's estimate over the
+            parent haplotypes of one pool, weighted as the pool average is.
+            It is **not** an uncertainty: it does not shrink as the pool
+            grows, so a caption that leaves it unexplained will be read as a
+            confidence interval. A series named here whose columns are not in
+            the frame raises, and a row whose ends are NaN is drawn as a bare
+            marker -- which is what an unmeasured background needs.
+        absent_label: What to write inside the axes at a background whose
+            every series is NaN -- a pool that does not exist rather than one
+            that came out thin. Written in the plot rather than on the tick so
+            that the tick can go on naming the background, which is what makes
+            the gap legible: the reader sees the position the pool would have
+            held, and the note saying there is nothing to put there. ``None``
+            writes nothing.
         value_label: The value axis' label. ``None`` keeps
             ``f"fitness effect in\nclade {clade} subset"``, which names the
             one clade every sub-panel of the row belongs to. A row whose
@@ -1943,6 +1981,20 @@ def background_panel(
             f"background_panel groups sub-panels by {group_column!r}, which is "
             f"not a column of the frame. Columns are {sorted(frame.columns)}."
         )
+
+    intervals = dict(spread_columns or {})
+    known = {label for label, _, _, _ in BACKGROUND_SERIES}
+    unknown = sorted(set(intervals) - known)
+    if unknown:
+        raise KeyError(
+            f"spread_columns names series {unknown}, which this panel does not "
+            f"draw. Its series are {sorted(known)}."
+        )
+    absent = sorted(
+        {column for pair in intervals.values() for column in pair} - set(frame.columns)
+    )
+    if absent:
+        raise KeyError(f"background_panel needs interval column(s) {absent}.")
 
     # Over the rows that carry a value, not over every row. A sub-panel may
     # declare a background it has no measurement for -- `fig:l455f`'s 23F,
@@ -2034,6 +2086,29 @@ def background_panel(
         part = frame[frame[group_column] == member].sort_values("background_order")
         x = list(range(len(part)))
         for label, column, colour, marker in BACKGROUND_SERIES:
+            # Under the markers, so a whisker shorter than the dot is hidden
+            # by it rather than drawn over it: the dot is the estimate and the
+            # whisker is context for it.
+            if label in intervals:
+                low_column, high_column = intervals[label]
+                for position, low, high in zip(
+                    x,
+                    part[low_column].to_numpy(dtype=float),
+                    part[high_column].to_numpy(dtype=float),
+                ):
+                    if not (np.isfinite(low) and np.isfinite(high)):
+                        continue
+                    axis.vlines(
+                        position, low, high, color=colour, linewidth=1.2, zorder=2
+                    )
+                    axis.hlines(
+                        [low, high],
+                        position - BACKGROUND_SPREAD_CAP,
+                        position + BACKGROUND_SPREAD_CAP,
+                        color=colour,
+                        linewidth=1.2,
+                        zorder=2,
+                    )
             axis.plot(
                 x,
                 part[column],
@@ -2044,6 +2119,25 @@ def background_panel(
                 label=(series_labels or {}).get(label, label),
                 zorder=3,
             )
+        if absent_label is not None:
+            # Just above the floor of the shared domain rather than above the
+            # sub-panel's own data: a note about a pool that does not exist
+            # should not move when a neighbouring clade's points do.
+            low, high = y_domain
+            for position, missing in zip(
+                x, part[value_columns].isna().all(axis=1).tolist()
+            ):
+                if missing:
+                    axis.text(
+                        position,
+                        low + BACKGROUND_ABSENT_LIFT * (high - low),
+                        absent_label,
+                        ha="center",
+                        va="bottom",
+                        fontsize=BACKGROUND_FONT_PT,
+                        color="#555555",
+                        zorder=3,
+                    )
         axis.axhline(0.0, color="#cccccc", linewidth=1, zorder=1)
         # No p-value above the mutation. `rule pool_counts` still computes the
         # randomization test and still writes it to `pool_shifts.parquet` and

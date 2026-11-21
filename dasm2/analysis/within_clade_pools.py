@@ -866,6 +866,62 @@ def substitution_key(aa_sequence: str, founder_aa: str) -> str:
     )
 
 
+#: Where :class:`PoolAverage` reports a pool's spread, as fractions of its
+#: synonymous weight. The 5th and 95th rather than the quartiles because a
+#: pool's haplotypes are not spread evenly through its range: in every pool
+#: `fig:l455f` draws, the middle half of the weight falls within a few
+#: hundredths of the median, so quartiles would report a spread of zero for a
+#: pool that does hold a handful of genuinely different parents.
+POOL_SPREAD_QUANTILES: tuple[float, ...] = (0.05, 0.95)
+
+
+def weighted_quantiles(
+    weights: Sequence[float],
+    values: Sequence[float],
+    quantiles: Sequence[float] = POOL_SPREAD_QUANTILES,
+) -> tuple[float, ...]:
+    """Quantiles of ``values`` under ``weights``, by the inverse-CDF rule.
+
+    The returned numbers are **observed values**, not interpolations between
+    them: the q-th quantile is the smallest value whose cumulative weight
+    reaches a q fraction of the total. A pool is a set of parent haplotypes
+    each seen on some number of branches, so this reads as "the effect on the
+    parent at the q-th branch, walking the pool's branches in order of
+    effect", which is what a spread over a pool of branches means.
+
+    Interpolating would invent an effect no haplotype has, which matters here
+    because the distributions are spikes: one haplotype can carry most of a
+    pool's weight, and both ends of the interval then have to be able to come
+    out at exactly its effect.
+    """
+    if len(weights) != len(values):
+        raise ValueError(
+            f"{len(weights)} weights against {len(values)} values; they are "
+            f"haplotype-wise and have to line up."
+        )
+    if not len(values):
+        raise ValueError("no haplotypes, so the pool has no spread to report.")
+    w = np.asarray(weights, dtype=float)
+    v = np.asarray(values, dtype=float)
+    if (w < 0).any():
+        raise ValueError("a negative weight; weights are event counts.")
+    total = float(w.sum())
+    if total <= 0:
+        raise ValueError(
+            "the weights sum to zero, so there is no distribution to take "
+            "quantiles of."
+        )
+    order = np.argsort(v, kind="stable")
+    v, cumulative = v[order], np.cumsum(w[order])
+    # `side="left"` so a quantile landing exactly on a haplotype's cumulative
+    # weight returns that haplotype rather than the next one, and the clip
+    # catches q = 1 plus floating-point drift in the sum.
+    return tuple(
+        float(v[min(int(np.searchsorted(cumulative, q * total, side="left")), len(v) - 1)])
+        for q in quantiles
+    )
+
+
 @dataclass(frozen=True)
 class PoolAverage:
     """The expected-count-weighted mean effect over a pool's own haplotypes.
@@ -880,12 +936,18 @@ class PoolAverage:
             synonymous event. They have no fitted evolutionary time, so they
             carry no weight; reported because a pool where most haplotypes land
             here is being represented by a handful of parents.
+        spread: the per-haplotype effects at :data:`POOL_SPREAD_QUANTILES`,
+            under the same weights the average uses. How much the model's
+            estimate moves between the parents of one pool, which is a
+            different quantity from how uncertain the average is -- it does
+            not shrink as the pool grows.
     """
 
     log_sf: float
     n_haplotypes: int
     synonymous_weight: float
     zero_weight_haplotypes: tuple[str, ...]
+    spread: tuple[float, ...]
 
 
 def pool_average_log_sf(
@@ -970,6 +1032,15 @@ def pool_average_log_sf(
         n_haplotypes=len(keys),
         synonymous_weight=float(sum(carrying.values())),
         zero_weight_haplotypes=tuple(sorted(all_keys - set(carrying))),
+        # The same weights and the same haplotypes the average is taken over,
+        # so the interval and the point are one population. Zero-weight
+        # haplotypes are outside both: a parent with no synonymous event has
+        # no fitted time, and giving it a say in the spread but not in the
+        # average would widen the interval with parents the dot never saw.
+        spread=weighted_quantiles(
+            [carrying[key] for key in keys],
+            [log_sf_by_haplotype[key] for key in keys],
+        ),
     )
 
 
@@ -978,6 +1049,7 @@ def join_dasm_effects(
     log_sf_by_pool: Mapping[str, float],
     *,
     pooled_by_pool: Mapping[str, float] | None = None,
+    spread_by_pool: Mapping[str, Sequence[float]] | None = None,
 ) -> pd.DataFrame:
     """Add the DASM columns to a cell table built by :func:`pool_cell_table`.
 
@@ -985,6 +1057,11 @@ def join_dasm_effects(
     score for this cell on a sequence that differs from the other pool's only by
     the marker. ``pooled_by_pool`` is the optional expected-count-weighted pool
     mean from :func:`pooled_log_sf`, which checks it.
+
+    ``spread_by_pool`` is :attr:`PoolAverage.spread`, one pair per pool,
+    landing as ``dasm_low`` and ``dasm_high``. Optional because it is drawn by
+    one figure: a caller that does not ask for it gets the columns its tables
+    already have.
     """
     missing = set(cells["pool_name"]) - set(log_sf_by_pool)
     if missing:
@@ -996,6 +1073,26 @@ def join_dasm_effects(
     out["dasm_effect"] = out["pool_name"].map(log_sf_by_pool).astype(float)
     if pooled_by_pool is not None:
         out["dasm_effect_pooled"] = out["pool_name"].map(pooled_by_pool).astype(float)
+    if spread_by_pool is not None:
+        missing = set(cells["pool_name"]) - set(spread_by_pool)
+        if missing:
+            raise ValueError(
+                f"no DASM spread for pool(s) {sorted(missing)}. A half-filled "
+                f"column would draw a whisker on some pools and not others, "
+                f"which reads as a pool whose parents agree."
+            )
+        widths = {len(pair) for pair in spread_by_pool.values()}
+        if widths != {2}:
+            raise ValueError(
+                f"spread_by_pool holds intervals of {sorted(widths)} values; "
+                f"two are needed, a low and a high."
+            )
+        out["dasm_low"] = out["pool_name"].map(
+            {pool: float(pair[0]) for pool, pair in spread_by_pool.items()}
+        )
+        out["dasm_high"] = out["pool_name"].map(
+            {pool: float(pair[1]) for pool, pair in spread_by_pool.items()}
+        )
     return out
 
 
