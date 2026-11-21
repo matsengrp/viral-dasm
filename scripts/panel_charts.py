@@ -1837,6 +1837,7 @@ def background_panel(
     group_column: str = "candidate",
     members: Sequence[tuple[str, str]] | None = None,
     series_labels: Mapping[str, str] | None = None,
+    marker_size: float = 7,
     value_label: str | None = None,
     x_gloss: str = BACKGROUND_X_GLOSS,
 ) -> matplotlib.figure.Figure:
@@ -1908,6 +1909,11 @@ def background_panel(
             the key rather than leaving it to the caption. Newlines are
             honoured, and a long key needs a slot of its own: see
             ``columns``.
+        marker_size: Marker size in points, matplotlib's ``markersize``. It
+            is a **diameter**, not an area, unlike Vega-Lite's ``size`` --
+            so a figure wanting its two renderers' dots to match has to
+            convert between the two conventions rather than pass one number
+            to both.
         value_label: The value axis' label. ``None`` keeps
             ``f"fitness effect in\nclade {clade} subset"``, which names the
             one clade every sub-panel of the row belongs to. A row whose
@@ -2033,7 +2039,7 @@ def background_panel(
                 part[column],
                 marker=marker,
                 color=colour,
-                markersize=7,
+                markersize=marker_size,
                 linewidth=1.4,
                 label=(series_labels or {}).get(label, label),
                 zorder=3,

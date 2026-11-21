@@ -233,6 +233,11 @@ def _(DRAWN, FOCAL, SELECTION, charts, mo, panels, spec):
         # model evaluated on each parent sequence. Saying it here puts it
         # where a reader meets the marks rather than in the caption.
         series_labels={"counts": "counts\n(separately applied\nto each subset)"},
+        # Twice the diameter of the published rows' dots. `markersize` is a
+        # diameter in points, so this is a factor of two directly; panel B's
+        # Vega-Lite `size` is an area and takes a factor of four for the same
+        # change.
+        marker_size=14,
         # One line. The two-line form exists because
         # `fig:within_clade_shifts`' label names a clade as well as a
         # quantity and is too long for its panels; this one is short enough

@@ -137,12 +137,25 @@ def _(PANEL_MODEL, SELECTION, TABLE_PATH, mo, panels, spec):
 
 @app.cell
 def _(LOOKUP, PANEL_MODEL, POOLED, SELECTION, SPEC, charts, mo, panels, spec):
+    # Panel B's type, which is not `PANEL_FONT_SIZE`.
+    #
+    # Measured on the two panels as written at 300 ppi, panel A's y-tick
+    # numerals are 49 px tall and panel B's are 53, so in absolute terms B's
+    # type was already the larger of the two -- `compose` solves one dpi for
+    # the whole page, so a pixel in either panel is the same size on paper.
+    # What differs is the share of the panel it occupies: panel B is 5,600 px
+    # wide against panel A's 4,833, so the same glyph reads as smaller
+    # against it, and that ratio is what a reader compares. This closes that
+    # gap and a little more.
+    _FONT = 20
     _chart = charts.mutation_lookup_line(
         LOOKUP,
         spec.L455F_MUTATION,
         clade_order=list(LOOKUP["clade"]),
         x_title="clade",
-        y_title="fitness effect",
+        # The same label panel A carries, so a reader crossing from one row
+        # to the other is reading one quantity rather than two.
+        y_title=f"fitness effect of {spec.L455F_MUTATION}",
         color_title="approach",
         # As in panel A, the key says what each approach was applied to:
         # here the counts approach is fit separately within each clade.
@@ -152,7 +165,15 @@ def _(LOOKUP, PANEL_MODEL, POOLED, SELECTION, SPEC, charts, mo, panels, spec):
         },
         series_colors=(charts.COUNTS_GREY, charts.DASM_PURPLE),
         series_shapes=("circle", "triangle"),
-        title=f"estimated per-clade fitness effect of {spec.L455F_MUTATION}",
+        # Twice the diameter of the default. Vega-Lite's `size` is an area in
+        # square pixels, so doubling the diameter is four times the default
+        # 80; panel A's matplotlib `markersize` is a diameter and takes a
+        # factor of two for the same change.
+        point_size=320,
+        # No title. The panel is lettered in the composed figure and its
+        # value axis now names the mutation, so a title would be a third
+        # place saying what the panel is about.
+        title="",
         reference_value=POOLED,
         # "the whole tree" is the shorthand `main.tex` already uses for this
         # quantity in `fig:dms`'s caption. What it actually sums over -- the
@@ -160,7 +181,7 @@ def _(LOOKUP, PANEL_MODEL, POOLED, SELECTION, SPEC, charts, mo, panels, spec):
         # every S455-founded clade is outside it -- is spelled out in
         # Methods, which is where that belongs.
         reference_label="counts (applied to the whole tree)",
-        reference_font_size=charts.PANEL_FONT_SIZE,
+        reference_font_size=_FONT,
         # **No shaded band**, for the reason `agreement_mutations.py` gives at
         # length: the interval is computed and carried into the tooltip and
         # the CSV, but drawing it widens the y domain to the thinnest clade's
@@ -177,18 +198,18 @@ def _(LOOKUP, PANEL_MODEL, POOLED, SELECTION, SPEC, charts, mo, panels, spec):
     # and the reference label cannot drift apart.
     _chart = (
         _chart.configure_axis(
-            labelFontSize=charts.PANEL_FONT_SIZE,
-            titleFontSize=charts.PANEL_FONT_SIZE,
+            labelFontSize=_FONT,
+            titleFontSize=_FONT,
         )
         .configure_legend(
-            labelFontSize=charts.PANEL_FONT_SIZE,
-            titleFontSize=charts.PANEL_FONT_SIZE,
+            labelFontSize=_FONT,
+            titleFontSize=_FONT,
             # No truncation. Vega-Lite clips a legend label at 160 px by
             # default, which turned this panel's counts key into
             # "counts (separatel...". 0 is Vega's "no limit".
             labelLimit=0,
         )
-        .configure_title(fontSize=charts.PANEL_FONT_SIZE)
+        .configure_title(fontSize=_FONT)
     )
     charts.save_panel(_chart, spec.L455F_LOOKUP_PANEL, selection=SELECTION)
     panels.write_panel_csv(

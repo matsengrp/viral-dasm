@@ -45,6 +45,7 @@ def mutation_lookup_line(
     extra_tooltips: Optional[dict[str, str]] = None,
     series_colors: tuple[str, str] = ("steelblue", "coral"),
     series_shapes: tuple[str, str] = ("circle", "circle"),
+    point_size: int = 80,
     reference_value: Optional[float] = None,
     reference_label: Optional[str] = None,
     reference_font_size: Optional[int] = None,
@@ -76,7 +77,9 @@ def mutation_lookup_line(
             ``delta_fitness`` and ``log_sf``. Missing keys keep the column
             name.
         title: Optional chart title, defaulting to
-            ``"Mutation <mutation> across clades"``.
+            ``"Mutation <mutation> across clades"``. Pass ``""`` for no title,
+            which is what a panel lettered in a composed figure wants when its
+            value axis already names the mutation.
         interval_columns: Optional ``(lower, upper)`` column names to shade as
             a grey band behind the series -- an uncertainty region for one of
             the two estimates. Rows missing either bound are skipped. A
@@ -99,6 +102,9 @@ def mutation_lookup_line(
             when the figure is printed in black and white, so a caller
             preparing a figure distinguishes the series twice. The default
             is a circle for both.
+        point_size: Point area in square pixels, Vega-Lite's own unit. It is
+            an **area**, so doubling the diameter a reader sees means
+            multiplying this by four.
         reference_value: Optional horizontal rule, for one estimate of the
             same quantity the series carry that is not per clade -- a
             tree-wide number against a per-clade series. Drawn **under** the
@@ -239,7 +245,7 @@ def mutation_lookup_line(
 
     line_chart = (
         alt.Chart(long)
-        .mark_line(point=alt.OverlayMarkDef(size=80))
+        .mark_line(point=alt.OverlayMarkDef(size=point_size))
         .encode(
             x=alt.X("clade:N", title=x_title, sort=sort_order),
             y=alt.Y("value:Q", title=y_title),
@@ -281,10 +287,16 @@ def mutation_lookup_line(
         + ([reference_text] if reference_text is not None else [])
         + [line_chart, zero_line]
     )
+    # `None` takes the default title; `""` sets no title at all, for a panel
+    # that is lettered in a composed figure and whose value axis already names
+    # the mutation. `title or default` could not express the second, since an
+    # empty string is falsy and fell through to the default.
+    chart_title = f"Mutation {mutation_str} across clades" if title is None else title
+    properties: dict[str, object] = {"width": width, "height": height}
+    if chart_title:
+        properties["title"] = chart_title
     # `alt.layer` is typed, unlike the `a + b` overloads used elsewhere here, so
     # its `.properties` is declared to return `LayerChart | FacetChart`.
     return alt.layer(*layers).properties(  # type: ignore[no-any-return, return-value]
-        width=width,
-        height=height,
-        title=title or f"Mutation {mutation_str} across clades",
+        **properties
     )
