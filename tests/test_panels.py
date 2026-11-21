@@ -13,6 +13,7 @@ is absent, and
 
 from __future__ import annotations
 
+import io
 import os
 import sys
 from pathlib import Path
@@ -1824,3 +1825,197 @@ def test_the_subsampling_clip_is_not_the_library_clip():
     assert panel_spec.SUBSAMPLING_CLIP_LOWER != CLIP_LOWER
     assert set(panel_spec.SUBSAMPLING_MODELS) <= set(MODELS)
     assert panel_spec.SUBSAMPLING_SCATTER_CLADE in panel_spec.SUBSAMPLING_LADDER_CLADES
+
+
+def test_the_l455f_letters_are_the_panels_its_rules_write():
+    """`fig:l455f`'s caption letters and its rules' outputs are one set.
+
+    Two spellings of the same two panels: ``L455F_PANELS`` is what the two
+    rules declare as outputs, ``L455F_PANEL_LETTERS`` is what the composition
+    reads, and ``L455F_FIGURE_ROWS`` is where they are placed on the page. A
+    stem in one and not the others is a panel that is drawn and never
+    composed, or a cell of the figure with nothing to put in it.
+    """
+    import panel_spec as spec
+
+    assert set(spec.L455F_PANEL_LETTERS.values()) == set(spec.L455F_PANELS), (
+        f"the composition reads {sorted(spec.L455F_PANEL_LETTERS.values())} "
+        f"and the rules write {sorted(spec.L455F_PANELS)}."
+    )
+    placed = [letter for row in spec.L455F_FIGURE_ROWS for letter in row]
+    assert sorted(placed) == sorted(spec.L455F_PANEL_LETTERS), (
+        f"the rows place {sorted(placed)} but the figure has panels "
+        f"{sorted(spec.L455F_PANEL_LETTERS)}."
+    )
+    assert len(placed) == len(set(placed)), (
+        f"a letter is placed twice: {placed}. The same panel would be drawn "
+        f"in two cells of the figure."
+    )
+
+
+def test_the_l455f_panel_stems_are_not_the_agreement_figure_s():
+    """`fig:l455f`'s panel A must not overwrite `fig:agreement`'s.
+
+    They are the same chart at a different mutation, so the stems are the one
+    thing keeping two tracked CSVs apart. Sharing one would leave whichever
+    rule ran second in possession of both figures' panel A.
+    """
+    import panel_spec as spec
+
+    assert not set(spec.L455F_PANELS) & set(
+        spec.MUTATION_PANELS + spec.LADDER_PANELS + spec.BACKGROUND_PANELS
+    ), (
+        f"{sorted(set(spec.L455F_PANELS) & set(spec.MUTATION_PANELS + spec.LADDER_PANELS + spec.BACKGROUND_PANELS))} "
+        f"is written by two rules into one path."
+    )
+
+
+def test_the_lookup_reference_rule_is_drawn_and_is_not_the_zero_rule():
+    """Panel A's clade-pooled rule: off by default, and told apart when on.
+
+    Two things in one test, because each is meaningless without the other.
+    The rule has to be *absent* unless asked for, or `fig:agreement`'s panel A
+    would acquire a horizontal line it was never drawn with. And when it is
+    asked for it has to be distinguishable from the zero rule beside it --
+    both are dashed horizontals, and two dashed grey horizontals on one panel
+    cannot be told apart.
+    """
+    import panel_charts as charts
+
+    frame = pd.DataFrame(
+        {
+            "clade": ["22F", "23A", "23F"],
+            "delta_fitness": [0.4, 0.5, 3.4],
+            "log_sf": [0.36, 0.52, 3.47],
+        }
+    )
+    plain = charts.mutation_lookup_line(frame, "L455F").to_dict()
+    assert _marks(plain) == {"line", "rule"}, (
+        f"the default panel drew {sorted(_marks(plain))}. `fig:agreement`'s "
+        f"panel A is drawn through this path and carries no reference line."
+    )
+
+    withrule = charts.mutation_lookup_line(
+        frame,
+        "L455F",
+        series_colors=(charts.COUNTS_GREY, charts.DASM_PURPLE),
+        reference_value=0.69,
+        reference_label="counts, clades pooled",
+    ).to_dict()
+    assert "text" in _marks(withrule), (
+        "the reference line is drawn without its label, so nothing on the "
+        "panel says what the line is."
+    )
+
+    rules = [
+        layer["mark"]
+        for layer in withrule["layer"]
+        if isinstance(layer.get("mark"), dict) and layer["mark"]["type"] == "rule"
+    ]
+    assert len(rules) == 2, f"expected the zero rule and the reference, got {rules}."
+    dashes = {tuple(mark.get("strokeDash", ())) for mark in rules}
+    assert len(dashes) == 2, (
+        f"both horizontals are dashed {dashes.pop()}. A reader cannot tell "
+        f"the clade-pooled estimate from zero."
+    )
+    colours = {mark.get("color") for mark in rules}
+    assert charts.COUNTS_GREY in colours, (
+        f"the reference is drawn in {colours}, and none of them is the counts "
+        f"series' colour. It is a counts quantity and has to read as one."
+    )
+
+
+def test_the_background_row_default_is_what_it_was_before_l455f():
+    """`fig:within_clade_shifts`' rows are untouched by `fig:l455f`'s needs.
+
+    ``background_panel`` grew three arguments so that panel B of `fig:l455f`
+    could group its sub-panels by clade, name its own value axis and gloss a
+    hand-specified split. Each defaults to what the published rows already
+    did, so passing them explicitly must draw the same figure as passing
+    nothing -- otherwise the three published rows moved.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    import panel_charts as charts
+
+    frame = pd.DataFrame(
+        {
+            "cluster": ["22D"] * 4,
+            "candidate": ["D574V", "D574V", "T19I", "T19I"],
+            "background": ["T346, T356", "R346, K356"] * 2,
+            "background_order": [0, 1, 0, 1],
+            "counts_effect": [-1.2, 0.9, -0.4, 0.3],
+            "dasm_effect": [-0.9, 0.7, -0.2, 0.1],
+        }
+    )
+    rendered = []
+    for kwargs in (
+        {},
+        {
+            "group_column": "candidate",
+            "value_label": None,
+            "x_gloss": charts.BACKGROUND_X_GLOSS,
+        },
+    ):
+        figure = charts.background_panel(
+            frame, "22D", y_domain=(-2.0, 2.0), columns=3, **kwargs
+        )
+        buffer = io.BytesIO()
+        figure.savefig(buffer, format="png", dpi=100)
+        rendered.append(buffer.getvalue())
+        plt.close(figure)
+    assert rendered[0] == rendered[1], (
+        "the new arguments at their defaults draw a different row from the "
+        "one the published figure is made of."
+    )
+
+
+def test_the_background_row_gloss_reaches_the_page():
+    """A caller's ``x_gloss`` is drawn, not merely measured.
+
+    The two-line x label is measured as one block and then split: the title
+    keeps the top and the gloss is re-drawn underneath. Drawing the module
+    constant there instead would put "clade-founder identities against
+    derived identities" under `fig:l455f`'s panel B -- which names a
+    hand-specified split as a frequency-derived one, in the one place on the
+    panel that says where the split came from.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    import panel_charts as charts
+
+    frame = pd.DataFrame(
+        {
+            "cluster": ["22F", "22F"],
+            "candidate": ["L455F", "L455F"],
+            "background": ["F456", "L456"],
+            "background_order": [0, 1],
+            "counts_effect": [0.4, 3.3],
+            "dasm_effect": [0.36, 3.1],
+        }
+    )
+    gloss = "(left: parents carrying F456; right: parents carrying L456)"
+    figure = charts.background_panel(
+        frame,
+        "L455F",
+        y_domain=(-1.0, 4.0),
+        columns=2,
+        group_column="cluster",
+        value_label="fitness effect of\nL455F",
+        x_gloss=gloss,
+    )
+    drawn = {text.get_text() for text in figure.texts}
+    plt.close(figure)
+    assert gloss in drawn, (
+        f"the caller's gloss is not on the panel; it carries {sorted(drawn)}."
+    )
+    assert charts.BACKGROUND_X_GLOSS not in drawn, (
+        "the default gloss was drawn over the caller's, which tells a reader "
+        "the split came from branch frequencies when it did not."
+    )

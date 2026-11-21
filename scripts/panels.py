@@ -177,6 +177,7 @@ from dasm2.analysis.viral_fitness_eval import (  # noqa: F401  (re-exported)
 from dasm2.analysis.within_clade_pools import (
     DEFAULT_PERMUTATIONS,
     ZERO_COUNT_PSEUDOCOUNT,
+    passes_evidence_gate,
 )
 from dasm2.io import read_fasta_first_sequence
 from dasm2.neutral.scov2_rates import GENE_NT_LENGTH

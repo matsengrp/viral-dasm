@@ -70,6 +70,13 @@ from panel_spec import (
     DEPTH_PANELS,
     EMERGENCE_CSV,
     ECDF_CLADES,
+    L455F_FIGURE_STEM,
+    L455F_HAPLOTYPE_TABLE,
+    L455F_PANELS,
+    L455F_PANEL_LETTERS,
+    L455F_POOL_CELLS,
+    L455F_POOL_SHIFTS,
+    L455F_POOL_SUMMARY,
     LADDER_ARM_PANELS,
     LADDER_PANELS,
     MUTATION_PANELS,
@@ -179,6 +186,10 @@ rule panels:
         panel_outputs(MUTATION_PANELS, DEFAULT_SELECTION),
         panel_outputs(LADDER_PANELS, DEFAULT_SELECTION),
         panel_outputs(SHIFT_ERROR_PANELS, DEFAULT_SELECTION, SUPPLEMENT_FORMATS),
+        # `fig:l455f`'s two panels. Named here for the reason the supplement
+        # above is: `rule figures` asks for the composed figure, and a panel
+        # nobody can ask for on its own is one that cannot be redrawn alone.
+        panel_outputs(L455F_PANELS, DEFAULT_SELECTION),
 
 
 rule subsampling:
@@ -1686,6 +1697,14 @@ rule figures:
             str(path)
             for path in composed_paths(DEFAULT_SELECTION, SHIFT_FIGURE_STEM)
         ],
+        # `fig:l455f`, and so its two panels. The published selection only,
+        # for `fig:within_clade_shifts`' reason: its expensive half is the
+        # haplotype scoring, which `fidelity` would repeat under two more
+        # checkpoints for a comparison no panel reads.
+        [
+            str(path)
+            for path in composed_paths(DEFAULT_SELECTION, L455F_FIGURE_STEM)
+        ],
         # `fig:subsampling`, and so its four panels. One panel set and no
         # selection to expand over: `SUBSAMPLING_SELECTION` is its directory.
         [
@@ -1749,4 +1768,227 @@ rule background_effects:
         " -- --cells {input.cells}"
         " --shifts {input.shifts}"
         " --selection {wildcards.selection}"
+        " > {log} 2>&1"
+
+
+rule l455f_pools:
+    """`fig:l455f` panel B's measurement: L455F on two backgrounds, per clade.
+
+    **Its own rule rather than rows in `rule pool_counts`', and only because
+    of the split.** Everything downstream of the pool definition is shared --
+    the script calls `pool_counts.clade_counts`, so the two estimates here are
+    computed exactly as every `fig:within_clade_shifts` cell is. What differs
+    is that the split is specified by hand, as site 456 and nothing else,
+    where that rule takes each clade's split from `clade_backgrounds.csv`.
+    Measured, not assumed: run unaided on these clades the chooser picks
+    S486P for 22F, and for 23A picks F456L but drags L455F itself in as a
+    co-traveller at 59% -- which puts the mutation under test inside the
+    background that defines the contrast.
+
+    Reaching that through `rule pool_counts` would mean widening
+    `CANDIDATE_CLADES` and `data/shift_candidates.csv`, which are
+    `fig:within_clade_shifts`' row set and subjects: three more clades there
+    is three more rows of that figure, and a fourth raises `IndexError` in
+    `SHIFT_PANEL_LETTERS` at module scope -- which is parse time for this
+    file.
+
+    **It scores, and it does not train.** The haplotype pass is inference
+    under the published checkpoint, on CPU: `rule score_haplotypes` explains
+    at length why a card is not worth holding for it, and the same arithmetic
+    applies to the smaller set here. The training marker and its guard are
+    declared for the reason that rule declares them -- a run that stopped
+    anywhere but the learning-rate floor must not reach a panel.
+
+    Its own haplotype table, not `rule score_haplotypes`': that rule's roster
+    is `CANDIDATE_CLADES` and its cells come from `shift_candidates.csv`,
+    neither of which carries these clades or this mutation, so there is no
+    cell there to read.
+    """
+    input:
+        script="scripts/l455f_pools.py",
+        pools_script="scripts/pool_counts.py",
+        haplotype_reader="scripts/clade_haplotypes.py",
+        scorer="scripts/score_haplotypes.py",
+        score_run="scripts/score_run.py",
+        founder_reader="scripts/founders.py",
+        runs="scripts/runs.py",
+        spec="scripts/panel_spec.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        pools="dasm2/analysis/within_clade_pools.py",
+        checkpoints="dasm2/serialization/checkpoints.py",
+        masking="dasm2/sequence/masking.py",
+        conversion="dasm2/sequence/conversion.py",
+        constants="dasm2/sequence/constants.py",
+        head_types="dasm2/heads/types.py",
+        core_base="dasm2/models/core/base.py",
+        factory="dasm2/models/factory.py",
+        io="dasm2/io.py",
+        scov2_rates="dasm2/neutral/scov2_rates.py",
+        dasm2_init="dasm2/__init__.py",
+        # The era partition this pipeline owns and both fitted rate tables it
+        # picks between, declared by hand for the reason `rule pool_counts`
+        # gives: `tests/test_rule_inputs.py` finds only literal
+        # `mat_pcp_path(...)` calls, and these are reached through
+        # `lib.master_table_path(era)`.
+        era_template="data/eras-pre-omicron-omicron.yaml",
+        rates_pre_omicron=str(mat_pcp_path("master_table_pre_omicron_file")),
+        rates_omicron=str(mat_pcp_path("master_table_omicron_file")),
+        annotations=str(mat_pcp_path("site_annotations_file")),
+        censored=str(mat_pcp_path("censored_mutations_file")),
+        censored_clades=str(mat_pcp_path("censored_clades_file")),
+        masked=str(mat_pcp_path("masked_nt_sites_file")),
+        pcps=str(corpus(ARM).source_pcp),
+        clade_founders=clade_founder_fastas,
+        done=f"{RUN_DIR}/{PUBLISHED_RUN}/training_complete.done",
+        run_guard=f"{ARTIFACT_ROOT}/run_guard/{PUBLISHED_RUN}.json",
+    output:
+        cells=str(L455F_POOL_CELLS),
+        shifts=str(L455F_POOL_SHIFTS),
+        summary=str(L455F_POOL_SUMMARY),
+        scores=str(L455F_HAPLOTYPE_TABLE),
+    log:
+        f"{ARTIFACT_ROOT}/logs/l455f_pools.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "python {input.script}"
+        " --pcp {input.pcps}"
+        " --cells {output.cells}"
+        " --shifts {output.shifts}"
+        " --summary {output.summary}"
+        " --haplotype-scores {output.scores}"
+        " > {log} 2>&1"
+
+
+rule l455f_lookup:
+    """`fig:l455f` panel A: L455F across the clades, from the scored table.
+
+    The same chart as `fig:agreement`'s panel A at a different mutation, and
+    its own stem rather than that one's: reusing it would overwrite the
+    tracked CSV the published figure is drawn from.
+    """
+    wildcard_constraints:
+        selection="|".join(SELECTIONS),
+    input:
+        panels="scripts/panels.py",
+        spec="scripts/panel_spec.py",
+        charts="scripts/panel_charts.py",
+        founder_reader="scripts/founders.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        analysis_charts="dasm2/analysis/charts.py",
+        analysis_viral="dasm2/analysis/viral.py",
+        analysis_eval="dasm2/analysis/viral_fitness_eval.py",
+        io="dasm2/io.py",
+        conversion="dasm2/sequence/conversion.py",
+        scov2_rates="dasm2/neutral/scov2_rates.py",
+        dasm2_init="dasm2/__init__.py",
+        notebook="notebooks/l455f_lookup.py",
+        table=SCORED_TABLE,
+        # `unobservable_founder_codons` asks every scored clade whether its
+        # founder differs from the reference at a tree-masked nucleotide, and
+        # this panel reads every clade. Plus the two files that predicate is
+        # built from.
+        clade_founders=clade_founder_fastas,
+        masked_nt_sites=str(mat_pcp_path("masked_nt_sites_file")),
+        reference=str(mat_pcp_path("reference_sequence_file")),
+    output:
+        html=f"{NOTEBOOK_DIR}/l455f_lookup_{{selection}}.html",
+        panels=panel_outputs([L455F_PANELS[0]], "{selection}"),
+    log:
+        f"{ARTIFACT_ROOT}/logs/l455f_lookup_{{selection}}.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "marimo export html {input.notebook} -o {output.html} --force"
+        " -- --table {input.table}"
+        " --selection {wildcards.selection}"
+        " > {log} 2>&1"
+
+
+rule l455f_backgrounds:
+    """`fig:l455f` panel B: one sub-panel per clade, two backgrounds each.
+
+    Its own rule rather than a cell of `rule l455f_pools`, which streams the
+    corpus twice per clade and scores a few thousand haplotypes: this reads
+    two small tables and draws, so the layout can be nudged and re-run in a
+    second instead of re-measuring every pool to move a panel.
+    """
+    wildcard_constraints:
+        selection="|".join(SELECTIONS),
+    input:
+        panels="scripts/panels.py",
+        spec="scripts/panel_spec.py",
+        charts="scripts/panel_charts.py",
+        founder_reader="scripts/founders.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        analysis_charts="dasm2/analysis/charts.py",
+        analysis_viral="dasm2/analysis/viral.py",
+        analysis_eval="dasm2/analysis/viral_fitness_eval.py",
+        pools="dasm2/analysis/within_clade_pools.py",
+        io="dasm2/io.py",
+        conversion="dasm2/sequence/conversion.py",
+        scov2_rates="dasm2/neutral/scov2_rates.py",
+        dasm2_init="dasm2/__init__.py",
+        notebook="notebooks/l455f_backgrounds.py",
+        cells=str(L455F_POOL_CELLS),
+        shifts=str(L455F_POOL_SHIFTS),
+        clade_founders=clade_founder_fastas,
+        masked_nt_sites=str(mat_pcp_path("masked_nt_sites_file")),
+        reference=str(mat_pcp_path("reference_sequence_file")),
+    output:
+        html=f"{NOTEBOOK_DIR}/l455f_backgrounds_{{selection}}.html",
+        panels=panel_outputs([L455F_PANELS[1]], "{selection}"),
+    log:
+        f"{ARTIFACT_ROOT}/logs/l455f_backgrounds_{{selection}}.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "marimo export html {input.notebook} -o {output.html} --force"
+        " -- --cells {input.cells}"
+        " --shifts {input.shifts}"
+        " --selection {wildcards.selection}"
+        " > {log} 2>&1"
+
+
+rule compose_l455f:
+    """`fig:l455f` itself, laid out from its two panels.
+
+    No scoring, no tallying and no table: it reads PNGs, the same split that
+    makes the other compositions cheap to re-lay-out.
+
+    The manuscript copy is not a declared output, for the reason
+    `rule compose_agreement` gives: `tex_figure_dir` points outside both this
+    repository and the artifact root, and snakemake deletes a job's declared
+    outputs when it fails -- so naming it would hand a failed layout the power
+    to delete the figure currently in the paper.
+    """
+    wildcard_constraints:
+        selection="|".join(SELECTIONS),
+    input:
+        layout="scripts/figure_layout.py",
+        spec="scripts/panel_spec.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        notebook="notebooks/l455f.py",
+        # The PNGs only: `compose` reads raster, and declaring the SVGs too
+        # would make this rule rerun on a vector copy it never opens.
+        panels=[
+            str(figure_dir("{selection}") / f"{stem}.png")
+            for stem in L455F_PANEL_LETTERS.values()
+        ],
+    output:
+        html=f"{NOTEBOOK_DIR}/l455f_{{selection}}.html",
+        figure=[
+            str(path) for path in composed_paths("{selection}", L455F_FIGURE_STEM)
+        ],
+    log:
+        f"{ARTIFACT_ROOT}/logs/compose_l455f_{{selection}}.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "marimo export html {input.notebook} -o {output.html} --force"
+        " -- --selection {wildcards.selection}"
         " > {log} 2>&1"

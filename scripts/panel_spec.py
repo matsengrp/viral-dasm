@@ -1162,9 +1162,9 @@ L455F_SITE = 455
 L455F_MARKER_SITE = 456
 L455F_MARKER_AA = "L"
 
-#: The clades the pools are measured over -- every XBB clade in the roster.
-#: Six measured, four drawn, and the two that drop out do so for reasons the
-#: panel can state rather than by being left off a list:
+#: The clades considered -- every XBB clade in the roster. Six considered,
+#: five measured and four drawn, and the two that drop out do so for
+#: reasons the panel can state rather than by being left off a list:
 #:
 #: * 23E fails the evidence gate, 6/5.36 actual-or-expected counts on its
 #:   456F pool and 1/0.063 on its 456L pool against
@@ -1188,6 +1188,14 @@ L455F_CLADES: tuple[str, ...] = ("22F", "23A", "23B", "23D", "23E", "23F")
 L455F_POOL_CELLS = POOL_DIR / "l455f_pool_cells.parquet"
 L455F_POOL_SHIFTS = POOL_DIR / "l455f_pool_shifts.parquet"
 L455F_POOL_SUMMARY = POOL_DIR / "l455f_pool_summary.json"
+
+#: The haplotypes this figure scores, and their selection factors. Its own
+#: table rather than :data:`HAPLOTYPE_TABLE`, which `rule score_haplotypes`
+#: writes over :data:`CANDIDATE_CLADES` and `shift_candidates.csv`: neither
+#: carries these clades or this mutation, so there is no cell here to read
+#: from there. Scoring is inference under the published checkpoint -- no
+#: training, and on CPU, no card.
+L455F_HAPLOTYPE_TABLE = SCORED_DIR / "l455f_haplotype_selection_factors.parquet"
 
 #: Panel stems. Its own, not :data:`MUTATION_PANELS`': panel A here is the
 #: same chart as `fig:agreement`'s panel A at a different mutation, and
@@ -1219,7 +1227,17 @@ L455F_PANEL_LETTERS: dict[str, str] = {
 #: `fig:within_clade_shifts`': two rows rather than three, and the top row is
 #: one wide panel rather than a scatter whose square aspect sets the height.
 L455F_BOX_IN: tuple[float, float] = (7.5, 7.0)
-L455F_FIGURE_SCALE = 1.0
+
+#: Shrink, so this figure's type matches the figures it sits among rather
+#: than the box it is allowed. `compose` solves one dpi from the pixels it is
+#: handed, so a figure of two wide panels resolves to a lower dpi -- and
+#: larger type on the page -- than one of six. At 1.0 this figure came out at
+#: 8.7 pt panel titles against `fig:agreement`'s 7.2 and
+#: `fig:within_clade_shifts`' 6.6, which is a fifth larger than its
+#: neighbours in a paper that prints them a page apart. 0.83 is 7.2/8.7,
+#: measured from those compositions rather than guessed, and it is a uniform
+#: shrink: the box, the margins and the gaps all move with it.
+L455F_FIGURE_SCALE = 0.83
 
 #: Panel A's own size, in Vega-Lite pixels. Not :data:`LOOKUP_PANEL_HEIGHT`
 #: and :data:`LOOKUP_PANEL_SCALE`, which are tuned so that `fig:agreement`'s

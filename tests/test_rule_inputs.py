@@ -115,6 +115,13 @@ ENTRY_POINTS = {
     "within_clade_outliers": "notebooks/within_clade_outliers.py",
     "outlier_ranking": "notebooks/outlier_ranking.py",
     "background_effects": "notebooks/background_effects.py",
+    # `fig:l455f`. Its measuring rule runs a script, as `rule pool_counts`
+    # does, because it streams the corpus and scores haplotypes; its two
+    # panels and its composition run notebooks, like every other panel rule.
+    "l455f_pools": "scripts/l455f_pools.py",
+    "l455f_lookup": "notebooks/l455f_lookup.py",
+    "l455f_backgrounds": "notebooks/l455f_backgrounds.py",
+    "compose_l455f": "notebooks/l455f.py",
     "compose_within_clade_shifts": "notebooks/within_clade_shifts.py",
     "subsampling_depth": "notebooks/subsampling_depth.py",
     "subsampling_ladder": "notebooks/subsampling_ladder.py",
