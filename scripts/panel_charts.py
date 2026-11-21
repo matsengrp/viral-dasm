@@ -2089,10 +2089,14 @@ def background_panel(
     placed_xlabel.set_text(BACKGROUND_X_TITLE)
     placed_xlabel.set_va("top")
     placed_xlabel.set_y(block.y1 + lift)
+    # `x_gloss`, not :data:`BACKGROUND_X_GLOSS`: the two-line label above was
+    # measured with the caller's gloss, and drawing the default here instead
+    # would silently put the wrong one on the page -- naming a hand-specified
+    # split as a frequency-derived one, at the size a reader trusts least.
     figure.text(
         label_x,
         block.y0 + lift,
-        BACKGROUND_X_GLOSS,
+        x_gloss,
         fontsize=BACKGROUND_FONT_PT - 1,
         ha="center",
         va="bottom",
