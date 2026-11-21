@@ -14,7 +14,7 @@ def _():
 @app.cell
 def _(mo):
     mo.md(r"""
-    # `fig:l455f` panel A — L455F across the clades
+    # `fig:l455f` panel B — L455F across the clades
 
     *One mutation's fitness effect in every clade that carries an estimate of
     it, by both approaches, against the one estimate that pools the clades.*
@@ -26,7 +26,7 @@ def _(mo):
     **Why L455F and not F456L.** `fig:agreement`'s panel A is an example of a
     mutation whose effect shifts between clades. This figure is about one
     specific shift and what causes it, so the mutation it draws is the one
-    panel B then splits by background.
+    panel A above has already split by background.
 
     **The dashed rule is the counts estimate with the clades pooled.** Not an
     average of the points above it: it is mat-pcp's own clade-pooled table,
@@ -176,10 +176,10 @@ def _(LOOKUP, PANEL_MODEL, POOLED, SELECTION, SPEC, charts, mo, panels, spec):
         )
         .configure_title(fontSize=charts.PANEL_FONT_SIZE)
     )
-    charts.save_panel(_chart, spec.L455F_PANELS[0], selection=SELECTION)
+    charts.save_panel(_chart, spec.L455F_LOOKUP_PANEL, selection=SELECTION)
     panels.write_panel_csv(
         LOOKUP.assign(model=PANEL_MODEL, mutation=spec.L455F_MUTATION),
-        spec.L455F_PANELS[0],
+        spec.L455F_LOOKUP_PANEL,
         selection=SELECTION,
         spec=SPEC,
     )

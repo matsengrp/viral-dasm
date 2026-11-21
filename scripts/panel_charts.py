@@ -1835,6 +1835,7 @@ def background_panel(
     columns: int,
     h_params: tuple[float, float, float] | None = None,
     group_column: str = "candidate",
+    members: Sequence[tuple[str, str]] | None = None,
     value_label: str | None = None,
     x_gloss: str = BACKGROUND_X_GLOSS,
 ) -> matplotlib.figure.Figure:
@@ -1885,6 +1886,19 @@ def background_panel(
             check below does not catch it, because the backgrounds are named
             by residue and all four clades name the same pair. A silent wrong
             picture is what the argument exists to prevent.
+        members: ``[(group value, title)]`` -- which sub-panels to draw, in
+            which order, under which titles. ``None`` draws every value of
+            ``group_column``, ordered by decreasing absolute counts shift and
+            titled by the value itself, which is what
+            `fig:within_clade_shifts` wants: its sub-panels are mutations,
+            and steepest-first puts the strongest evidence leftmost.
+
+            A row of *clades* wants neither half of that. Clades have a
+            natural order of their own, and a sub-panel with only one
+            background measured has no shift to sort by at all. The titles
+            are separate from the keys because a clade's label in a paper is
+            not the label this pipeline keys on -- ``23F`` against
+            ``23F (EG.5.1)`` -- the same split :data:`ECDF_CLADES` makes.
         value_label: The value axis' label. ``None`` keeps
             ``f"fitness effect in\nclade {clade} subset"``, which names the
             one clade every sub-panel of the row belongs to. A row whose
@@ -1915,14 +1929,25 @@ def background_panel(
             f"not a column of the frame. Columns are {sorted(frame.columns)}."
         )
 
+    # Over the rows that carry a value, not over every row. A sub-panel may
+    # declare a background it has no measurement for -- `fig:l455f`'s 23F,
+    # whose founder already carries the derived residue, so there is no
+    # founder-side pool to measure -- and such a row is drawn as a named tick
+    # with no point. Its label is its own (`n.a.`), which would otherwise read
+    # as a third background and fail this check. What the check is for is
+    # unchanged: the *measured* backgrounds are a pair.
+    value_columns = [column for _, column, _, _ in BACKGROUND_SERIES]
+    measured = frame[frame[value_columns].notna().any(axis=1)]
     order = (
-        frame.sort_values("background_order")["background"].drop_duplicates().tolist()
+        measured.sort_values("background_order")["background"]
+        .drop_duplicates()
+        .tolist()
     )
     if len(order) != 2:
         raise ValueError(
-            f"{clade} has {len(order)} backgrounds, not two: {order}. The panel "
-            f"draws a contrast, so a third would be plotted with nothing "
-            f"saying which pair the slope belongs to."
+            f"{clade} has {len(order)} measured backgrounds, not two: {order}. "
+            f"The panel draws a contrast, so a third would be plotted with "
+            f"nothing saying which pair the slope belongs to."
         )
     # Exactly two rows per sub-panel, which the check above does not
     # establish. It counts distinct background *names* over the whole frame,
@@ -1948,14 +1973,31 @@ def background_panel(
     # by the data and not by the thing under test.
     def shift_of(member: str) -> float:
         part = frame[frame[group_column] == member].sort_values("background_order")
-        return abs(
+        shift = abs(
             float(part.iloc[-1]["counts_effect"]) - float(part.iloc[0]["counts_effect"])
         )
+        # A sub-panel with an unmeasured side has no shift. Sorting it last
+        # rather than letting a NaN through, which orders unpredictably.
+        return shift if np.isfinite(shift) else -np.inf
 
-    members = sorted(frame[group_column].unique(), key=shift_of, reverse=True)
-    if len(members) > columns - 1:
+    if members is None:
+        drawn = [
+            (member, str(member))
+            for member in sorted(
+                frame[group_column].unique(), key=shift_of, reverse=True
+            )
+        ]
+    else:
+        drawn = [(member, title) for member, title in members]
+        absent = [member for member, _ in drawn if member not in set(frame[group_column])]
+        if absent:
+            raise ValueError(
+                f"{clade}: {absent} named in `members` but not in the frame's "
+                f"{group_column!r} column, so those sub-panels would be blank."
+            )
+    if len(drawn) > columns - 1:
         raise ValueError(
-            f"{clade} has {len(members)} {group_column} groups and the row is "
+            f"{clade} has {len(drawn)} {group_column} groups and the row is "
             f"{columns} slots wide, which leaves no slot for the legend."
         )
 
@@ -1969,10 +2011,10 @@ def background_panel(
         squeeze=False,
         sharey=True,
     )
-    for empty in axes[0][len(members) :]:
+    for empty in axes[0][len(drawn) :]:
         empty.set_axis_off()
 
-    for slot, member in enumerate(members):
+    for slot, (member, title) in enumerate(drawn):
         axis = axes[0][slot]
         part = frame[frame[group_column] == member].sort_values("background_order")
         x = list(range(len(part)))
@@ -2003,7 +2045,7 @@ def background_panel(
         # "in clade 20B" would be the same five words on every one of them --
         # and on a two-candidate row they are wide enough to collide. The
         # clade is on the value-axis label instead, once.
-        axis.set_title(member, fontsize=BACKGROUND_FONT_PT, fontweight="bold")
+        axis.set_title(title, fontsize=BACKGROUND_FONT_PT, fontweight="bold")
         axis.tick_params(axis="y", labelsize=BACKGROUND_FONT_PT)
         # On every sub-panel, not only the one carrying the ticks: the grid is
         # how a reader carries a level across a row, and `sharey` hides the
@@ -2062,7 +2104,7 @@ def background_panel(
     # On this clade's own sub-panels rather than on the row's slots: the label
     # belongs under the plots it describes, not under the middle of a padding
     # that exists only to make the rows line up.
-    occupied = [axes[0][slot].get_position() for slot in range(len(members))]
+    occupied = [axes[0][slot].get_position() for slot in range(len(drawn))]
     label_x = (
         min(span.x0 for span in occupied) + max(span.x1 for span in occupied)
     ) / 2
@@ -2106,7 +2148,7 @@ def background_panel(
     # beside the plots rather than a band above them. Every row reserves that
     # slot, which is what the surplus column is for.
     handles, labels = axes[0][0].get_legend_handles_labels()
-    spare = axes[0][len(members)] if columns > len(members) else axes[0][-1]
+    spare = axes[0][len(drawn)] if columns > len(drawn) else axes[0][-1]
     drawn = figure.legend(
         handles,
         labels,

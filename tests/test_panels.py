@@ -1956,6 +1956,7 @@ def test_the_background_row_default_is_what_it_was_before_l455f():
         {},
         {
             "group_column": "candidate",
+            "members": None,
             "value_label": None,
             "x_gloss": charts.BACKGROUND_X_GLOSS,
         },
@@ -2019,3 +2020,139 @@ def test_the_background_row_gloss_reaches_the_page():
         "the default gloss was drawn over the caller's, which tells a reader "
         "the split came from branch frequencies when it did not."
     )
+
+
+def test_the_background_row_draws_the_members_it_is_given():
+    """``members`` sets which sub-panels are drawn, in what order, titled how.
+
+    `fig:within_clade_shifts` sorts its sub-panels steepest-first and titles
+    them by the group value, which is what a row of mutations wants.
+    `fig:l455f`'s row is clades, which have an order of their own and a name
+    in the paper that is not the key this pipeline uses.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    import panel_charts as charts
+
+    # 23A has the larger counts shift, so steepest-first would put it first.
+    frame = pd.DataFrame(
+        {
+            "cluster": ["23A", "23A", "22F", "22F"],
+            "candidate": ["L455F"] * 4,
+            "background": ["F456", "L456"] * 2,
+            "background_order": [0, 1, 0, 1],
+            "counts_effect": [0.1, 3.5, 0.1, 1.0],
+            "dasm_effect": [0.3, 2.7, 0.3, 1.1],
+        }
+    )
+    figure = charts.background_panel(
+        frame, "L455F", y_domain=(-1.0, 4.0), columns=3, group_column="cluster"
+    )
+    assert [axis.get_title() for axis in figure.axes if axis.get_title()] == [
+        "23A",
+        "22F",
+    ], "the default is no longer steepest-first, so the test below proves nothing."
+    plt.close(figure)
+
+    figure = charts.background_panel(
+        frame,
+        "L455F",
+        y_domain=(-1.0, 4.0),
+        columns=3,
+        group_column="cluster",
+        members=[("22F", "22F (XBB)"), ("23A", "23A (XBB.1.5)")],
+    )
+    assert [axis.get_title() for axis in figure.axes if axis.get_title()] == [
+        "22F (XBB)",
+        "23A (XBB.1.5)",
+    ], "the given order and titles did not reach the sub-panels."
+    plt.close(figure)
+
+    with pytest.raises(ValueError, match="not in the frame"):
+        charts.background_panel(
+            frame,
+            "L455F",
+            y_domain=(-1.0, 4.0),
+            columns=3,
+            group_column="cluster",
+            members=[("23Z", "23Z (nowhere)")],
+        )
+
+
+def test_a_background_with_nothing_measured_is_a_tick_and_not_a_third_pool():
+    """23F's case: a named x position with no point behind it.
+
+    Its founder already carries 456L, so there is no F456 subset of that
+    clade to measure -- which is different from one that was measured and
+    came out thin, and the panel says so by naming the tick `n.a.`. That
+    label must not read as a third background: the two-background check
+    counts the backgrounds that carry a value.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    import panel_charts as charts
+
+    frame = pd.DataFrame(
+        {
+            "cluster": ["22F", "22F", "23F", "23F"],
+            "candidate": ["L455F"] * 4,
+            "background": ["F456", "L456", "n.a.", "L456"],
+            "background_order": [0, 1, 0, 1],
+            "counts_effect": [0.1, 3.0, float("nan"), 3.2],
+            "dasm_effect": [0.3, 2.8, float("nan"), 3.8],
+        }
+    )
+    figure = charts.background_panel(
+        frame,
+        "L455F",
+        y_domain=charts.background_y_domain(frame),
+        columns=3,
+        group_column="cluster",
+        members=[("22F", "22F"), ("23F", "23F")],
+    )
+    titled = [axis for axis in figure.axes if axis.get_title()]
+    labels = {
+        axis.get_title(): [text.get_text() for text in axis.get_xticklabels()]
+        for axis in titled
+    }
+    plt.close(figure)
+    assert labels["23F"] == ["n.a.", "L456"], (
+        f"23F's ticks are {labels['23F']}; the unmeasured side must keep its "
+        f"own name rather than borrow the other clades'."
+    )
+    assert labels["22F"] == ["F456", "L456"]
+
+
+def test_a_third_measured_background_is_still_refused():
+    """The check the n.a. row must not weaken.
+
+    Three *measured* backgrounds is the error it was written for: a slope
+    through three points has no single pair it belongs to.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt  # noqa: F401
+
+    import panel_charts as charts
+
+    frame = pd.DataFrame(
+        {
+            "cluster": ["22F"] * 3,
+            "candidate": ["L455F"] * 3,
+            "background": ["F456", "L456", "S456"],
+            "background_order": [0, 1, 2],
+            "counts_effect": [0.1, 3.0, 1.5],
+            "dasm_effect": [0.3, 2.8, 1.4],
+        }
+    )
+    with pytest.raises(ValueError, match="measured backgrounds"):
+        charts.background_panel(
+            frame, "L455F", y_domain=(-1.0, 4.0), columns=3, group_column="cluster"
+        )

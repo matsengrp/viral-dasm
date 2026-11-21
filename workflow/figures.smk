@@ -70,8 +70,11 @@ from panel_spec import (
     DEPTH_PANELS,
     EMERGENCE_CSV,
     ECDF_CLADES,
+    L455F_BACKGROUND_PANEL,
+    L455F_CLADE_NAMES,
     L455F_FIGURE_STEM,
     L455F_HAPLOTYPE_TABLE,
+    L455F_LOOKUP_PANEL,
     L455F_PANELS,
     L455F_PANEL_LETTERS,
     L455F_POOL_CELLS,
@@ -1895,7 +1898,7 @@ rule l455f_lookup:
         reference=str(mat_pcp_path("reference_sequence_file")),
     output:
         html=f"{NOTEBOOK_DIR}/l455f_lookup_{{selection}}.html",
-        panels=panel_outputs([L455F_PANELS[0]], "{selection}"),
+        panels=panel_outputs([L455F_LOOKUP_PANEL], "{selection}"),
     log:
         f"{ARTIFACT_ROOT}/logs/l455f_lookup_{{selection}}.log",
     resources:
@@ -1940,7 +1943,7 @@ rule l455f_backgrounds:
         reference=str(mat_pcp_path("reference_sequence_file")),
     output:
         html=f"{NOTEBOOK_DIR}/l455f_backgrounds_{{selection}}.html",
-        panels=panel_outputs([L455F_PANELS[1]], "{selection}"),
+        panels=panel_outputs([L455F_BACKGROUND_PANEL], "{selection}"),
     log:
         f"{ARTIFACT_ROOT}/logs/l455f_backgrounds_{{selection}}.log",
     resources:

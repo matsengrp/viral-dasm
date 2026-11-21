@@ -25,14 +25,15 @@ def _(mo):
 
     | panel | drawn by | what it shows |
     |---|---|---|
-    | A | `l455f_lookup` | L455F across every clade that carries an estimate, both approaches, against the clade-pooled counts estimate |
-    | B | `l455f_backgrounds` | L455F in each XBB clade, on 456F parents against 456L parents |
+    | A | `l455f_backgrounds` | L455F in each XBB clade, on 456F parents against 456L parents |
+    | B | `l455f_lookup` | L455F across every clade that carries an estimate, both approaches, against the clade-pooled counts estimate |
 
-    **What the two rows are for.** A establishes that one mutation's effect
-    moves between clades, and that both approaches see it move. B asks what
-    the move is made of: inside a single clade, where elapsed time is nearly
-    fixed, the same mutation is measured on two sets of parents that differ at
-    one site. A is the observation; B is the explanation, tested per clade.
+    **What the two rows are for.** A is the claim: inside a single clade,
+    where elapsed time is nearly fixed, the same mutation is measured on two
+    sets of parents that differ at one site, and both approaches see it move.
+    B is what that looks like when the backgrounds are *not* separated -- one
+    number per clade, and one number for the whole lot, which is all the
+    counts approach can give without being told where to cut.
 
     **GISAID**: reads two rendered panels and writes a figure. No sequence, no
     per-site table and no count passes through this notebook.

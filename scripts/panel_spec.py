@@ -1182,6 +1182,25 @@ L455F_MARKER_AA = "L"
 #: `workflow/figures.smk`.
 L455F_CLADES: tuple[str, ...] = ("22F", "23A", "23B", "23D", "23E", "23F")
 
+#: Each drawn clade under the name the tree's own metadata gives it, on the
+#: :data:`ECDF_CLADES` precedent: `main.tex` names clades by their Pango
+#: alias and every table here is keyed by the bare Nextstrain clade. The
+#: pairs are the distinct values of the tree metadata's
+#: `Nextstrain_clade_usher` field -- `23F (EG.5.1)` -- so the panel's titles,
+#: the paper's prose and `results/panels/` all name the same clade.
+#:
+#: Every clade of :data:`L455F_CLADES` is spelled, including those the panel
+#: may gate out, so that which clades are drawn stays a property of the
+#: evidence rather than of this dictionary.
+L455F_CLADE_NAMES: dict[str, str] = {
+    "22F": "22F (XBB)",
+    "23A": "23A (XBB.1.5)",
+    "23B": "23B (XBB.1.16)",
+    "23D": "23D (XBB.1.9)",
+    "23E": "23E (XBB.2.3)",
+    "23F": "23F (EG.5.1)",
+}
+
 #: Where the pools this figure measures land. Its own tables rather than rows
 #: in `rule pool_counts`' output, because that rule's roster is
 #: :data:`CANDIDATE_CLADES` and its candidates are `shift_candidates.csv`.
@@ -1197,21 +1216,28 @@ L455F_POOL_SUMMARY = POOL_DIR / "l455f_pool_summary.json"
 #: training, and on CPU, no card.
 L455F_HAPLOTYPE_TABLE = SCORED_DIR / "l455f_haplotype_selection_factors.parquet"
 
-#: Panel stems. Its own, not :data:`MUTATION_PANELS`': panel A here is the
+#: Panel stems, named rather than indexed, because which letter each one
+#: carries is a layout choice and the rules that write them are not.
+#:
+#: Its own stems, not :data:`MUTATION_PANELS`': the lookup panel here is the
 #: same chart as `fig:agreement`'s panel A at a different mutation, and
 #: reusing that stem would overwrite the tracked CSV that figure is drawn
 #: from.
-L455F_PANELS: tuple[str, ...] = (
-    "panel_a_l455f_lookup",
-    "panel_b_l455f_backgrounds",
-)
+L455F_BACKGROUND_PANEL = "panel_a_l455f_backgrounds"
+L455F_LOOKUP_PANEL = "panel_b_l455f_lookup"
+
+#: In figure order: the within-clade contrast first, the across-clade lookup
+#: second. The contrast leads because it is the claim -- one mutation, two
+#: backgrounds, both approaches -- and the lookup below it is what that claim
+#: looks like when the backgrounds are not separated.
+L455F_PANELS: tuple[str, ...] = (L455F_BACKGROUND_PANEL, L455F_LOOKUP_PANEL)
 
 #: `fig:l455f`'s stem, which is its LaTeX label: `main.tex` includes
 #: `figures/l455f.pdf`. One spelling, so the file the manuscript includes and
 #: the file this pipeline writes cannot drift.
 L455F_FIGURE_STEM = "l455f"
 
-#: Two rows of one. Panel B is a single image of four sub-panels, unlike
+#: Two rows of one. Panel A is a single image of several sub-panels, unlike
 #: `fig:within_clade_shifts`' one image per clade, because here the clade is
 #: the sub-panel rather than the row.
 L455F_FIGURE_ROWS: tuple[tuple[str, ...], ...] = (("A",), ("B",))
@@ -1219,8 +1245,8 @@ L455F_FIGURE_ROWS: tuple[tuple[str, ...], ...] = (("A",), ("B",))
 #: Which panel stem each letter is. Derived nowhere: a letter is a caption
 #: fact and a stem is a filename, and nothing in either implies the other.
 L455F_PANEL_LETTERS: dict[str, str] = {
-    "A": L455F_PANELS[0],
-    "B": L455F_PANELS[1],
+    "A": L455F_BACKGROUND_PANEL,
+    "B": L455F_LOOKUP_PANEL,
 }
 
 #: The box this figure has to fit inside, in inches. Shorter than
@@ -1239,11 +1265,11 @@ L455F_BOX_IN: tuple[float, float] = (7.5, 7.0)
 #: shrink: the box, the margins and the gaps all move with it.
 L455F_FIGURE_SCALE = 0.83
 
-#: Panel A's own size, in Vega-Lite pixels. Not :data:`LOOKUP_PANEL_HEIGHT`
-#: and :data:`LOOKUP_PANEL_SCALE`, which are tuned so that `fig:agreement`'s
-#: panel A sits level with two neighbours in a three-across row and are
-#: pinned there by `tests/test_panels.py`. Here panel A has the row to
-#: itself and carries 23 clades on its x axis rather than 15.
+#: The lookup panel's own size, in Vega-Lite pixels. Not
+#: :data:`LOOKUP_PANEL_HEIGHT` and :data:`LOOKUP_PANEL_SCALE`, which are tuned
+#: so that `fig:agreement`'s panel A sits level with two neighbours in a
+#: three-across row and are pinned there by `tests/test_panels.py`. Here it
+#: has the row to itself and carries 23 clades on its x axis rather than 15.
 L455F_LOOKUP_WIDTH = 900
 L455F_LOOKUP_HEIGHT = 330
 

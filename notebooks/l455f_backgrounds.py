@@ -14,7 +14,7 @@ def _():
 @app.cell
 def _(mo):
     mo.md(r"""
-    # `fig:l455f` panel B — L455F on two backgrounds, clade by clade
+    # `fig:l455f` panel A — L455F on two backgrounds, clade by clade
 
     *L455F's fitness effect on the parents carrying the clade founder's 456F
     and on the parents carrying 456L, estimated by both approaches, in each
@@ -127,38 +127,69 @@ def _(CELLS_PATH, SELECTION, SHIFTS_PATH, mo, panels, pd, spec):
     FOCAL["panel_gate"] = panels.passes_evidence_gate(
         FOCAL["actual"], FOCAL["expected"], minimum=panels.PANEL_MIN_COUNT
     )
-    _both = FOCAL.groupby("cluster")["panel_gate"].all()
-    DRAWN = [clade for clade in spec.L455F_CLADES if _both.get(clade, False)]
+    # Every pool a clade has must clear the cutoff. For a clade with two
+    # that is the contrast's thinner side; for 23F, which has one by
+    # construction, it is that one.
+    _clears = FOCAL.groupby("cluster")["panel_gate"].all()
+    DRAWN = sorted(clade for clade in spec.L455F_CLADES if _clears.get(clade, False))
     GATED = {
-        clade: "both pools below the cutoff"
-        if clade in _both.index
-        else "not measured -- see the pools script"
+        clade: (
+            "below the cutoff"
+            if clade in _clears.index
+            else "not measured -- see the pools script"
+        )
         for clade in spec.L455F_CLADES
         if clade not in DRAWN
     }
     if not DRAWN:
         raise ValueError(
             f"no clade of {list(spec.L455F_CLADES)} clears "
-            f"{panels.PANEL_MIN_COUNT} actual or expected counts on both "
-            f"pools, so the panel would be blank."
+            f"{panels.PANEL_MIN_COUNT} actual or expected counts on every "
+            f"pool it has, so the panel would be blank."
         )
     FOCAL = FOCAL[FOCAL["cluster"].isin(DRAWN)]
 
+    # A named tick with no point, for a clade whose founder already carries
+    # the derived residue and so has no founder-side pool to measure. The row
+    # is added **here and not by the producer**: the pools file records what
+    # was measured, and a row of NaNs is a drawing instruction rather than a
+    # measurement. `n.a.` rather than `F456` because the distinction is the
+    # point -- this clade has no 456F background, as against one that was
+    # measured and came out thin.
+    ONE_POOL = [
+        clade
+        for clade, n in FOCAL.groupby("cluster").size().items()
+        if n == 1
+    ]
+    if ONE_POOL:
+        _placeholder = FOCAL[FOCAL["cluster"].isin(ONE_POOL)].copy()
+        _placeholder["background"] = "n.a."
+        _placeholder["background_order"] = 0
+        for _column in ("counts_effect", "dasm_effect", "se", "actual", "expected"):
+            _placeholder[_column] = float("nan")
+        FOCAL = pd.concat([FOCAL, _placeholder], ignore_index=True)
+
     # One p-value per clade, not per candidate: the candidate is the same
-    # mutation in every sub-panel here, and keying on it would collapse four
-    # clades onto one row.
+    # mutation in every sub-panel here, and keying on it would collapse the
+    # clades onto one row. A clade with one pool has no shift and so no test;
+    # the panel draws no p-value in any case, and the CSV says which it is.
     _p = SHIFTS[SHIFTS["candidate"] == spec.L455F_MUTATION]
     _p = _p.drop_duplicates(["cluster", "p_value"]).set_index("cluster")
-    FOCAL["p_label"] = [
-        (
-            f"p < {1 / (panels.DEFAULT_PERMUTATIONS + 1):.0e}".replace("e-0", "e-")
-            if bool(_p.loc[clade, "p_at_floor"])
-            else f"p = {float(_p.loc[clade, 'p_value']):.2g}"
-        )
-        for clade in FOCAL["cluster"]
-    ]
+
+    def _p_label(clade: str) -> str:
+        if clade not in _p.index:
+            return "n.a. -- one pool, no shift to test"
+        if bool(_p.loc[clade, "p_at_floor"]):
+            return f"p < {1 / (panels.DEFAULT_PERMUTATIONS + 1):.0e}".replace(
+                "e-0", "e-"
+            )
+        return f"p = {float(_p.loc[clade, 'p_value']):.2g}"
+
+    FOCAL["p_label"] = [_p_label(clade) for clade in FOCAL["cluster"]]
     mo.md(
-        f"Selection **{SELECTION}**. Drawn: `{'`, `'.join(DRAWN)}`. "
+        f"Selection **{SELECTION}**. Drawn: `{'`, `'.join(DRAWN)}`"
+        + (f", of which `{'`, `'.join(ONE_POOL)}` on one pool" if ONE_POOL else "")
+        + ". "
         + (
             "Not drawn: "
             + ", ".join(f"**{clade}** ({why})" for clade, why in GATED.items())
@@ -188,14 +219,26 @@ def _(DRAWN, FOCAL, SELECTION, charts, mo, panels, spec):
         y_domain=_y_domain,
         columns=len(DRAWN) + 1,
         group_column="cluster",
-        value_label=f"fitness effect of\n{spec.L455F_MUTATION}",
+        # Clade order, not steepest-first. These sub-panels are clades, which
+        # have an order of their own that also runs roughly in time, and the
+        # one-pool clade has no shift to be sorted by. Titled as the tree's
+        # own metadata names them, so the panel and the paper's prose agree.
+        members=[(clade, spec.L455F_CLADE_NAMES[clade]) for clade in DRAWN],
+        # One line. The two-line form exists because
+        # `fig:within_clade_shifts`' label names a clade as well as a
+        # quantity and is too long for its panels; this one is short enough
+        # to set on one line, which reads better beside a single row.
+        value_label=f"fitness effect of {spec.L455F_MUTATION}",
+        # Named by residue alone, not as "the clade founder's F456": 23F's
+        # founder carries L456, so that phrasing is false of the one
+        # sub-panel whose left-hand tick is `n.a.` in the first place.
         x_gloss=(
-            f"(left: parents carrying the clade founder's "
-            f"F{spec.L455F_MARKER_SITE}; right: parents carrying "
+            f"(left: parents carrying F{spec.L455F_MARKER_SITE}; "
+            f"right: parents carrying "
             f"{spec.L455F_MARKER_AA}{spec.L455F_MARKER_SITE})"
         ),
     )
-    PANEL = charts.save_mpl_panel(_figure, spec.L455F_PANELS[1], selection=SELECTION)
+    PANEL = charts.save_mpl_panel(_figure, spec.L455F_BACKGROUND_PANEL, selection=SELECTION)
     panels.write_pool_csv(
         FOCAL[
             [
@@ -216,7 +259,7 @@ def _(DRAWN, FOCAL, SELECTION, charts, mo, panels, spec):
                 "p_label",
             ]
         ].rename(columns={"cluster": "clade"}),
-        spec.L455F_PANELS[1],
+        spec.L455F_BACKGROUND_PANEL,
         selection=SELECTION,
     )
     mo.vstack([mo.md(f"### {spec.L455F_MUTATION} — {len(DRAWN)} clades"), PANEL])

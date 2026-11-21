@@ -52,6 +52,7 @@ from lib import (
     ARTIFACT_ROOT,
     GENE,
     assert_dasm2_is_this_repo,
+    master_table_path,
     mat_pcp_path,
     select_checkpoint,
 )
@@ -82,14 +83,30 @@ from panel_spec import (
     L455F_POOL_SUMMARY,
     L455F_SITE,
     PCP_CHUNK_ROWS,
+    era_of_clade,
     parse_mutation,
 )
-from pool_counts import clade_counts
+from pool_counts import (
+    DERIVED_POOL,
+    FOUNDER_POOL,
+    _pool_average,
+    background_label,
+    clade_counts,
+    pool_name,
+)
 from runs import run_id
 from score_haplotypes import score_backgrounds
 from score_run import globally_masked_sites
 
-from dasm2.analysis.within_clade_pools import DEFAULT_PERMUTATIONS
+from dasm2.analysis.within_clade_pools import (
+    DEFAULT_PERMUTATIONS,
+    PoolSpec,
+    join_dasm_effects,
+    join_rates,
+    load_annotations,
+    pool_cell_table,
+    tally_pools,
+)
 from dasm2.sequence.masking import load_censor_table
 
 #: The split, as :func:`pool_counts.clade_specs` takes it: the derived pool
@@ -98,29 +115,47 @@ from dasm2.sequence.masking import load_censor_table
 SPLIT_DERIVED = {L455F_MARKER_SITE: L455F_MARKER_AA}
 
 
-def measurable_clades(clades: list[str]) -> tuple[list[str], dict[str, str]]:
-    """Which clades have two distinct pools, and why the others do not.
+#: What a clade gets measured as. A clade whose founder carries the *founder*
+#: residue at the marker site has two pools and a shift between them;
+#: a clade whose founder already carries the *derived* residue has only the
+#: derived one.
+PAIRED, SINGLE = "paired", "single"
+
+
+def clade_roles(clades: list[str]) -> dict[str, str]:
+    """How each clade can be measured: as a contrast, or as one pool.
 
     Two founder checks, at the two sites that define the contrast:
 
     **At** :data:`panel_spec.L455F_SITE`. The founder must carry the residue
     L455F mutates away from, or the clade is not at risk for the mutation at
-    all and both its pools would be empty. A clade failing this is a roster
-    error rather than a finding, so it raises.
+    all and no pool of it would hold a branch. A clade failing this is a
+    roster error rather than a finding, so it raises.
 
-    **At** :data:`panel_spec.L455F_MARKER_SITE`. The founder must *not*
-    already carry the derived residue. 23F (EG.5.1) does: it is the one XBB
-    subclade whose founder carries 456L, so ``split_derived`` would equal the
-    founder's own residues there and :func:`pool_counts.clade_specs` would
-    build two pools with identical predicates -- the same branches twice, a
-    shift of exactly zero, and nothing in the output saying so.
+    **At** :data:`panel_spec.L455F_MARKER_SITE`. If the founder already
+    carries the derived residue -- 23F (EG.5.1) is the one XBB subclade where
+    it does -- then :func:`pool_counts.clade_specs` would build two pools with
+    identical predicates: the same branches twice, a shift of exactly zero,
+    and nothing in the output saying so.
     :mod:`exploratory.l455f_456.shift_per_clade` guards only the first site,
-    which is why 23F is absent from its roster by hand; here it is refused by
-    the check, with the reason recorded.
+    which is why 23F is absent from its roster by hand.
+
+    Such a clade is measured on its derived pool alone rather than dropped.
+    It has no founder-side pool *by construction*, which is a different thing
+    from a pool that was measured and found thin, and the figure draws it as
+    a named tick with no point. It is the clade that makes the figure's
+    point: a lineage whose founder already carries 456L, where L455F is
+    strongly favoured from the start.
+
+    The founder-side pool is deliberately **not** reconstructed from the
+    branches that reverted to 456F. There are a few hundred of them against
+    tens of thousands on the derived side, and they are revertants rather
+    than the clade's own background -- a different object from the founder
+    pools of the other clades, drawn in the same position and read as the
+    same thing.
 
     Returns:
-        ``(measured, refused)`` -- the clades to build pools for, and a reason
-        per clade for those left out.
+        ``{clade: PAIRED | SINGLE}``, in the order given.
     """
     founder_residue, site, _ = parse_mutation(L455F_MUTATION)
     if site != L455F_SITE:
@@ -128,30 +163,117 @@ def measurable_clades(clades: list[str]) -> tuple[list[str], dict[str, str]]:
             f"{L455F_MUTATION} is at site {site} but `L455F_SITE` is "
             f"{L455F_SITE}. The two spellings of the figure's site disagree."
         )
-    measured, refused = [], {}
+    roles = {}
     for clade in clades:
         founder = founder_aa_sequence(clade, GENE)
         if founder[site - 1] != founder_residue:
             raise ValueError(
                 f"{clade}'s founder carries {founder[site - 1]!r} at site "
                 f"{site}, not {founder_residue!r}: it is not at risk for "
-                f"{L455F_MUTATION}, so neither pool would hold a branch. The "
+                f"{L455F_MUTATION}, so no pool of it would hold a branch. The "
                 f"roster names a clade this mutation cannot be measured in."
             )
-        if founder[L455F_MARKER_SITE - 1] == L455F_MARKER_AA:
-            refused[clade] = (
-                f"founder already carries {L455F_MARKER_AA}{L455F_MARKER_SITE}, "
-                f"so the derived pool's predicate matches the founder pool's "
-                f"and the two would be the same branches"
-            )
-            continue
-        measured.append(clade)
-    if not measured:
-        raise ValueError(
-            f"no clade of {clades} can be measured: {refused}. The panel would "
-            f"be empty."
+        roles[clade] = (
+            SINGLE if founder[L455F_MARKER_SITE - 1] == L455F_MARKER_AA else PAIRED
         )
-    return measured, refused
+    return roles
+
+
+def derived_pool_only(
+    clade: str,
+    *,
+    pcp_path: str,
+    annotations_path,
+    haplotype_scores: pd.DataFrame,
+    chunk_rows: int,
+    max_chunks: int | None,
+) -> tuple[pd.DataFrame, dict]:
+    """One clade's derived pool, for a clade that has no founder-side one.
+
+    The same quantities :func:`pool_counts.clade_counts` computes for a
+    contrast, for one pool: the counts effect over the branches whose parent
+    carries the derived residue, and the DASM pool average over the
+    haplotypes those branches hold. No shift and no randomization test, which
+    both need two pools.
+
+    :func:`pool_cell_table` is written for a contrast and takes two specs, so
+    it is handed the same spec twice and the duplicate half discarded. That
+    is cheaper and plainer than a second code path through
+    :func:`aggregate_to_aa_cells`, and the tallies are keyed by pool name --
+    one name, tallied once -- so nothing is counted twice.
+    """
+    founder_aa = founder_aa_sequence(clade, GENE)
+    _, site, mutant = parse_mutation(L455F_MUTATION)
+    annotations = load_annotations(annotations_path, [clade], GENE)
+    era = era_of_clade(clade)
+    annotations = join_rates(annotations, pd.read_csv(master_table_path(era)))
+    print(f"{clade}: era {era}, {len(annotations):,} annotated rows", flush=True)
+
+    spec = PoolSpec(
+        name=pool_name(L455F_MUTATION, DERIVED_POOL),
+        at_risk={site: founder_aa[site - 1]},
+        marker=SPLIT_DERIVED,
+        hold={},
+    )
+    print(f"{clade}: streaming the corpus for 1 pool ...", flush=True)
+    tallies = tally_pools(
+        pcp_path,
+        [spec],
+        annotations,
+        clade=clade,
+        chunk_rows=chunk_rows,
+        max_chunks=max_chunks,
+    )
+    cells = pool_cell_table(
+        tallies, annotations, cluster=clade, gene=GENE, pool0=spec, pool1=spec
+    )
+    cells = cells[cells["pool"] == 1].copy()
+
+    average = _pool_average(
+        tallies,
+        spec.name,
+        haplotype_scores,
+        clade=clade,
+        founder_aa=founder_aa,
+        aa_site=site,
+        mutant_aa=mutant,
+    )
+    cells = join_dasm_effects(cells, {spec.name: average.log_sf})
+    cells.insert(0, "candidate", L455F_MUTATION)
+    cells["background"] = background_label(SPLIT_DERIVED)
+
+    focal = cells[(cells["aa_site"] == site) & (cells["mutant_aa"] == mutant)]
+    if len(focal) != 1:
+        raise ValueError(
+            f"{clade}/{L455F_MUTATION}: the focal cell appears {len(focal)} "
+            f"times in the pool's cell table. It was dropped by the "
+            f"exclude/mask restriction."
+        )
+    summary = {
+        "clade": clade,
+        "backgrounds": {DERIVED_POOL: background_label(SPLIT_DERIVED)},
+        "founder_pool": (
+            f"none: the clade founder already carries "
+            f"{L455F_MARKER_AA}{L455F_MARKER_SITE}"
+        ),
+        "pools": {
+            DERIVED_POOL: {
+                "label": background_label(SPLIT_DERIVED),
+                "n_pcps": int(tallies.n_pcps[spec.name]),
+                "synonymous": int(tallies.synonymous_observed[spec.name]),
+                "n_haplotypes": average.n_haplotypes,
+                "counts_effect": float(focal.iloc[0]["counts_effect"]),
+                "dasm_effect": average.log_sf,
+            }
+        },
+    }
+    print(
+        f"  {L455F_MUTATION:>7}: one pool, counts "
+        f"{float(focal.iloc[0]['counts_effect']):+.2f}, DASM "
+        f"{average.log_sf:+.2f}",
+        flush=True,
+    )
+    return cells, summary
 
 
 def main() -> None:
@@ -186,10 +308,10 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    measured, refused = measurable_clades(list(args.clades))
-    for clade, reason in refused.items():
-        print(f"{clade}: refused -- {reason}", flush=True)
-    print(f"measuring {L455F_MUTATION} in {measured}", flush=True)
+    roles = clade_roles(list(args.clades))
+    measured = list(roles)
+    for clade, role in roles.items():
+        print(f"{clade}: {role}", flush=True)
 
     print("\nenumerating haplotypes ...", flush=True)
     haplotypes = clade_haplotypes(measured, args.pcp, chunk_rows=PCP_CHUNK_ROWS)
@@ -225,8 +347,20 @@ def main() -> None:
 
     annotations_path = mat_pcp_path("site_annotations_file")
     cells, shifts, summary = [], [], {}
-    for clade in measured:
-        print(f"\n=== {clade} ===", flush=True)
+    for clade, role in roles.items():
+        print(f"\n=== {clade} ({role}) ===", flush=True)
+        if role == SINGLE:
+            clade_cells, clade_summary = derived_pool_only(
+                clade,
+                pcp_path=args.pcp,
+                annotations_path=annotations_path,
+                haplotype_scores=scores[scores["clade"] == clade],
+                chunk_rows=PCP_CHUNK_ROWS,
+                max_chunks=args.max_chunks,
+            )
+            cells.append(clade_cells)
+            summary[clade] = {L455F_MUTATION: clade_summary}
+            continue
         clade_cells, clade_shifts, clade_summary = clade_counts(
             clade,
             [L455F_MUTATION],
@@ -246,7 +380,6 @@ def main() -> None:
         cells.append(clade_cells)
         shifts.append(clade_shifts)
         summary[clade] = clade_summary
-    summary["__refused"] = refused
 
     for path, frame in (
         (args.cells, pd.concat(cells, ignore_index=True)),
