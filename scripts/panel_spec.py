@@ -1130,11 +1130,155 @@ SHIFT_PANEL_LETTERS: dict[str, str] = {
 SHIFT_BOX_IN: tuple[float, float] = (7.5, 9.0)
 SHIFT_FIGURE_SCALE = 1.0
 
+
+# ---------------------------------------------------------------------------
+# fig:l455f -- one mutation, between clades and within them
+# ---------------------------------------------------------------------------
+
+#: The mutation `fig:l455f` is about. Spelled separately from
+#: :data:`LOOKUP_MUTATION` rather than aliased to it, on the precedent of
+#: :data:`SUBSAMPLING_SCATTER_CLADE` beside :data:`SCATTER_CLADE`: the two
+#: figures look up different mutations for different reasons, and a shared
+#: name would make one figure's choice look like the other's.
+L455F_MUTATION = "L455F"
+
+#: The site the mutation is at, and the site whose residue splits each clade's
+#: branches into the two backgrounds panel B contrasts.
+#:
+#: **This split is specified by hand, which is a deviation from
+#: `fig:within_clade_shifts` and must be reported as one.** That figure takes
+#: each clade's split from branch frequencies, unaided, through
+#: `rule clade_backgrounds` -- which is what makes its panels a property of
+#: the tree rather than of a choice. Here the split cannot come from there:
+#: for 23A the unaided marker is F456L but it arrives with L455F itself at
+#: 59% of marker branches as a co-traveller, which puts the mutation under
+#: test inside the background that defines the contrast and leaves the cell
+#: unscoreable; and for 22F the unaided marker is not site 456 at all but
+#: S486P. Measured, not assumed: see `_ignore/step_zero_clade_backgrounds.csv`
+#: and the PR body. For 23B the unaided marker *is* F456L with no
+#: co-travellers, so there the hand specification confirms rather than
+#: overrides.
+L455F_SITE = 455
+L455F_MARKER_SITE = 456
+L455F_MARKER_AA = "L"
+
+#: The clades considered -- every XBB clade in the roster. Six considered,
+#: six measured and five drawn, and the two special cases are drawn or
+#: dropped for reasons the panel can state rather than by being left off a
+#: list:
+#:
+#: * 23E fails the evidence gate, 6/5.36 actual-or-expected counts on its
+#:   456F pool and 1/0.063 on its 456L pool against
+#:   :data:`PANEL_MIN_COUNT`. Its pools are written and not drawn.
+#: * 23F has no founder-side pool to build, by the founder check at
+#:   :data:`L455F_MARKER_SITE`: EG.5.1's founder already carries 456L, so a
+#:   founder pool and a derived pool would be the same branches. It is
+#:   measured on its derived pool alone and drawn as a named tick with no
+#:   point on the 456F side, which the caption marks `n.a.`.
+#:
+#: Deliberately **not** :data:`CANDIDATE_CLADES`, which is
+#: `fig:within_clade_shifts`' row set: adding a clade there would add a row to
+#: that figure, and a fourth would raise `IndexError` in
+#: :data:`SHIFT_PANEL_LETTERS` at module scope -- which is parse time for
+#: `workflow/figures.smk`.
+L455F_CLADES: tuple[str, ...] = ("22F", "23A", "23B", "23D", "23E", "23F")
+
+#: Each drawn clade under the name the tree's own metadata gives it, on the
+#: :data:`ECDF_CLADES` precedent: `main.tex` names clades by their Pango
+#: alias and every table here is keyed by the bare Nextstrain clade. The
+#: pairs are the distinct values of the tree metadata's
+#: `Nextstrain_clade_usher` field -- `23F (EG.5.1)` -- so the panel's titles,
+#: the paper's prose and `results/panels/` all name the same clade.
+#:
+#: Every clade of :data:`L455F_CLADES` is spelled, including those the panel
+#: may gate out, so that which clades are drawn stays a property of the
+#: evidence rather than of this dictionary.
+L455F_CLADE_NAMES: dict[str, str] = {
+    "22F": "22F (XBB)",
+    "23A": "23A (XBB.1.5)",
+    "23B": "23B (XBB.1.16)",
+    "23D": "23D (XBB.1.9)",
+    "23E": "23E (XBB.2.3)",
+    "23F": "23F (EG.5.1)",
+}
+
+#: Where the pools this figure measures land. Its own tables rather than rows
+#: in `rule pool_counts`' output, because that rule's roster is
+#: :data:`CANDIDATE_CLADES` and its candidates are `shift_candidates.csv`.
+L455F_POOL_CELLS = POOL_DIR / "l455f_pool_cells.parquet"
+L455F_POOL_SHIFTS = POOL_DIR / "l455f_pool_shifts.parquet"
+L455F_POOL_SUMMARY = POOL_DIR / "l455f_pool_summary.json"
+
+#: The haplotypes this figure scores, and their selection factors. Its own
+#: table rather than :data:`HAPLOTYPE_TABLE`, which `rule score_haplotypes`
+#: writes over :data:`CANDIDATE_CLADES` and `shift_candidates.csv`: neither
+#: carries these clades or this mutation, so there is no cell here to read
+#: from there. Scoring is inference under the published checkpoint -- no
+#: training, and on CPU, no card.
+L455F_HAPLOTYPE_TABLE = SCORED_DIR / "l455f_haplotype_selection_factors.parquet"
+
+#: The figure's one panel stem. Unlettered -- `fig:l455f` is a single panel,
+#: so there is no A to distinguish from a B and the stem says what the panel
+#: is rather than where it sits.
+L455F_BACKGROUND_PANEL = "l455f_backgrounds"
+
+#: One panel, kept as a tuple because `rule panels` collects panel stems by
+#: figure and a bare string there would be collected as its characters.
+L455F_PANELS: tuple[str, ...] = (L455F_BACKGROUND_PANEL,)
+
+#: `fig:l455f`'s stem, which is its LaTeX label: `main.tex` includes
+#: `figures/l455f.pdf`. One spelling, so the file the manuscript includes and
+#: the file this pipeline writes cannot drift.
+L455F_FIGURE_STEM = "l455f"
+
+#: One row of one. The panel is a single image of several sub-panels, unlike
+#: `fig:within_clade_shifts`' one image per clade, because here the clade is
+#: the sub-panel rather than the row.
+L455F_FIGURE_ROWS: tuple[tuple[str, ...], ...] = (("A",),)
+
+#: Which panel stem each layout key is. "A" is a key into the images
+#: `compose` is handed, not a letter drawn on the page: see
+#: :data:`L455F_FIGURE_LABELS`.
+L455F_PANEL_LETTERS: dict[str, str] = {"A": L455F_BACKGROUND_PANEL}
+
+#: Nothing drawn beside the panel. A figure of one panel has no second panel
+#: to be told apart from, so a bold "A" over it would name a distinction the
+#: figure does not make -- and the caption has none to refer to either.
+L455F_FIGURE_LABELS: dict[str, str] = {"A": ""}
+
+#: The box this figure has to fit inside, in inches. The width is the text
+#: block's; the height is slack and stays generous, because a single row of
+#: one wide panel is bound by width and a height that bound instead would
+#: shrink the figure for no reason a reader could see.
+L455F_BOX_IN: tuple[float, float] = (7.5, 7.0)
+
+#: Shrink, so this figure's type matches the figures it sits among rather
+#: than fill the box it is allowed. `compose` solves one dpi from the pixels
+#: it is handed -- here the panel's width over the width available, since a
+#: single short row is nowhere near the box's height -- and type lands on the
+#: page at `size * 72 / dpi`. So the scale is the only handle on type size
+#: once the panel itself is drawn, and the figure's width on the page is
+#: whatever that handle leaves.
+#:
+#: Solved rather than guessed, against the composition this figure is printed
+#: beside: `fig:agreement` places its panels at 755 dpi for 7.2 pt titles,
+#: and this panel is 4,833 px wide inside a box 7.5 in wide less 0.12 in of
+#: margin, so 4833 / (750 * 7.38) is the scale that lands on the same 7.2 pt.
+#: `rule compose_l455f`'s log prints what it actually solved; read it there
+#: rather than from this comment if the panel is ever redrawn at another
+#: size.
+L455F_FIGURE_SCALE = 0.873
+
 #: The columns the panels read. Named rather than taken whole: the table is
 #: 1,425,760 rows per run over 24 columns, and the pooled `*_all` half,
 #: `uncertainty` and `censored_directional` are read by no panel here.
 #: `delta_fitness_bayesian` is, barely -- it is the other member of
 #: :data:`FITNESS_METRICS`, so a spec that names it must find it.
+#:
+#: A figure that does want one of the `*_all` columns widens this tuple at
+#: its own call to `panels.read_scored_table`, as `scripts/dms.py` does with
+#: `POOLED_METRIC`. Widening it here instead would make every panel's read,
+#: and every test fixture, carry a column one figure wants.
 TABLE_COLUMNS: tuple[str, ...] = (
     "clade",
     "model",

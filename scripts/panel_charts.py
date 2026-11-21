@@ -1785,6 +1785,17 @@ BACKGROUND_SERIES = (
     ("DASM", "dasm_effect", DASM_PURPLE, "^"),
 )
 
+#: Where :func:`background_panel` writes its ``absent_label``, as a fraction
+#: of the value axis above its floor. Clear of the axis line, and low enough
+#: that the note cannot be mistaken for a point.
+BACKGROUND_ABSENT_LIFT = 0.04
+
+#: Half the width of the cap on a spread whisker, in x-axis units -- the x
+#: positions are 0 and 1, so this is a fourteenth of the gap between the two
+#: backgrounds. Wide enough to read as a cap rather than as a tick of the
+#: line, narrow enough that two pools' caps cannot meet.
+BACKGROUND_SPREAD_CAP = 0.07
+
 #: What the x axis of a row is called, and the gloss under it saying which
 #: side is which. Two strings rather than one, because they are drawn at two
 #: sizes and two weights; see :func:`background_panel`.
@@ -1797,7 +1808,9 @@ def _em_in() -> float:
     return BACKGROUND_FONT_PT / 72.0
 
 
-def background_y_domain(frame: pd.DataFrame) -> tuple[float, float]:
+def background_y_domain(
+    frame: pd.DataFrame, *, extra_columns: Sequence[str] = ()
+) -> tuple[float, float]:
     """The value axis every sub-panel of every background row shares.
 
     One domain across all three clades, so a steep line means a large shift
@@ -1810,12 +1823,19 @@ def background_y_domain(frame: pd.DataFrame) -> tuple[float, float]:
 
     Args:
         frame: Every row that will be drawn, by every clade.
+        extra_columns: Further columns the axis has to contain -- the ends of
+            a spread whisker, which can reach past the points it belongs to.
+            A domain that does not see them clips the whisker at the axis and
+            draws a bounded interval as an open one.
 
     Returns:
         ``(low, high)``, the data range padded by :data:`BACKGROUND_FOOTROOM`
         below and :data:`BACKGROUND_HEADROOM` above.
     """
-    columns = [column for _, column, _, _ in BACKGROUND_SERIES]
+    columns = [column for _, column, _, _ in BACKGROUND_SERIES] + list(extra_columns)
+    missing = sorted(set(columns) - set(frame.columns))
+    if missing:
+        raise KeyError(f"background_y_domain was asked to scale against {missing}.")
     drawn = frame[columns].to_numpy(dtype=float)
     drawn = drawn[np.isfinite(drawn)]
     if drawn.size == 0:
@@ -1834,8 +1854,17 @@ def background_panel(
     y_domain: tuple[float, float],
     columns: int,
     h_params: tuple[float, float, float] | None = None,
+    group_column: str = "candidate",
+    members: Sequence[tuple[str, str]] | None = None,
+    series_labels: Mapping[str, str] | None = None,
+    marker_size: float = 7,
+    spread_columns: Mapping[str, tuple[str, str]] | None = None,
+    absent_label: str | None = None,
+    value_label: str | None = None,
+    x_gloss: str = BACKGROUND_X_GLOSS,
 ) -> matplotlib.figure.Figure:
-    """One clade's row of `fig:within_clade_shifts`: panel B, D or F.
+    """One row of background estimates: `fig:within_clade_shifts`' panels
+    B, D and F, and the single panel of `fig:l455f`.
 
     One sub-panel per candidate mutation, each plotting that mutation's
     fitness effect on the clade's two backgrounds by both approaches. The x
@@ -1870,6 +1899,70 @@ def background_panel(
             ``tight_layout`` sizes each figure's margins from its own tick
             labels, and a row whose empty right-hand slots carry none comes
             out with wider panels than the first.
+        group_column: Which column makes a sub-panel. ``"candidate"`` is one
+            clade's row of several mutations, which is
+            `fig:within_clade_shifts`. ``"cluster"`` is one mutation's row of
+            several clades, which is `fig:l455f`'s panel B.
+
+            **It has to be a parameter rather than a relabelled column.**
+            Handing this function four clades' rows for one candidate under
+            the default draws *one* sub-panel with eight x positions,
+            alternating between the two backgrounds -- and the two-background
+            check below does not catch it, because the backgrounds are named
+            by residue and all four clades name the same pair. A silent wrong
+            picture is what the argument exists to prevent.
+        members: ``[(group value, title)]`` -- which sub-panels to draw, in
+            which order, under which titles. ``None`` draws every value of
+            ``group_column``, ordered by decreasing absolute counts shift and
+            titled by the value itself, which is what
+            `fig:within_clade_shifts` wants: its sub-panels are mutations,
+            and steepest-first puts the strongest evidence leftmost.
+
+            A row of *clades* wants neither half of that. Clades have a
+            natural order of their own, and a sub-panel with only one
+            background measured has no shift to sort by at all. The titles
+            are separate from the keys because a clade's label in a paper is
+            not the label this pipeline keys on -- ``23F`` against
+            ``23F (EG.5.1)`` -- the same split :data:`ECDF_CLADES` makes.
+        series_labels: ``{series label: legend text}``, overriding what
+            :data:`BACKGROUND_SERIES` calls each approach in the legend. The
+            marks are unchanged; only the key's wording is. A panel whose two
+            approaches are applied to *different* things -- one fit per
+            subset against one model evaluated per parent -- can say so in
+            the key rather than leaving it to the caption. Newlines are
+            honoured, and a long key needs a slot of its own: see
+            ``columns``.
+        marker_size: Marker size in points, matplotlib's ``markersize``. It
+            is a **diameter**, not an area, unlike Vega-Lite's ``size`` --
+            so a figure wanting its two renderers' dots to match has to
+            convert between the two conventions rather than pass one number
+            to both.
+        spread_columns: ``{series label: (low column, high column)}``, drawn
+            as a capped vertical whisker under that series' marker. For the
+            DASM series this is the spread of the model's estimate over the
+            parent haplotypes of one pool, weighted as the pool average is.
+            It is **not** an uncertainty: it does not shrink as the pool
+            grows, so a caption that leaves it unexplained will be read as a
+            confidence interval. A series named here whose columns are not in
+            the frame raises, and a row whose ends are NaN is drawn as a bare
+            marker -- which is what an unmeasured background needs.
+        absent_label: What to write inside the axes at a background whose
+            every series is NaN -- a pool that does not exist rather than one
+            that came out thin. Written in the plot rather than on the tick so
+            that the tick can go on naming the background, which is what makes
+            the gap legible: the reader sees the position the pool would have
+            held, and the note saying there is nothing to put there. ``None``
+            writes nothing.
+        value_label: The value axis' label. ``None`` keeps
+            ``f"fitness effect in\nclade {clade} subset"``, which names the
+            one clade every sub-panel of the row belongs to. A row whose
+            sub-panels are *different* clades has no such clade and must pass
+            its own.
+        x_gloss: The second line of the x label, under
+            :data:`BACKGROUND_X_TITLE`. The default names the two sides as
+            clade-founder against derived identities, which is what a
+            frequency-derived split is; a split specified by hand at one site
+            is not that, and says so instead.
 
     Returns:
         The row, as a matplotlib figure, ordered left to right by decreasing
@@ -1884,30 +1977,98 @@ def background_panel(
     if missing:
         raise KeyError(f"background_panel needs column(s) {missing}.")
 
+    if group_column not in frame.columns:
+        raise KeyError(
+            f"background_panel groups sub-panels by {group_column!r}, which is "
+            f"not a column of the frame. Columns are {sorted(frame.columns)}."
+        )
+
+    intervals = dict(spread_columns or {})
+    known = {label for label, _, _, _ in BACKGROUND_SERIES}
+    unknown = sorted(set(intervals) - known)
+    if unknown:
+        raise KeyError(
+            f"spread_columns names series {unknown}, which this panel does not "
+            f"draw. Its series are {sorted(known)}."
+        )
+    absent = sorted(
+        {column for pair in intervals.values() for column in pair} - set(frame.columns)
+    )
+    if absent:
+        raise KeyError(f"background_panel needs interval column(s) {absent}.")
+
+    # Over the rows that carry a value, not over every row. A sub-panel may
+    # declare a background it has no measurement for -- `fig:l455f`'s 23F,
+    # whose founder already carries the derived residue, so there is no
+    # founder-side pool to measure -- and such a row is drawn as a named tick
+    # with no point. Its label is its own (`n.a.`), which would otherwise read
+    # as a third background and fail this check. What the check is for is
+    # unchanged: the *measured* backgrounds are a pair.
+    value_columns = [column for _, column, _, _ in BACKGROUND_SERIES]
+    measured = frame[frame[value_columns].notna().any(axis=1)]
     order = (
-        frame.sort_values("background_order")["background"].drop_duplicates().tolist()
+        measured.sort_values("background_order")["background"]
+        .drop_duplicates()
+        .tolist()
     )
     if len(order) != 2:
         raise ValueError(
-            f"{clade} has {len(order)} backgrounds, not two: {order}. The panel "
-            f"draws a contrast, so a third would be plotted with nothing "
-            f"saying which pair the slope belongs to."
+            f"{clade} has {len(order)} measured backgrounds, not two: {order}. "
+            f"The panel draws a contrast, so a third would be plotted with "
+            f"nothing saying which pair the slope belongs to."
+        )
+    # Exactly two rows per sub-panel, which the check above does not
+    # establish. It counts distinct background *names* over the whole frame,
+    # and the names here are residues -- so a frame holding four clades under
+    # one `candidate` still shows two of them, and the sub-panel is then drawn
+    # as a single line through eight points alternating between the two
+    # backgrounds. That is the wrong picture, and nothing about it looks
+    # wrong, which is what makes this worth a line of code: a sub-panel draws
+    # one contrast, so it is two points.
+    sizes = frame.groupby(group_column).size()
+    wrong = {str(member): int(n) for member, n in sizes.items() if n != 2}
+    if wrong:
+        raise ValueError(
+            f"{clade}: grouping by {group_column!r} gives {wrong} rows per "
+            f"sub-panel, not 2. A sub-panel draws one contrast between two "
+            f"backgrounds. More than two rows usually means the frame holds "
+            f"several groups of another column -- pass that column as "
+            f"`group_column`."
         )
 
     # Steepest first, measured on counts rather than on the DASM: counts is
     # the observation the model is being checked against, so the order is set
     # by the data and not by the thing under test.
-    def shift_of(candidate: str) -> float:
-        part = frame[frame["candidate"] == candidate].sort_values("background_order")
-        return abs(
+    def shift_of(member: str) -> float:
+        part = frame[frame[group_column] == member].sort_values("background_order")
+        shift = abs(
             float(part.iloc[-1]["counts_effect"]) - float(part.iloc[0]["counts_effect"])
         )
+        # A sub-panel with an unmeasured side has no shift. Sorting it last
+        # rather than letting a NaN through, which orders unpredictably.
+        return shift if np.isfinite(shift) else -np.inf
 
-    members = sorted(frame["candidate"].unique(), key=shift_of, reverse=True)
-    if len(members) > columns - 1:
+    if members is None:
+        drawn = [
+            (member, str(member))
+            for member in sorted(
+                frame[group_column].unique(), key=shift_of, reverse=True
+            )
+        ]
+    else:
+        drawn = [(member, title) for member, title in members]
+        absent = [
+            member for member, _ in drawn if member not in set(frame[group_column])
+        ]
+        if absent:
+            raise ValueError(
+                f"{clade}: {absent} named in `members` but not in the frame's "
+                f"{group_column!r} column, so those sub-panels would be blank."
+            )
+    if len(drawn) > columns - 1:
         raise ValueError(
-            f"{clade} has {len(members)} candidates and the row is {columns} "
-            f"slots wide, which leaves no slot for the legend."
+            f"{clade} has {len(drawn)} {group_column} groups and the row is "
+            f"{columns} slots wide, which leaves no slot for the legend."
         )
 
     figure, axes = plt.subplots(
@@ -1920,24 +2081,66 @@ def background_panel(
         squeeze=False,
         sharey=True,
     )
-    for empty in axes[0][len(members) :]:
+    for empty in axes[0][len(drawn) :]:
         empty.set_axis_off()
 
-    for slot, candidate in enumerate(members):
+    for slot, (member, title) in enumerate(drawn):
         axis = axes[0][slot]
-        part = frame[frame["candidate"] == candidate].sort_values("background_order")
+        part = frame[frame[group_column] == member].sort_values("background_order")
         x = list(range(len(part)))
         for label, column, colour, marker in BACKGROUND_SERIES:
+            # Under the markers, so a whisker shorter than the dot is hidden
+            # by it rather than drawn over it: the dot is the estimate and the
+            # whisker is context for it.
+            if label in intervals:
+                low_column, high_column = intervals[label]
+                for position, low, high in zip(
+                    x,
+                    part[low_column].to_numpy(dtype=float),
+                    part[high_column].to_numpy(dtype=float),
+                ):
+                    if not (np.isfinite(low) and np.isfinite(high)):
+                        continue
+                    axis.vlines(
+                        position, low, high, color=colour, linewidth=1.2, zorder=2
+                    )
+                    axis.hlines(
+                        [low, high],
+                        position - BACKGROUND_SPREAD_CAP,
+                        position + BACKGROUND_SPREAD_CAP,
+                        color=colour,
+                        linewidth=1.2,
+                        zorder=2,
+                    )
             axis.plot(
                 x,
                 part[column],
                 marker=marker,
                 color=colour,
-                markersize=7,
+                markersize=marker_size,
                 linewidth=1.4,
-                label=label,
+                label=(series_labels or {}).get(label, label),
                 zorder=3,
             )
+        if absent_label is not None:
+            # Just above the floor of the shared domain rather than above the
+            # sub-panel's own data: a note about a pool that does not exist
+            # should not move when a neighbouring clade's points do.
+            low, high = y_domain
+            for position, missing in zip(
+                x, part[value_columns].isna().all(axis=1).tolist()
+            ):
+                if missing:
+                    axis.text(
+                        position,
+                        low + BACKGROUND_ABSENT_LIFT * (high - low),
+                        absent_label,
+                        ha="center",
+                        va="bottom",
+                        fontsize=BACKGROUND_FONT_PT,
+                        color="#555555",
+                        zorder=3,
+                    )
         axis.axhline(0.0, color="#cccccc", linewidth=1, zorder=1)
         # No p-value above the mutation. `rule pool_counts` still computes the
         # randomization test and still writes it to `pool_shifts.parquet` and
@@ -1954,7 +2157,7 @@ def background_panel(
         # "in clade 20B" would be the same five words on every one of them --
         # and on a two-candidate row they are wide enough to collide. The
         # clade is on the value-axis label instead, once.
-        axis.set_title(candidate, fontsize=BACKGROUND_FONT_PT, fontweight="bold")
+        axis.set_title(title, fontsize=BACKGROUND_FONT_PT, fontweight="bold")
         axis.tick_params(axis="y", labelsize=BACKGROUND_FONT_PT)
         # On every sub-panel, not only the one carrying the ticks: the grid is
         # how a reader carries a level across a row, and `sharey` hides the
@@ -1972,7 +2175,7 @@ def background_panel(
     # names what membership requires rather than the parent's whole
     # background.
     placed_xlabel = figure.supxlabel(
-        f"{BACKGROUND_X_TITLE}\n{BACKGROUND_X_GLOSS}",
+        f"{BACKGROUND_X_TITLE}\n{x_gloss}",
         fontsize=BACKGROUND_FONT_PT,
         fontweight="bold",
         ma="center",
@@ -1986,7 +2189,9 @@ def background_panel(
     # default, which for a vertical label means the lines align along their
     # lower edge and the shorter one hangs off the top.
     placed_ylabel = figure.supylabel(
-        f"fitness effect in\nclade {clade} subset",
+        value_label
+        if value_label is not None
+        else f"fitness effect in\nclade {clade} subset",
         fontsize=BACKGROUND_FONT_PT,
         fontweight="bold",
         ma="center",
@@ -2013,7 +2218,7 @@ def background_panel(
     # On this clade's own sub-panels rather than on the row's slots: the label
     # belongs under the plots it describes, not under the middle of a padding
     # that exists only to make the rows line up.
-    occupied = [axes[0][slot].get_position() for slot in range(len(members))]
+    occupied = [axes[0][slot].get_position() for slot in range(len(drawn))]
     label_x = (
         min(span.x0 for span in occupied) + max(span.x1 for span in occupied)
     ) / 2
@@ -2040,10 +2245,14 @@ def background_panel(
     placed_xlabel.set_text(BACKGROUND_X_TITLE)
     placed_xlabel.set_va("top")
     placed_xlabel.set_y(block.y1 + lift)
+    # `x_gloss`, not :data:`BACKGROUND_X_GLOSS`: the two-line label above was
+    # measured with the caller's gloss, and drawing the default here instead
+    # would silently put the wrong one on the page -- naming a hand-specified
+    # split as a frequency-derived one, at the size a reader trusts least.
     figure.text(
         label_x,
         block.y0 + lift,
-        BACKGROUND_X_GLOSS,
+        x_gloss,
         fontsize=BACKGROUND_FONT_PT - 1,
         ha="center",
         va="bottom",
@@ -2053,7 +2262,7 @@ def background_panel(
     # beside the plots rather than a band above them. Every row reserves that
     # slot, which is what the surplus column is for.
     handles, labels = axes[0][0].get_legend_handles_labels()
-    spare = axes[0][len(members)] if columns > len(members) else axes[0][-1]
+    spare = axes[0][len(drawn)] if columns > len(drawn) else axes[0][-1]
     drawn = figure.legend(
         handles,
         labels,
@@ -2063,6 +2272,11 @@ def background_panel(
         frameon=False,
         fontsize=BACKGROUND_FONT_PT,
         title="approach",
+        # A multi-line key is one entry, so its lines sit under each other
+        # rather than beside the marker. Harmless on the one-word keys the
+        # published rows use, which have no second line.
+        alignment="left",
+        labelspacing=0.9,
     )
     drawn.get_title().set_fontsize(BACKGROUND_FONT_PT)
     drawn.get_title().set_fontweight("bold")

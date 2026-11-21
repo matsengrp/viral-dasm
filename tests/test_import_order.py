@@ -36,8 +36,16 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 #: runs every cell, so a notebook a rule exports is pipeline code that reads a
 #: Parquet. The cell bodies are walked like any other module -- `ast.walk`
 #: reaches an import wherever it sits.
-SCRIPTS = sorted((REPO_ROOT / "scripts").glob("*.py")) + sorted(
-    (REPO_ROOT / "notebooks").glob("*.py")
+#:
+#: `exploratory/` is covered for the same reason even though the pipeline never
+#: runs it: those scripts read the same Parquet through the same vendored
+#: `dasm2`, so a lost memory pool or a leaked checkout costs them the same
+#: thing, and an off-to-the-side measurement that silently ran another
+#: checkout's code is worse than one that never ran.
+SCRIPTS = (
+    sorted((REPO_ROOT / "scripts").glob("*.py"))
+    + sorted((REPO_ROOT / "notebooks").glob("*.py"))
+    + sorted((REPO_ROOT / "exploratory").glob("*/*.py"))
 )
 
 #: Modules that pull pyarrow in, directly or transitively.

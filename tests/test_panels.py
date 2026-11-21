@@ -13,6 +13,7 @@ is absent, and
 
 from __future__ import annotations
 
+import io
 import os
 import sys
 from pathlib import Path
@@ -1824,3 +1825,404 @@ def test_the_subsampling_clip_is_not_the_library_clip():
     assert panel_spec.SUBSAMPLING_CLIP_LOWER != CLIP_LOWER
     assert set(panel_spec.SUBSAMPLING_MODELS) <= set(MODELS)
     assert panel_spec.SUBSAMPLING_SCATTER_CLADE in panel_spec.SUBSAMPLING_LADDER_CLADES
+
+
+def test_the_l455f_panel_is_placed_once_and_drawn_without_a_letter():
+    """`fig:l455f` is one panel, placed once, with nothing lettered on it.
+
+    Three spellings of the same panel: ``L455F_PANELS`` is what the rule
+    declares as its output, ``L455F_PANEL_LETTERS`` is what the composition
+    reads, and ``L455F_FIGURE_ROWS`` is where it is placed on the page. A stem
+    in one and not the others is a panel that is drawn and never composed, or
+    a cell of the figure with nothing to put in it.
+
+    And the label: ``compose`` draws a key's own name beside the panel unless
+    told otherwise, so a figure of one panel acquires a bold "A" by default --
+    naming a distinction it does not make, and one the caption has nothing to
+    refer to.
+    """
+    import panel_spec as spec
+
+    assert set(spec.L455F_PANEL_LETTERS.values()) == set(spec.L455F_PANELS), (
+        f"the composition reads {sorted(spec.L455F_PANEL_LETTERS.values())} "
+        f"and the rules write {sorted(spec.L455F_PANELS)}."
+    )
+    placed = [key for row in spec.L455F_FIGURE_ROWS for key in row]
+    assert sorted(placed) == sorted(spec.L455F_PANEL_LETTERS), (
+        f"the rows place {sorted(placed)} but the figure has panels "
+        f"{sorted(spec.L455F_PANEL_LETTERS)}."
+    )
+    assert len(placed) == len(set(placed)), (
+        f"a panel is placed twice: {placed}. The same panel would be drawn "
+        f"in two cells of the figure."
+    )
+    assert len(spec.L455F_PANELS) == 1, (
+        f"`fig:l455f` now has {len(spec.L455F_PANELS)} panels. More than one "
+        f"needs letters, and this figure is composed without them."
+    )
+    assert set(spec.L455F_FIGURE_LABELS) == set(spec.L455F_PANEL_LETTERS), (
+        f"labels are given for {sorted(spec.L455F_FIGURE_LABELS)} and the "
+        f"figure places {sorted(spec.L455F_PANEL_LETTERS)}; a panel with no "
+        f"entry is lettered with its key."
+    )
+    assert not any(spec.L455F_FIGURE_LABELS.values()), (
+        f"{spec.L455F_FIGURE_LABELS} letters a figure that has one panel."
+    )
+
+
+def test_the_l455f_panel_stems_are_not_the_agreement_figure_s():
+    """`fig:l455f`'s panel must not overwrite another figure's.
+
+    Every panel in a selection is written into one directory under its stem,
+    and each stem's CSV is tracked. A stem shared with another figure would
+    leave whichever rule ran second in possession of both panels, and the
+    published figure redrawn from the wrong table.
+    """
+    import panel_spec as spec
+
+    assert not set(spec.L455F_PANELS) & set(
+        spec.MUTATION_PANELS + spec.LADDER_PANELS + spec.BACKGROUND_PANELS
+    ), (
+        f"{sorted(set(spec.L455F_PANELS) & set(spec.MUTATION_PANELS + spec.LADDER_PANELS + spec.BACKGROUND_PANELS))} "
+        f"is written by two rules into one path."
+    )
+
+
+def test_the_background_row_default_is_what_it_was_before_l455f():
+    """`fig:within_clade_shifts`' rows are untouched by `fig:l455f`'s needs.
+
+    ``background_panel`` grew three arguments so that panel B of `fig:l455f`
+    could group its sub-panels by clade, name its own value axis and gloss a
+    hand-specified split. Each defaults to what the published rows already
+    did, so passing them explicitly must draw the same figure as passing
+    nothing -- otherwise the three published rows moved.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import panel_charts as charts
+
+    frame = pd.DataFrame(
+        {
+            "cluster": ["22D"] * 4,
+            "candidate": ["D574V", "D574V", "T19I", "T19I"],
+            "background": ["T346, T356", "R346, K356"] * 2,
+            "background_order": [0, 1, 0, 1],
+            "counts_effect": [-1.2, 0.9, -0.4, 0.3],
+            "dasm_effect": [-0.9, 0.7, -0.2, 0.1],
+        }
+    )
+    rendered = []
+    for kwargs in (
+        {},
+        {
+            "group_column": "candidate",
+            "members": None,
+            "value_label": None,
+            "x_gloss": charts.BACKGROUND_X_GLOSS,
+        },
+    ):
+        figure = charts.background_panel(
+            frame, "22D", y_domain=(-2.0, 2.0), columns=3, **kwargs
+        )
+        buffer = io.BytesIO()
+        figure.savefig(buffer, format="png", dpi=100)
+        rendered.append(buffer.getvalue())
+        plt.close(figure)
+    assert rendered[0] == rendered[1], (
+        "the new arguments at their defaults draw a different row from the "
+        "one the published figure is made of."
+    )
+
+
+def test_the_background_row_gloss_reaches_the_page():
+    """A caller's ``x_gloss`` is drawn, not merely measured.
+
+    The two-line x label is measured as one block and then split: the title
+    keeps the top and the gloss is re-drawn underneath. Drawing the module
+    constant there instead would put "clade-founder identities against
+    derived identities" under `fig:l455f`'s panel B -- which names a
+    hand-specified split as a frequency-derived one, in the one place on the
+    panel that says where the split came from.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import panel_charts as charts
+
+    frame = pd.DataFrame(
+        {
+            "cluster": ["22F", "22F"],
+            "candidate": ["L455F", "L455F"],
+            "background": ["F456", "L456"],
+            "background_order": [0, 1],
+            "counts_effect": [0.4, 3.3],
+            "dasm_effect": [0.36, 3.1],
+        }
+    )
+    gloss = "(left: parents carrying F456; right: parents carrying L456)"
+    figure = charts.background_panel(
+        frame,
+        "L455F",
+        y_domain=(-1.0, 4.0),
+        columns=2,
+        group_column="cluster",
+        value_label="fitness effect of\nL455F",
+        x_gloss=gloss,
+    )
+    drawn = {text.get_text() for text in figure.texts}
+    plt.close(figure)
+    assert gloss in drawn, (
+        f"the caller's gloss is not on the panel; it carries {sorted(drawn)}."
+    )
+    assert charts.BACKGROUND_X_GLOSS not in drawn, (
+        "the default gloss was drawn over the caller's, which tells a reader "
+        "the split came from branch frequencies when it did not."
+    )
+
+
+def test_the_background_row_draws_the_members_it_is_given():
+    """``members`` sets which sub-panels are drawn, in what order, titled how.
+
+    `fig:within_clade_shifts` sorts its sub-panels steepest-first and titles
+    them by the group value, which is what a row of mutations wants.
+    `fig:l455f`'s row is clades, which have an order of their own and a name
+    in the paper that is not the key this pipeline uses.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import panel_charts as charts
+
+    # 23A has the larger counts shift, so steepest-first would put it first.
+    frame = pd.DataFrame(
+        {
+            "cluster": ["23A", "23A", "22F", "22F"],
+            "candidate": ["L455F"] * 4,
+            "background": ["F456", "L456"] * 2,
+            "background_order": [0, 1, 0, 1],
+            "counts_effect": [0.1, 3.5, 0.1, 1.0],
+            "dasm_effect": [0.3, 2.7, 0.3, 1.1],
+        }
+    )
+    figure = charts.background_panel(
+        frame, "L455F", y_domain=(-1.0, 4.0), columns=3, group_column="cluster"
+    )
+    assert [axis.get_title() for axis in figure.axes if axis.get_title()] == [
+        "23A",
+        "22F",
+    ], "the default is no longer steepest-first, so the test below proves nothing."
+    plt.close(figure)
+
+    figure = charts.background_panel(
+        frame,
+        "L455F",
+        y_domain=(-1.0, 4.0),
+        columns=3,
+        group_column="cluster",
+        members=[("22F", "22F (XBB)"), ("23A", "23A (XBB.1.5)")],
+    )
+    assert [axis.get_title() for axis in figure.axes if axis.get_title()] == [
+        "22F (XBB)",
+        "23A (XBB.1.5)",
+    ], "the given order and titles did not reach the sub-panels."
+    plt.close(figure)
+
+    with pytest.raises(ValueError, match="not in the frame"):
+        charts.background_panel(
+            frame,
+            "L455F",
+            y_domain=(-1.0, 4.0),
+            columns=3,
+            group_column="cluster",
+            members=[("23Z", "23Z (nowhere)")],
+        )
+
+
+def test_the_spread_whisker_is_drawn_only_where_there_is_one():
+    """`fig:l455f`'s whiskers: on the DASM series, and not on an empty pool.
+
+    A whisker is two line collections -- the stem, and its two caps in one
+    call -- so counting them separates "drawn" from "drawn at zero height",
+    which is what a pool whose parents agree would look like. The unmeasured
+    background has NaN ends and has to draw none at all: a whisker there
+    would be a bounded interval on a pool that was never measured.
+    """
+    import matplotlib.pyplot as plt
+    import panel_charts as charts
+
+    frame = pd.DataFrame(
+        {
+            "cluster": ["22F", "22F", "23F", "23F"],
+            "candidate": ["L455F"] * 4,
+            "background": ["F456", "L456", "n.a.", "L456"],
+            "background_order": [0, 1, 0, 1],
+            "counts_effect": [0.1, 3.0, float("nan"), 3.4],
+            "dasm_effect": [0.3, 2.7, float("nan"), 3.7],
+            "dasm_low": [0.2, 2.6, float("nan"), 3.4],
+            "dasm_high": [0.5, 2.8, float("nan"), 3.9],
+        }
+    )
+    kwargs = {
+        "y_domain": (-1.0, 4.5),
+        "columns": 3,
+        "group_column": "cluster",
+        "members": [("22F", "22F"), ("23F", "23F")],
+    }
+    plain = charts.background_panel(frame, "L455F", **kwargs)
+    plain_counts = [len(axis.collections) for axis in plain.axes if axis.get_title()]
+    plt.close(plain)
+
+    whiskered = charts.background_panel(
+        frame, "L455F", spread_columns={"DASM": ("dasm_low", "dasm_high")}, **kwargs
+    )
+    counts = [len(axis.collections) for axis in whiskered.axes if axis.get_title()]
+    plt.close(whiskered)
+
+    assert plain_counts == [0, 0], (
+        f"the panel already draws {plain_counts} collections without being "
+        f"asked for whiskers, so this test counts something else."
+    )
+    assert counts == [4, 2], (
+        f"collections per sub-panel are {counts}; 22F has two measured pools "
+        f"and 23F one, at two collections each."
+    )
+
+    with pytest.raises(KeyError, match="does not draw"):
+        charts.background_panel(
+            frame,
+            "L455F",
+            spread_columns={"counts!": ("dasm_low", "dasm_high")},
+            **kwargs,
+        )
+    with pytest.raises(KeyError, match="interval column"):
+        charts.background_panel(
+            frame, "L455F", spread_columns={"DASM": ("nope", "dasm_high")}, **kwargs
+        )
+
+
+def test_the_y_domain_contains_the_whiskers_it_is_shown():
+    """An interval reaching past its dot still has to fit on the axis."""
+    import panel_charts as charts
+
+    frame = pd.DataFrame(
+        {
+            "cluster": ["22F", "22F"],
+            "candidate": ["L455F"] * 2,
+            "background": ["F456", "L456"],
+            "background_order": [0, 1],
+            "counts_effect": [0.1, 3.0],
+            "dasm_effect": [0.3, 2.7],
+            "dasm_low": [0.2, 2.6],
+            "dasm_high": [0.5, 3.9],
+        }
+    )
+    narrow = charts.background_y_domain(frame)
+    wide = charts.background_y_domain(frame, extra_columns=("dasm_low", "dasm_high"))
+    assert narrow[1] < 3.9, "the points alone already reach the whisker's top."
+    assert wide[1] > 3.9, f"the domain {wide} clips a whisker ending at 3.9."
+
+
+def test_a_background_with_nothing_measured_is_a_tick_and_not_a_third_pool():
+    """23F's case: a named x position with no point behind it.
+
+    Its founder already carries 456L, so there is no F456 subset of that
+    clade to measure -- which is different from one that was measured and
+    came out thin. The tick goes on naming the background, so that what is
+    missing is legible as the F456 side rather than as an anonymous gap, and
+    ``absent_label`` writes the note inside the axes. A row carrying no value
+    must not reach the two-background check either way: that check counts the
+    backgrounds that carry a value.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import panel_charts as charts
+
+    frame = pd.DataFrame(
+        {
+            "cluster": ["22F", "22F", "23F", "23F"],
+            "candidate": ["L455F"] * 4,
+            "background": ["F456", "L456", "F456", "L456"],
+            "background_order": [0, 1, 0, 1],
+            "counts_effect": [0.1, 3.0, float("nan"), 3.2],
+            "dasm_effect": [0.3, 2.8, float("nan"), 3.8],
+        }
+    )
+    figure = charts.background_panel(
+        frame,
+        "L455F",
+        y_domain=charts.background_y_domain(frame),
+        columns=3,
+        group_column="cluster",
+        members=[("22F", "22F"), ("23F", "23F")],
+        absent_label="n.a.",
+    )
+    titled = [axis for axis in figure.axes if axis.get_title()]
+    labels = {
+        axis.get_title(): [text.get_text() for text in axis.get_xticklabels()]
+        for axis in titled
+    }
+    notes = {
+        axis.get_title(): [text.get_text() for text in axis.texts] for axis in titled
+    }
+    series_labels = {label for label, _, _, _ in charts.BACKGROUND_SERIES}
+    lines = {
+        axis.get_title(): [
+            line.get_ydata() for line in axis.lines if line.get_label() in series_labels
+        ]
+        for axis in titled
+    }
+    plt.close(figure)
+    assert labels["23F"] == ["F456", "L456"], (
+        f"23F's ticks are {labels['23F']}; the side it does not have is still "
+        f"the F456 side, and the tick is what says so."
+    )
+    assert labels["22F"] == ["F456", "L456"]
+    assert notes["23F"] == ["n.a."], (
+        f"23F's in-plot text is {notes['23F']}; the clade with no F456 pool "
+        f"is the one that needs the note."
+    )
+    assert notes["22F"] == [], (
+        f"22F carries a note ({notes['22F']}) although both its pools were "
+        f"measured, so the note does not mean what it says."
+    )
+    # And neither series puts a point at the F456 position of 23F, which
+    # would be a measurement of a pool that does not exist. The zero rule is
+    # excluded above; it is drawn across every sub-panel.
+    assert all(numpy.isnan(series[0]) for series in lines["23F"]), (
+        f"23F's series start at {[series[0] for series in lines['23F']]}; the "
+        f"unmeasured side must stay empty."
+    )
+
+
+def test_a_third_measured_background_is_still_refused():
+    """The check the n.a. row must not weaken.
+
+    Three *measured* backgrounds is the error it was written for: a slope
+    through three points has no single pair it belongs to.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt  # noqa: F401
+    import panel_charts as charts
+
+    frame = pd.DataFrame(
+        {
+            "cluster": ["22F"] * 3,
+            "candidate": ["L455F"] * 3,
+            "background": ["F456", "L456", "S456"],
+            "background_order": [0, 1, 2],
+            "counts_effect": [0.1, 3.0, 1.5],
+            "dasm_effect": [0.3, 2.8, 1.4],
+        }
+    )
+    with pytest.raises(ValueError, match="measured backgrounds"):
+        charts.background_panel(
+            frame, "L455F", y_domain=(-1.0, 4.0), columns=3, group_column="cluster"
+        )

@@ -24,11 +24,13 @@ pd = pytest.importorskip("pandas")
 import panel_spec
 
 from dasm2.analysis.within_clade_pools import (
+    POOL_SPREAD_QUANTILES,
     PoolSpec,
     permutation_shift_test,
     pool_average_log_sf,
     pooled_log_sf,
     substitution_key,
+    weighted_quantiles,
 )
 
 
@@ -73,6 +75,51 @@ def test_the_pool_average_is_weighted_by_synonymous_events():
     assert average.log_sf < unweighted
     assert average.n_haplotypes == 2
     assert average.synonymous_weight == pytest.approx(100.0)
+
+
+def test_the_spread_is_weighted_like_the_average_and_not_interpolated():
+    """`fig:l455f`'s whiskers: the pool's own weights, and its own values.
+
+    Two claims at once, because the second is what makes the first visible.
+    A haplotype carrying 99 of a pool's 100 events sets both ends of a
+    5th-to-95th interval: at either end the cumulative weight has already
+    passed through it. And the ends are effects some haplotype actually has
+    -- an interpolated end would be a number no parent in the pool was
+    scored at, on a distribution this lopsided.
+    """
+    founder = "MKV"
+    heavy, light = "MKA", "MRV"
+    average = pool_average_log_sf(
+        {"aaa": 99, "bbb": 1},
+        {"aaa": heavy, "bbb": light},
+        {
+            substitution_key(heavy, founder): 1.0,
+            substitution_key(light, founder): 5.0,
+        },
+        founder_aa=founder,
+    )
+    assert average.spread == (1.0, 1.0), (
+        f"the spread is {average.spread}; the heavy haplotype holds 99% of "
+        f"the weight, so both percentiles are its own effect."
+    )
+
+    # Unweighted, the same two haplotypes would give the two extremes.
+    assert weighted_quantiles([1.0, 1.0], [1.0, 5.0]) == (1.0, 5.0)
+
+
+def test_the_spread_quantiles_are_the_ones_the_panel_is_captioned_with():
+    """The caption says 5th to 95th, so the constant has to be that pair."""
+    assert POOL_SPREAD_QUANTILES == (0.05, 0.95)
+
+
+def test_a_spread_cannot_be_taken_of_nothing():
+    """A pool with no weight has no distribution, and NaN ends draw as open."""
+    with pytest.raises(ValueError, match="sum to zero"):
+        weighted_quantiles([0.0, 0.0], [1.0, 2.0])
+    with pytest.raises(ValueError, match="no haplotypes"):
+        weighted_quantiles([], [])
+    with pytest.raises(ValueError, match="have to line up"):
+        weighted_quantiles([1.0], [1.0, 2.0])
 
 
 def test_the_pool_average_is_arithmetic_in_the_linear_domain():
