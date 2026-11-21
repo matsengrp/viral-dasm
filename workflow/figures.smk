@@ -74,7 +74,6 @@ from panel_spec import (
     L455F_CLADE_NAMES,
     L455F_FIGURE_STEM,
     L455F_HAPLOTYPE_TABLE,
-    L455F_LOOKUP_PANEL,
     L455F_PANELS,
     L455F_PANEL_LETTERS,
     L455F_POOL_CELLS,
@@ -189,9 +188,9 @@ rule panels:
         panel_outputs(MUTATION_PANELS, DEFAULT_SELECTION),
         panel_outputs(LADDER_PANELS, DEFAULT_SELECTION),
         panel_outputs(SHIFT_ERROR_PANELS, DEFAULT_SELECTION, SUPPLEMENT_FORMATS),
-        # `fig:l455f`'s two panels. Named here for the reason the supplement
-        # above is: `rule figures` asks for the composed figure, and a panel
-        # nobody can ask for on its own is one that cannot be redrawn alone.
+        # `fig:l455f`'s panel. Named here for the reason the supplement above
+        # is: `rule figures` asks for the composed figure, and a panel nobody
+        # can ask for on its own is one that cannot be redrawn alone.
         panel_outputs(L455F_PANELS, DEFAULT_SELECTION),
 
 
@@ -1700,7 +1699,7 @@ rule figures:
             str(path)
             for path in composed_paths(DEFAULT_SELECTION, SHIFT_FIGURE_STEM)
         ],
-        # `fig:l455f`, and so its two panels. The published selection only,
+        # `fig:l455f`, and so its panel. The published selection only,
         # for `fig:within_clade_shifts`' reason: its expensive half is the
         # haplotype scoring, which `fidelity` would repeat under two more
         # checkpoints for a comparison no panel reads.
@@ -1775,7 +1774,7 @@ rule background_effects:
 
 
 rule l455f_pools:
-    """`fig:l455f` panel B's measurement: L455F on two backgrounds, per clade.
+    """`fig:l455f`'s measurement: L455F on two backgrounds, per clade.
 
     **Its own rule rather than rows in `rule pool_counts`', and only because
     of the split.** Everything downstream of the pool definition is shared --
@@ -1864,54 +1863,8 @@ rule l455f_pools:
         " > {log} 2>&1"
 
 
-rule l455f_lookup:
-    """`fig:l455f` panel A: L455F across the clades, from the scored table.
-
-    The same chart as `fig:agreement`'s panel A at a different mutation, and
-    its own stem rather than that one's: reusing it would overwrite the
-    tracked CSV the published figure is drawn from.
-    """
-    wildcard_constraints:
-        selection="|".join(SELECTIONS),
-    input:
-        panels="scripts/panels.py",
-        spec="scripts/panel_spec.py",
-        charts="scripts/panel_charts.py",
-        founder_reader="scripts/founders.py",
-        lib="scripts/lib.py",
-        config="config.yaml",
-        analysis_charts="dasm2/analysis/charts.py",
-        analysis_viral="dasm2/analysis/viral.py",
-        analysis_eval="dasm2/analysis/viral_fitness_eval.py",
-        io="dasm2/io.py",
-        conversion="dasm2/sequence/conversion.py",
-        scov2_rates="dasm2/neutral/scov2_rates.py",
-        dasm2_init="dasm2/__init__.py",
-        notebook="notebooks/l455f_lookup.py",
-        table=SCORED_TABLE,
-        # `unobservable_founder_codons` asks every scored clade whether its
-        # founder differs from the reference at a tree-masked nucleotide, and
-        # this panel reads every clade. Plus the two files that predicate is
-        # built from.
-        clade_founders=clade_founder_fastas,
-        masked_nt_sites=str(mat_pcp_path("masked_nt_sites_file")),
-        reference=str(mat_pcp_path("reference_sequence_file")),
-    output:
-        html=f"{NOTEBOOK_DIR}/l455f_lookup_{{selection}}.html",
-        panels=panel_outputs([L455F_LOOKUP_PANEL], "{selection}"),
-    log:
-        f"{ARTIFACT_ROOT}/logs/l455f_lookup_{{selection}}.log",
-    resources:
-        mem_mb=PANEL_MEM_MB,
-    shell:
-        "marimo export html {input.notebook} -o {output.html} --force"
-        " -- --table {input.table}"
-        " --selection {wildcards.selection}"
-        " > {log} 2>&1"
-
-
 rule l455f_backgrounds:
-    """`fig:l455f` panel B: one sub-panel per clade, two backgrounds each.
+    """`fig:l455f`: one sub-panel per clade, two backgrounds each.
 
     Its own rule rather than a cell of `rule l455f_pools`, which streams the
     corpus twice per clade and scores a few thousand haplotypes: this reads
@@ -1957,7 +1910,7 @@ rule l455f_backgrounds:
 
 
 rule compose_l455f:
-    """`fig:l455f` itself, laid out from its two panels.
+    """`fig:l455f` itself, its one panel placed on a page.
 
     No scoring, no tallying and no table: it reads PNGs, the same split that
     makes the other compositions cheap to re-lay-out.

@@ -1216,62 +1216,57 @@ L455F_POOL_SUMMARY = POOL_DIR / "l455f_pool_summary.json"
 #: training, and on CPU, no card.
 L455F_HAPLOTYPE_TABLE = SCORED_DIR / "l455f_haplotype_selection_factors.parquet"
 
-#: Panel stems, named rather than indexed, because which letter each one
-#: carries is a layout choice and the rules that write them are not.
-#:
-#: Its own stems, not :data:`MUTATION_PANELS`': the lookup panel here is the
-#: same chart as `fig:agreement`'s panel A at a different mutation, and
-#: reusing that stem would overwrite the tracked CSV that figure is drawn
-#: from.
-L455F_BACKGROUND_PANEL = "panel_a_l455f_backgrounds"
-L455F_LOOKUP_PANEL = "panel_b_l455f_lookup"
+#: The figure's one panel stem. Unlettered -- `fig:l455f` is a single panel,
+#: so there is no A to distinguish from a B and the stem says what the panel
+#: is rather than where it sits.
+L455F_BACKGROUND_PANEL = "l455f_backgrounds"
 
-#: In figure order: the within-clade contrast first, the across-clade lookup
-#: second. The contrast leads because it is the claim -- one mutation, two
-#: backgrounds, both approaches -- and the lookup below it is what that claim
-#: looks like when the backgrounds are not separated.
-L455F_PANELS: tuple[str, ...] = (L455F_BACKGROUND_PANEL, L455F_LOOKUP_PANEL)
+#: One panel, kept as a tuple because `rule panels` collects panel stems by
+#: figure and a bare string there would be collected as its characters.
+L455F_PANELS: tuple[str, ...] = (L455F_BACKGROUND_PANEL,)
 
 #: `fig:l455f`'s stem, which is its LaTeX label: `main.tex` includes
 #: `figures/l455f.pdf`. One spelling, so the file the manuscript includes and
 #: the file this pipeline writes cannot drift.
 L455F_FIGURE_STEM = "l455f"
 
-#: Two rows of one. Panel A is a single image of several sub-panels, unlike
+#: One row of one. The panel is a single image of several sub-panels, unlike
 #: `fig:within_clade_shifts`' one image per clade, because here the clade is
 #: the sub-panel rather than the row.
-L455F_FIGURE_ROWS: tuple[tuple[str, ...], ...] = (("A",), ("B",))
+L455F_FIGURE_ROWS: tuple[tuple[str, ...], ...] = (("A",),)
 
-#: Which panel stem each letter is. Derived nowhere: a letter is a caption
-#: fact and a stem is a filename, and nothing in either implies the other.
-L455F_PANEL_LETTERS: dict[str, str] = {
-    "A": L455F_BACKGROUND_PANEL,
-    "B": L455F_LOOKUP_PANEL,
-}
+#: Which panel stem each layout key is. "A" is a key into the images
+#: `compose` is handed, not a letter drawn on the page: see
+#: :data:`L455F_FIGURE_LABELS`.
+L455F_PANEL_LETTERS: dict[str, str] = {"A": L455F_BACKGROUND_PANEL}
 
-#: The box this figure has to fit inside, in inches. Shorter than
-#: `fig:within_clade_shifts`': two rows rather than three, and the top row is
-#: one wide panel rather than a scatter whose square aspect sets the height.
+#: Nothing drawn beside the panel. A figure of one panel has no second panel
+#: to be told apart from, so a bold "A" over it would name a distinction the
+#: figure does not make -- and the caption has none to refer to either.
+L455F_FIGURE_LABELS: dict[str, str] = {"A": ""}
+
+#: The box this figure has to fit inside, in inches. The width is the text
+#: block's; the height is slack and stays generous, because a single row of
+#: one wide panel is bound by width and a height that bound instead would
+#: shrink the figure for no reason a reader could see.
 L455F_BOX_IN: tuple[float, float] = (7.5, 7.0)
 
 #: Shrink, so this figure's type matches the figures it sits among rather
-#: than the box it is allowed. `compose` solves one dpi from the pixels it is
-#: handed, so a figure of two wide panels resolves to a lower dpi -- and
-#: larger type on the page -- than one of six. At 1.0 this figure came out at
-#: 8.7 pt panel titles against `fig:agreement`'s 7.2 and
-#: `fig:within_clade_shifts`' 6.6, which is a fifth larger than its
-#: neighbours in a paper that prints them a page apart. 0.83 is 7.2/8.7,
-#: measured from those compositions rather than guessed, and it is a uniform
-#: shrink: the box, the margins and the gaps all move with it.
-L455F_FIGURE_SCALE = 0.83
-
-#: The lookup panel's own size, in Vega-Lite pixels. Not
-#: :data:`LOOKUP_PANEL_HEIGHT` and :data:`LOOKUP_PANEL_SCALE`, which are tuned
-#: so that `fig:agreement`'s panel A sits level with two neighbours in a
-#: three-across row and are pinned there by `tests/test_panels.py`. Here it
-#: has the row to itself and carries 23 clades on its x axis rather than 15.
-L455F_LOOKUP_WIDTH = 900
-L455F_LOOKUP_HEIGHT = 330
+#: than fill the box it is allowed. `compose` solves one dpi from the pixels
+#: it is handed -- here the panel's width over the width available, since a
+#: single short row is nowhere near the box's height -- and type lands on the
+#: page at `size * 72 / dpi`. So the scale is the only handle on type size
+#: once the panel itself is drawn, and the figure's width on the page is
+#: whatever that handle leaves.
+#:
+#: Solved rather than guessed, against the composition this figure is printed
+#: beside: `fig:agreement` places its panels at 755 dpi for 7.2 pt titles,
+#: and this panel is 4,833 px wide inside a box 7.5 in wide less 0.12 in of
+#: margin, so 4833 / (750 * 7.38) is the scale that lands on the same 7.2 pt.
+#: `rule compose_l455f`'s log prints what it actually solved; read it there
+#: rather than from this comment if the panel is ever redrawn at another
+#: size.
+L455F_FIGURE_SCALE = 0.873
 
 #: The columns the panels read. Named rather than taken whole: the table is
 #: 1,425,760 rows per run over 24 columns, and the pooled `*_all` half,
@@ -1281,10 +1276,8 @@ L455F_LOOKUP_HEIGHT = 330
 #:
 #: A figure that does want one of the `*_all` columns widens this tuple at
 #: its own call to `panels.read_scored_table`, as `scripts/dms.py` does with
-#: `POOLED_METRIC` and `fig:l455f`'s panel A does with
-#: :data:`panels.pooled_metric_column`. Widening it here instead would make
-#: every panel's read, and every test fixture, carry a column one figure
-#: wants.
+#: `POOLED_METRIC`. Widening it here instead would make every panel's read,
+#: and every test fixture, carry a column one figure wants.
 TABLE_COLUMNS: tuple[str, ...] = (
     "clade",
     "model",

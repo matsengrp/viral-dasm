@@ -14,7 +14,7 @@ def _():
 @app.cell
 def _(mo):
     mo.md(r"""
-    # `fig:l455f` panel A — L455F on two backgrounds, clade by clade
+    # `fig:l455f` — L455F on two backgrounds, clade by clade
 
     *L455F's fitness effect on the parents carrying the clade founder's 456F
     and on the parents carrying 456L, estimated by both approaches, in each
@@ -234,9 +234,8 @@ def _(DRAWN, FOCAL, SELECTION, charts, mo, panels, spec):
         # where a reader meets the marks rather than in the caption.
         series_labels={"counts": "counts\n(separately applied\nto each subset)"},
         # Twice the diameter of the published rows' dots. `markersize` is a
-        # diameter in points, so this is a factor of two directly; panel B's
-        # Vega-Lite `size` is an area and takes a factor of four for the same
-        # change.
+        # diameter in points, so a factor of two here is a factor of two on
+        # the page.
         marker_size=14,
         # One line. The two-line form exists because
         # `fig:within_clade_shifts`' label names a clade as well as a

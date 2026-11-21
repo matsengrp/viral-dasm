@@ -1,4 +1,4 @@
-"""The counts and DASM halves of `fig:l455f`'s panel B, one clade at a time.
+"""The counts and DASM halves of `fig:l455f`, one clade at a time.
 
 For every XBB clade in :data:`panel_spec.L455F_CLADES`, this measures L455F's
 fitness effect on the parents that carry the clade founder's 456F and on the

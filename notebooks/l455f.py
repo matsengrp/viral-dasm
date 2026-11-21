@@ -14,28 +14,26 @@ def _():
 @app.cell
 def _(mo):
     mo.md(r"""
-    # `fig:l455f` — one mutation's effect, between clades and within them
+    # `fig:l455f` — one mutation's effect on two backgrounds
 
     Composition only. Nothing here scores a model, tallies a pool or
-    recomputes a shift: both panels are PNGs that `l455f_lookup.py` and
-    `l455f_backgrounds.py` already wrote at their own settings, and this
-    notebook arranges them.
+    recomputes a shift: the panel is a PNG that `l455f_backgrounds.py`
+    already wrote at its own settings, and this notebook places it on a page.
 
-    Two rows of one.
+    One row of one, and so **no panel letter**: a lone panel has no second
+    panel to be told apart from, and the caption has none to refer to.
+    `spec.L455F_FIGURE_LABELS` is what says so, and the left margin loses the
+    strip a letter would have sat in.
 
     | panel | drawn by | what it shows |
     |---|---|---|
-    | A | `l455f_backgrounds` | L455F in each XBB clade, on 456F parents against 456L parents |
-    | B | `l455f_lookup` | L455F across every clade that carries an estimate, both approaches, against the clade-pooled counts estimate |
+    | — | `l455f_backgrounds` | L455F in each XBB clade, on F456 parents against L456 parents |
 
-    **What the two rows are for.** A is the claim: inside a single clade,
-    where elapsed time is nearly fixed, the same mutation is measured on two
-    sets of parents that differ at one site, and both approaches see it move.
-    B is what that looks like when the backgrounds are *not* separated -- one
-    number per clade, and one number for the whole lot, which is all the
-    counts approach can give without being told where to cut.
+    **What it is for.** Inside a single clade, where elapsed time is nearly
+    fixed, the same mutation is measured on two sets of parents that differ
+    at one site, and both approaches see it move.
 
-    **GISAID**: reads two rendered panels and writes a figure. No sequence, no
+    **GISAID**: reads one rendered panel and writes a figure. No sequence, no
     per-site table and no count passes through this notebook.
     """)
     return
@@ -43,6 +41,7 @@ def _(mo):
 
 @app.cell
 def _(mo):
+    import dataclasses
     import sys
     from pathlib import Path
 
@@ -59,7 +58,7 @@ def _(mo):
     # statement of it.
     SELECTION = str(mo.cli_args()["selection"])
     PANEL_DIR = spec.figure_dir(SELECTION)
-    return PANEL_DIR, SELECTION, fl, spec
+    return PANEL_DIR, SELECTION, dataclasses, fl, spec
 
 
 @app.cell
@@ -84,9 +83,8 @@ def _(PANEL_DIR, SELECTION, fl, mo, spec):
     # No `pad_to_common_width` here, unlike `within_clade_shifts.py`. That
     # figure pads because each of its rows is a scatter *and* a background
     # row, and the background rows only read as a column if the scatters
-    # beside them end at one x. Here every row is one panel, so there is no
-    # second column to line up and padding would only widen the narrower row
-    # with whitespace.
+    # beside them end at one x. Here there is one panel, so there is nothing
+    # to line it up against.
     mo.md(
         f"Selection **{SELECTION}**, at the size each rule rendered it:\n\n"
         + "\n".join(
@@ -98,18 +96,25 @@ def _(PANEL_DIR, SELECTION, fl, mo, spec):
 
 
 @app.cell
-def _(PANELS, fl, spec):
-    # The two panels are drawn by different renderers: A is Vega-Lite from
-    # `panel_charts.save_panel`, B matplotlib from `save_mpl_panel`. One title
-    # size still serves both, because both are written at `VEGA_WRITE_PPI` and
-    # a Vega-Lite pixel and a matplotlib point both land at `size * ppi / 72`
-    # on disk -- `BACKGROUND_FONT_PT` is `PANEL_FONT_SIZE` converted on that
-    # basis. That is what the panel letters are sized against.
+def _(PANELS, dataclasses, fl, spec):
+    # The panel is matplotlib, from `panel_charts.save_mpl_panel`, but the
+    # title size is still given in Vega-Lite's units: both renderers write at
+    # `VEGA_WRITE_PPI`, and a Vega-Lite pixel and a matplotlib point both land
+    # at `size * ppi / 72` on disk -- `BACKGROUND_FONT_PT` is
+    # `PANEL_FONT_SIZE` converted on that basis. Nothing is lettered here, so
+    # this now sizes only the figure, not a label; it is left in place so that
+    # the dpi this figure is solved at stays comparable to its neighbours'.
+    #
+    # `labels` suppresses the letter. The margin would still reserve the
+    # strip it sits in, so `label_w_in` goes to zero as well and the left
+    # margin becomes the same `margin_pad_in` the right side gets.
     composed = fl.compose(
         PANELS,
         [list(_row) for _row in spec.L455F_FIGURE_ROWS],
         box_in=spec.L455F_BOX_IN,
         scale=spec.L455F_FIGURE_SCALE,
+        spacing=dataclasses.replace(fl.DEFAULT_SPACING, label_w_in=0.0),
+        labels=spec.L455F_FIGURE_LABELS,
         title_px_on_disk=fl.vega_title_px_on_disk(title_px=spec.PANEL_TITLE_PX),
     )
     print(composed.summary())

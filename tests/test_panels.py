@@ -1827,14 +1827,19 @@ def test_the_subsampling_clip_is_not_the_library_clip():
     assert panel_spec.SUBSAMPLING_SCATTER_CLADE in panel_spec.SUBSAMPLING_LADDER_CLADES
 
 
-def test_the_l455f_letters_are_the_panels_its_rules_write():
-    """`fig:l455f`'s caption letters and its rules' outputs are one set.
+def test_the_l455f_panel_is_placed_once_and_drawn_without_a_letter():
+    """`fig:l455f` is one panel, placed once, with nothing lettered on it.
 
-    Two spellings of the same two panels: ``L455F_PANELS`` is what the two
-    rules declare as outputs, ``L455F_PANEL_LETTERS`` is what the composition
-    reads, and ``L455F_FIGURE_ROWS`` is where they are placed on the page. A
-    stem in one and not the others is a panel that is drawn and never
-    composed, or a cell of the figure with nothing to put in it.
+    Three spellings of the same panel: ``L455F_PANELS`` is what the rule
+    declares as its output, ``L455F_PANEL_LETTERS`` is what the composition
+    reads, and ``L455F_FIGURE_ROWS`` is where it is placed on the page. A stem
+    in one and not the others is a panel that is drawn and never composed, or
+    a cell of the figure with nothing to put in it.
+
+    And the label: ``compose`` draws a key's own name beside the panel unless
+    told otherwise, so a figure of one panel acquires a bold "A" by default --
+    naming a distinction it does not make, and one the caption has nothing to
+    refer to.
     """
     import panel_spec as spec
 
@@ -1842,23 +1847,36 @@ def test_the_l455f_letters_are_the_panels_its_rules_write():
         f"the composition reads {sorted(spec.L455F_PANEL_LETTERS.values())} "
         f"and the rules write {sorted(spec.L455F_PANELS)}."
     )
-    placed = [letter for row in spec.L455F_FIGURE_ROWS for letter in row]
+    placed = [key for row in spec.L455F_FIGURE_ROWS for key in row]
     assert sorted(placed) == sorted(spec.L455F_PANEL_LETTERS), (
         f"the rows place {sorted(placed)} but the figure has panels "
         f"{sorted(spec.L455F_PANEL_LETTERS)}."
     )
     assert len(placed) == len(set(placed)), (
-        f"a letter is placed twice: {placed}. The same panel would be drawn "
+        f"a panel is placed twice: {placed}. The same panel would be drawn "
         f"in two cells of the figure."
+    )
+    assert len(spec.L455F_PANELS) == 1, (
+        f"`fig:l455f` now has {len(spec.L455F_PANELS)} panels. More than one "
+        f"needs letters, and this figure is composed without them."
+    )
+    assert set(spec.L455F_FIGURE_LABELS) == set(spec.L455F_PANEL_LETTERS), (
+        f"labels are given for {sorted(spec.L455F_FIGURE_LABELS)} and the "
+        f"figure places {sorted(spec.L455F_PANEL_LETTERS)}; a panel with no "
+        f"entry is lettered with its key."
+    )
+    assert not any(spec.L455F_FIGURE_LABELS.values()), (
+        f"{spec.L455F_FIGURE_LABELS} letters a figure that has one panel."
     )
 
 
 def test_the_l455f_panel_stems_are_not_the_agreement_figure_s():
-    """`fig:l455f`'s panel A must not overwrite `fig:agreement`'s.
+    """`fig:l455f`'s panel must not overwrite another figure's.
 
-    They are the same chart at a different mutation, so the stems are the one
-    thing keeping two tracked CSVs apart. Sharing one would leave whichever
-    rule ran second in possession of both figures' panel A.
+    Every panel in a selection is written into one directory under its stem,
+    and each stem's CSV is tracked. A stem shared with another figure would
+    leave whichever rule ran second in possession of both panels, and the
+    published figure redrawn from the wrong table.
     """
     import panel_spec as spec
 
@@ -1867,61 +1885,6 @@ def test_the_l455f_panel_stems_are_not_the_agreement_figure_s():
     ), (
         f"{sorted(set(spec.L455F_PANELS) & set(spec.MUTATION_PANELS + spec.LADDER_PANELS + spec.BACKGROUND_PANELS))} "
         f"is written by two rules into one path."
-    )
-
-
-def test_the_lookup_reference_rule_is_drawn_and_is_not_the_zero_rule():
-    """Panel A's clade-pooled rule: off by default, and told apart when on.
-
-    Two things in one test, because each is meaningless without the other.
-    The rule has to be *absent* unless asked for, or `fig:agreement`'s panel A
-    would acquire a horizontal line it was never drawn with. And when it is
-    asked for it has to be distinguishable from the zero rule beside it --
-    both are dashed horizontals, and two dashed grey horizontals on one panel
-    cannot be told apart.
-    """
-    import panel_charts as charts
-
-    frame = pd.DataFrame(
-        {
-            "clade": ["22F", "23A", "23F"],
-            "delta_fitness": [0.4, 0.5, 3.4],
-            "log_sf": [0.36, 0.52, 3.47],
-        }
-    )
-    plain = charts.mutation_lookup_line(frame, "L455F").to_dict()
-    assert _marks(plain) == {"line", "rule"}, (
-        f"the default panel drew {sorted(_marks(plain))}. `fig:agreement`'s "
-        f"panel A is drawn through this path and carries no reference line."
-    )
-
-    withrule = charts.mutation_lookup_line(
-        frame,
-        "L455F",
-        series_colors=(charts.COUNTS_GREY, charts.DASM_PURPLE),
-        reference_value=0.69,
-        reference_label="counts, clades pooled",
-    ).to_dict()
-    assert "text" in _marks(withrule), (
-        "the reference line is drawn without its label, so nothing on the "
-        "panel says what the line is."
-    )
-
-    rules = [
-        layer["mark"]
-        for layer in withrule["layer"]
-        if isinstance(layer.get("mark"), dict) and layer["mark"]["type"] == "rule"
-    ]
-    assert len(rules) == 2, f"expected the zero rule and the reference, got {rules}."
-    dashes = {tuple(mark.get("strokeDash", ())) for mark in rules}
-    assert len(dashes) == 2, (
-        f"both horizontals are dashed {dashes.pop()}. A reader cannot tell "
-        f"the clade-pooled estimate from zero."
-    )
-    colours = {mark.get("color") for mark in rules}
-    assert charts.COUNTS_GREY in colours, (
-        f"the reference is drawn in {colours}, and none of them is the counts "
-        f"series' colour. It is a counts quantity and has to read as one."
     )
 
 
