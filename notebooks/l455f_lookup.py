@@ -144,12 +144,22 @@ def _(LOOKUP, PANEL_MODEL, POOLED, SELECTION, SPEC, charts, mo, panels, spec):
         x_title="clade",
         y_title="fitness effect",
         color_title="approach",
-        series_labels={"delta_fitness": "counts", "log_sf": "DASM"},
+        # As in panel A, the key says what each approach was applied to:
+        # here the counts approach is fit separately within each clade.
+        series_labels={
+            "delta_fitness": "counts (separately applied to each clade)",
+            "log_sf": "DASM",
+        },
         series_colors=(charts.COUNTS_GREY, charts.DASM_PURPLE),
         series_shapes=("circle", "triangle"),
         title=f"estimated per-clade fitness effect of {spec.L455F_MUTATION}",
         reference_value=POOLED,
-        reference_label="counts, clades pooled",
+        # "the whole tree" is the shorthand `main.tex` already uses for this
+        # quantity in `fig:dms`'s caption. What it actually sums over -- the
+        # clades whose founder carries the parent residue at this site, so
+        # every S455-founded clade is outside it -- is spelled out in
+        # Methods, which is where that belongs.
+        reference_label="counts (applied to the whole tree)",
         reference_font_size=charts.PANEL_FONT_SIZE,
         # **No shaded band**, for the reason `agreement_mutations.py` gives at
         # length: the interval is computed and carried into the tooltip and
@@ -173,6 +183,10 @@ def _(LOOKUP, PANEL_MODEL, POOLED, SELECTION, SPEC, charts, mo, panels, spec):
         .configure_legend(
             labelFontSize=charts.PANEL_FONT_SIZE,
             titleFontSize=charts.PANEL_FONT_SIZE,
+            # No truncation. Vega-Lite clips a legend label at 160 px by
+            # default, which turned this panel's counts key into
+            # "counts (separatel...". 0 is Vega's "no limit".
+            labelLimit=0,
         )
         .configure_title(fontSize=charts.PANEL_FONT_SIZE)
     )

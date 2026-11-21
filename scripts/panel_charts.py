@@ -1836,6 +1836,7 @@ def background_panel(
     h_params: tuple[float, float, float] | None = None,
     group_column: str = "candidate",
     members: Sequence[tuple[str, str]] | None = None,
+    series_labels: Mapping[str, str] | None = None,
     value_label: str | None = None,
     x_gloss: str = BACKGROUND_X_GLOSS,
 ) -> matplotlib.figure.Figure:
@@ -1899,6 +1900,14 @@ def background_panel(
             are separate from the keys because a clade's label in a paper is
             not the label this pipeline keys on -- ``23F`` against
             ``23F (EG.5.1)`` -- the same split :data:`ECDF_CLADES` makes.
+        series_labels: ``{series label: legend text}``, overriding what
+            :data:`BACKGROUND_SERIES` calls each approach in the legend. The
+            marks are unchanged; only the key's wording is. A panel whose two
+            approaches are applied to *different* things -- one fit per
+            subset against one model evaluated per parent -- can say so in
+            the key rather than leaving it to the caption. Newlines are
+            honoured, and a long key needs a slot of its own: see
+            ``columns``.
         value_label: The value axis' label. ``None`` keeps
             ``f"fitness effect in\nclade {clade} subset"``, which names the
             one clade every sub-panel of the row belongs to. A row whose
@@ -2026,7 +2035,7 @@ def background_panel(
                 color=colour,
                 markersize=7,
                 linewidth=1.4,
-                label=label,
+                label=(series_labels or {}).get(label, label),
                 zorder=3,
             )
         axis.axhline(0.0, color="#cccccc", linewidth=1, zorder=1)
@@ -2158,6 +2167,11 @@ def background_panel(
         frameon=False,
         fontsize=BACKGROUND_FONT_PT,
         title="approach",
+        # A multi-line key is one entry, so its lines sit under each other
+        # rather than beside the marker. Harmless on the one-word keys the
+        # published rows use, which have no second line.
+        alignment="left",
+        labelspacing=0.9,
     )
     drawn.get_title().set_fontsize(BACKGROUND_FONT_PT)
     drawn.get_title().set_fontweight("bold")

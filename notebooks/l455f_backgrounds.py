@@ -217,13 +217,22 @@ def _(DRAWN, FOCAL, SELECTION, charts, mo, panels, spec):
         # and what `value_label` below then puts on the value axis.
         spec.L455F_MUTATION,
         y_domain=_y_domain,
-        columns=len(DRAWN) + 1,
+        # Two spare slots rather than one. The legend keys here name what
+        # each approach was applied to, which is several words rather than
+        # one, and a key wider than its slot runs off the panel's right edge.
+        columns=len(DRAWN) + 2,
         group_column="cluster",
         # Clade order, not steepest-first. These sub-panels are clades, which
         # have an order of their own that also runs roughly in time, and the
         # one-pool clade has no shift to be sorted by. Titled as the tree's
         # own metadata names them, so the panel and the paper's prose agree.
         members=[(clade, spec.L455F_CLADE_NAMES[clade]) for clade in DRAWN],
+        # Each key says what that approach was applied to, because the two
+        # are not applied to the same thing: the counts approach is fit
+        # separately within each subset of branches, while the DASM is one
+        # model evaluated on each parent sequence. Saying it here puts it
+        # where a reader meets the marks rather than in the caption.
+        series_labels={"counts": "counts\n(separately applied\nto each subset)"},
         # One line. The two-line form exists because
         # `fig:within_clade_shifts`' label names a clade as well as a
         # quantity and is too long for its panels; this one is short enough
