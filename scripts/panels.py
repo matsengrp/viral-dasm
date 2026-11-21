@@ -174,7 +174,7 @@ from dasm2.analysis.viral_fitness_eval import (  # noqa: F401  (re-exported)
     within_clade_count_ladder,
     within_clade_metrics,
 )
-from dasm2.analysis.within_clade_pools import (
+from dasm2.analysis.within_clade_pools import (  # noqa: F401  (re-exported for the notebooks)
     DEFAULT_PERMUTATIONS,
     ZERO_COUNT_PSEUDOCOUNT,
     passes_evidence_gate,

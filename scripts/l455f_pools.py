@@ -3,7 +3,8 @@
 For every XBB clade in :data:`panel_spec.L455F_CLADES`, this measures L455F's
 fitness effect on the parents that carry the clade founder's 456F and on the
 parents that carry 456L, takes the shift between them, and tests that shift by
-randomization. It is the within-clade form of the FLip claim: L455F and F456L
+randomization. The exception is 23F, whose founder already carries 456L: it
+has no founder-side pool, and is measured on its derived pool alone. It is the within-clade form of the FLip claim: L455F and F456L
 are individually costly to the XBB spike and jointly beneficial, so L455F's
 effect should be much higher on a 456L background than on a 456F one.
 
@@ -88,7 +89,6 @@ from panel_spec import (
 )
 from pool_counts import (
     DERIVED_POOL,
-    FOUNDER_POOL,
     _pool_average,
     background_label,
     clade_counts,

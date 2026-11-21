@@ -1901,7 +1901,6 @@ def test_the_background_row_default_is_what_it_was_before_l455f():
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-
     import panel_charts as charts
 
     frame = pd.DataFrame(
@@ -1951,7 +1950,6 @@ def test_the_background_row_gloss_reaches_the_page():
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-
     import panel_charts as charts
 
     frame = pd.DataFrame(
@@ -1997,7 +1995,6 @@ def test_the_background_row_draws_the_members_it_is_given():
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-
     import panel_charts as charts
 
     # 23A has the larger counts shift, so steepest-first would put it first.
@@ -2055,7 +2052,6 @@ def test_the_spread_whisker_is_drawn_only_where_there_is_one():
     would be a bounded interval on a pool that was never measured.
     """
     import matplotlib.pyplot as plt
-
     import panel_charts as charts
 
     frame = pd.DataFrame(
@@ -2070,12 +2066,12 @@ def test_the_spread_whisker_is_drawn_only_where_there_is_one():
             "dasm_high": [0.5, 2.8, float("nan"), 3.9],
         }
     )
-    kwargs = dict(
-        y_domain=(-1.0, 4.5),
-        columns=3,
-        group_column="cluster",
-        members=[("22F", "22F"), ("23F", "23F")],
-    )
+    kwargs = {
+        "y_domain": (-1.0, 4.5),
+        "columns": 3,
+        "group_column": "cluster",
+        "members": [("22F", "22F"), ("23F", "23F")],
+    }
     plain = charts.background_panel(frame, "L455F", **kwargs)
     plain_counts = [len(axis.collections) for axis in plain.axes if axis.get_title()]
     plt.close(plain)
@@ -2097,7 +2093,10 @@ def test_the_spread_whisker_is_drawn_only_where_there_is_one():
 
     with pytest.raises(KeyError, match="does not draw"):
         charts.background_panel(
-            frame, "L455F", spread_columns={"counts!": ("dasm_low", "dasm_high")}, **kwargs
+            frame,
+            "L455F",
+            spread_columns={"counts!": ("dasm_low", "dasm_high")},
+            **kwargs,
         )
     with pytest.raises(KeyError, match="interval column"):
         charts.background_panel(
@@ -2142,7 +2141,6 @@ def test_a_background_with_nothing_measured_is_a_tick_and_not_a_third_pool():
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-
     import panel_charts as charts
 
     frame = pd.DataFrame(
@@ -2175,9 +2173,7 @@ def test_a_background_with_nothing_measured_is_a_tick_and_not_a_third_pool():
     series_labels = {label for label, _, _, _ in charts.BACKGROUND_SERIES}
     lines = {
         axis.get_title(): [
-            line.get_ydata()
-            for line in axis.lines
-            if line.get_label() in series_labels
+            line.get_ydata() for line in axis.lines if line.get_label() in series_labels
         ]
         for axis in titled
     }
@@ -2214,7 +2210,6 @@ def test_a_third_measured_background_is_still_refused():
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt  # noqa: F401
-
     import panel_charts as charts
 
     frame = pd.DataFrame(

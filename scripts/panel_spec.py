@@ -1163,17 +1163,18 @@ L455F_MARKER_SITE = 456
 L455F_MARKER_AA = "L"
 
 #: The clades considered -- every XBB clade in the roster. Six considered,
-#: five measured and four drawn, and the two that drop out do so for
-#: reasons the panel can state rather than by being left off a list:
+#: six measured and five drawn, and the two special cases are drawn or
+#: dropped for reasons the panel can state rather than by being left off a
+#: list:
 #:
 #: * 23E fails the evidence gate, 6/5.36 actual-or-expected counts on its
 #:   456F pool and 1/0.063 on its 456L pool against
 #:   :data:`PANEL_MIN_COUNT`. Its pools are written and not drawn.
-#: * 23F is refused before its pools are built, by the founder check at
-#:   :data:`L455F_MARKER_SITE`: EG.5.1's founder already carries 456L, so the
-#:   derived pool's predicate matches the founder's and the two pools would be
-#:   the same branches. It is the clade panel A singles out, so the caption
-#:   says why it cannot appear in B.
+#: * 23F has no founder-side pool to build, by the founder check at
+#:   :data:`L455F_MARKER_SITE`: EG.5.1's founder already carries 456L, so a
+#:   founder pool and a derived pool would be the same branches. It is
+#:   measured on its derived pool alone and drawn as a named tick with no
+#:   point on the 456F side, which the caption marks `n.a.`.
 #:
 #: Deliberately **not** :data:`CANDIDATE_CLADES`, which is
 #: `fig:within_clade_shifts`' row set: adding a clade there would add a row to

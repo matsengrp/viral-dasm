@@ -66,8 +66,8 @@ def _(PANEL_DIR, SELECTION, fl, mo, spec):
     # `mo.stop` rather than a raise, because the message is the useful output:
     # a reader who exports this notebook by hand before the panels exist
     # should be told which rule writes them, not shown a traceback. Under
-    # `rule compose_l455f` the case cannot arise -- both PNGs are declared
-    # inputs -- so this is the standalone path.
+    # `rule compose_l455f` the case cannot arise -- the panel PNG is a
+    # declared input -- so this is the standalone path.
     _missing = fl.missing_panels(PANEL_DIR, list(spec.L455F_PANEL_LETTERS.values()))
     mo.stop(
         bool(_missing),

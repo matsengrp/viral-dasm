@@ -24,15 +24,16 @@ def _(mo):
     ninety degrees: there a row is one clade and a sub-panel is one mutation,
     here the row is one mutation and a sub-panel is one clade. That is the
     `group_column` argument, and it is an argument rather than a relabelled
-    column because the default would draw four clades' rows as a single
-    sub-panel of eight points alternating between two backgrounds -- a wrong
+    column because the default would draw every clade's row as a single
+    sub-panel of points alternating between two backgrounds -- a wrong
     picture that looks right.
 
     **The split is specified by hand, at site 456 and nothing else.** This is
     a deviation from `fig:within_clade_shifts`, whose splits come from branch
     frequencies through `rule clade_backgrounds`, and it is the reason this
     figure has its own measuring script. Measured rather than assumed, by
-    running that rule's chooser unaided on these four clades:
+    running that rule's chooser unaided on the four clades that have two
+    pools:
 
     | clade | what the unaided chooser picks | what it drags in |
     |---|---|---|
@@ -46,13 +47,14 @@ def _(mo):
     not be a 456 contrast at all; and for 23B the hand specification confirms
     what the chooser already finds rather than overriding it.
 
-    **Two clades of the roster are not drawn, for two different reasons.**
-    23F is refused before its pools are built -- EG.5.1's founder already
-    carries 456L, so the two pools would be the same branches -- and that
-    happens in `scripts/l455f_pools.py`, upstream of this notebook. 23E is
-    measured and then gated out here: its 456L pool holds one event against
-    an expected 0.06, which is below the cutoff the rest of the figure is
-    drawn at.
+    **Two clades of the roster are special, for two different reasons.**
+    23F has no founder-side pool -- EG.5.1's founder already carries 456L, so
+    a founder pool and a derived pool would be the same branches -- so
+    `scripts/l455f_pools.py`, upstream of this notebook, measures it on its
+    derived pool alone, and it is drawn here as a named tick with no point on
+    the 456F side. 23E is measured and then gated out here: its 456L pool
+    holds one event against an expected 0.06, which is below the cutoff the
+    rest of the figure is drawn at.
 
     **The whiskers.** The purple triangle is the pool average, and the
     whisker on it is the 5th to 95th percentile of the same haplotypes'
@@ -168,11 +170,7 @@ def _(CELLS_PATH, SELECTION, SHIFTS_PATH, mo, panels, pd, spec):
     # not that it was the F456 side, which is the comparison every other
     # sub-panel is making. The label is taken from the clades that do have
     # that pool rather than spelled again here.
-    ONE_POOL = [
-        clade
-        for clade, n in FOCAL.groupby("cluster").size().items()
-        if n == 1
-    ]
+    ONE_POOL = [clade for clade, n in FOCAL.groupby("cluster").size().items() if n == 1]
     if ONE_POOL:
         _founder_labels = sorted(
             FOCAL.loc[FOCAL["background_order"] == 0, "background"].dropna().unique()
@@ -292,7 +290,9 @@ def _(DRAWN, FOCAL, SELECTION, charts, mo, panels, spec):
             f"{spec.L455F_MARKER_AA}{spec.L455F_MARKER_SITE})"
         ),
     )
-    PANEL = charts.save_mpl_panel(_figure, spec.L455F_BACKGROUND_PANEL, selection=SELECTION)
+    PANEL = charts.save_mpl_panel(
+        _figure, spec.L455F_BACKGROUND_PANEL, selection=SELECTION
+    )
     panels.write_pool_csv(
         FOCAL[
             [

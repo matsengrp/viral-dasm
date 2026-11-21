@@ -1863,7 +1863,8 @@ def background_panel(
     value_label: str | None = None,
     x_gloss: str = BACKGROUND_X_GLOSS,
 ) -> matplotlib.figure.Figure:
-    """One clade's row of `fig:within_clade_shifts`: panel B, D or F.
+    """One row of background estimates: `fig:within_clade_shifts`' panels
+    B, D and F, and the single panel of `fig:l455f`.
 
     One sub-panel per candidate mutation, each plotting that mutation's
     fitness effect on the clade's two backgrounds by both approaches. The x
@@ -2056,7 +2057,9 @@ def background_panel(
         ]
     else:
         drawn = [(member, title) for member, title in members]
-        absent = [member for member, _ in drawn if member not in set(frame[group_column])]
+        absent = [
+            member for member, _ in drawn if member not in set(frame[group_column])
+        ]
         if absent:
             raise ValueError(
                 f"{clade}: {absent} named in `members` but not in the frame's "
@@ -2186,7 +2189,9 @@ def background_panel(
     # default, which for a vertical label means the lines align along their
     # lower edge and the shorter one hangs off the top.
     placed_ylabel = figure.supylabel(
-        value_label if value_label is not None else f"fitness effect in\nclade {clade} subset",
+        value_label
+        if value_label is not None
+        else f"fitness effect in\nclade {clade} subset",
         fontsize=BACKGROUND_FONT_PT,
         fontweight="bold",
         ma="center",
