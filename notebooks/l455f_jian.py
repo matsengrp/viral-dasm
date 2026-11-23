@@ -203,12 +203,11 @@ def _(MEASURED, SELECTION, charts, mo, panels, spec):
         # whiskers span their parent haplotypes.
         spread_columns=None,
         # The same two ticks as panel B, named the same way and under the
-        # same words, so the reader carries one contrast down the figure.
-        # No gloss. Panel B's names which side is which because its x ticks
-        # are residues and its sub-panels are clades; here the heading already
-        # says "in the presence and absence of F456L", and a line repeating it
-        # under the ticks would be the third place one figure says so.
-        x_gloss=None,
+        # same words, so the reader carries one contrast down the figure --
+        # and, like B, a second line saying which side is which. The heading
+        # says which two variants were assayed; this says which is on which
+        # tick.
+        x_gloss=spec.L455F_JIAN_X_GLOSS,
         series=_series,
     )
     PANEL = charts.save_mpl_panel(_figure, spec.L455F_JIAN_PANEL, selection=SELECTION)

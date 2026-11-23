@@ -2371,7 +2371,12 @@ def background_panel(
         # "in clade 20B" would be the same five words on every one of them --
         # and on a two-candidate row they are wide enough to collide. The
         # clade is on the value-axis label instead, once.
-        axis.set_title(title, fontsize=BACKGROUND_FONT_PT, fontweight="bold")
+        # Not set at all when it is empty. An empty `Text` still has the
+        # height of a line, which `tight_layout` reserves above the axes --
+        # and on a row whose sub-panels are named by their value labels
+        # instead, that line is read as white space under the heading.
+        if title:
+            axis.set_title(title, fontsize=BACKGROUND_FONT_PT, fontweight="bold")
         if value_labels is not None:
             # On the axes rather than through `supylabel`, because the point of
             # a label per sub-panel is that it sits against the sub-panel it
@@ -2470,6 +2475,12 @@ def background_panel(
             fontweight="bold",
             ma="center",
         )
+        # Out of `tight_layout`'s own reckoning, which since matplotlib 3.3
+        # reserves room for a figure heading by itself. Left in, the heading's
+        # height is counted twice -- once by that and once by the `rect`
+        # below -- and the row is drawn with a band of white under its
+        # heading about as tall as the heading.
+        placed_title.set_in_layout(False)
         block = placed_title.get_window_extent(
             _measuring_renderer(figure)
         ).transformed(figure.transFigure.inverted())

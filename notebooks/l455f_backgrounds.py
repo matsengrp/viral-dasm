@@ -259,6 +259,13 @@ def _(DRAWN, FOCAL, SELECTION, charts, mo, panels, spec):
         # each approach was applied to, which is several words rather than
         # one, and a key wider than its slot runs off the panel's right edge.
         columns=len(DRAWN) + 2,
+        # What the sub-panel titles cannot say: that these are XBB lineages,
+        # and that the estimates come from the tree -- which is the contrast
+        # with the measurements in panel A above.
+        figure_title=spec.L455F_BACKGROUND_TITLE,
+        # Taller by the height of that heading, so the plot boxes stay the
+        # height of panel A's.
+        row_h_in=spec.L455F_BACKGROUND_ROW_H_IN,
         group_column="cluster",
         # Three arms rather than the two the within-clade rows draw, in the
         # order the key reads them: the DASM, then the counts approach at its

@@ -1267,7 +1267,8 @@ L455F_JIAN_ARROWS: dict[str, tuple[str, str]] = {
 #: other.
 #:
 #: **Set so that panel A's plot boxes come out 1.90 inches wide, which is
-#: what panel B's are.** That matters more here than it looks: both panels
+#: what panel B's are** -- which, with the arrows beside each axis, is also
+#: what makes the row wider than its heading needs. That matters more here than it looks: both panels
 #: draw a two-point line and the figure's claim is about its slope, so the
 #: same shift drawn across a narrower box would read as a steeper one. The
 #: two were measured off the rendered panels, not derived -- `tight_layout`
@@ -1279,19 +1280,38 @@ L455F_JIAN_CELL_W_IN = 5.95
 #: B's are: A spends height on a three-line heading that B does not, so at
 #: one figure height its plots would be the shorter of the two. Measured off
 #: the rendered panels, as the width is.
-L455F_JIAN_ROW_H_IN = 6.49
+L455F_JIAN_ROW_H_IN = 6.08
 
 #: Panel A's heading, over both sub-panels: what was measured, on what, and
 #: by whom. It also stands in for a key -- the row draws one series, and the
 #: heading already names who measured it.
 #:
-#: **Two lines**, which is what sets :data:`L455F_JIAN_CELL_W_IN`: the first
-#: of them is 10.4 inches wide and `background_panel` raises on a heading
-#: wider than its row rather than centring it and clipping both ends.
+#: **Two lines of about one width**, 7.4 and 8.3 inches, broken so that "and
+#: absence of F456L" stays whole. Both have to fit the row, which
+#: `background_panel` raises on rather than centring and clipping -- but here
+#: the row is set by its plots and arrows and is wider than either line needs.
 L455F_JIAN_TITLE = (
-    "Effect of L455F on XBB.1.5 phenotypes in the presence and absence of F456L\n"
-    "experimentally measured by Jian et al."
+    "Effect of L455F on XBB.1.5 phenotypes in the presence\n"
+    "and absence of F456L, experimentally measured by Jian et al."
 )
+
+#: The second line of panel A's x label, naming the two variants its ticks
+#: are the 456 residues of. Panel B's names pools of branches; this one names
+#: the constructs the assays were run on.
+L455F_JIAN_X_GLOSS = "(left: XBB.1.5; right: XBB.1.5 + F456L)"
+
+#: Panel B's heading. One line -- it is 9.9 inches against a 13.8-inch row
+#: -- and it says what the sub-panel titles cannot: that these are lineages
+#: of XBB and that the estimates come from the tree rather than from an
+#: experiment, which is the contrast with panel A above it.
+L455F_BACKGROUND_TITLE = (
+    "Fitness effect of L455F in XBB lineages, as estimated from the UShER tree"
+)
+
+#: How tall panel B is, in inches, against the 5.49 the shared-axis rows use.
+#: The heading costs it the height of a line, and its plot boxes have to stay
+#: the height of panel A's: see :data:`L455F_JIAN_ROW_H_IN`.
+L455F_BACKGROUND_ROW_H_IN = 5.98
 
 L455F_PANELS: tuple[str, ...] = (L455F_JIAN_PANEL, L455F_BACKGROUND_PANEL)
 
