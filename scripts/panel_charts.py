@@ -2096,7 +2096,7 @@ def background_panel(
             writes nothing.
         value_label: The value axis' label, written once down the left of
             the row. ``None`` keeps ``f"fitness effect in\nclade {clade}
-            subset"``, which names the one clade every sub-panel of the row
+            pool"``, which names the one clade every sub-panel of the row
             belongs to. A row whose sub-panels are *different* clades has no
             such clade and must pass its own.
         value_labels: ``{group value: label}``, a label per sub-panel instead
@@ -2477,7 +2477,7 @@ def background_panel(
         placed_ylabel = figure.supylabel(
             value_label
             if value_label is not None
-            else f"fitness effect in\nclade {clade} subset",
+            else f"fitness effect in\nclade {clade} pool",
             fontsize=BACKGROUND_FONT_PT,
             fontweight="bold",
             ma="center",
