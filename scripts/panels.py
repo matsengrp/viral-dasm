@@ -1093,12 +1093,12 @@ def pooled_counts_estimate(
 
     One number, from the clade-pooled grid: every branch of every clade, with
     no clade and no background resolution at all. That is the comparator
-    `fig:l455f`'s panel B needs beside its per-subset fits -- what the
+    `fig:l455f`'s panel B needs beside its per-pool fits -- what the
     approach says about this mutation when it is not handed the split the
     panel is about -- and it is drawn flat across both backgrounds of every
     sub-panel, which is the whole of what it has to say.
 
-    ``delta_fitness_ratio``, the same statistic the panel's per-subset
+    ``delta_fitness_ratio``, the same statistic the panel's per-pool
     estimate is, so the two share a value axis without a conversion.
 
     **The gene filter is not optional.** The grids carry one row per gene a

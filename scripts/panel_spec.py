@@ -1287,7 +1287,7 @@ L455F_JIAN_CELL_W_IN = 5.95
 #: B's are: A spends height on a three-line heading that B does not, so at
 #: one figure height its plots would be the shorter of the two. Measured off
 #: the rendered panels, as the width is.
-L455F_JIAN_ROW_H_IN = 5.63
+L455F_JIAN_ROW_H_IN = 5.95
 
 #: Panel A's heading, over both sub-panels: what was measured, on what, and
 #: by whom. It also stands in for a key -- the row draws one series, and the
@@ -1306,7 +1306,10 @@ L455F_JIAN_TITLE = (
 #: a gloss under the row. Two words is all its axis needs: the heading names
 #: the two variants assayed and the ticks name the residue that tells them
 #: apart, so a row-wide label would be a third telling.
-L455F_JIAN_X_LABEL = "genetic background"
+#:
+#: "genetic background", not panel B's "pool of branches": these two ticks
+#: are engineered constructs, not sets of branches of the tree.
+L455F_JIAN_X_LABEL = "genetic\nbackground"
 
 #: Panel B's heading, in two lines broken at its comma. It says what the
 #: sub-panel titles cannot: that these are XBB variants and that the

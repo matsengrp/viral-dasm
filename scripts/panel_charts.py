@@ -67,7 +67,7 @@ FIT_FIREBRICK = "#b22222"
 COUNTS_GREY = "#4d4d4d"
 #: The same approach fit over the whole tree rather than inside one
 #: background of one clade, which `fig:l455f`'s panel B draws beside the
-#: per-subset fits. A paler shade of the same grey rather than a colour of its
+#: per-pool fits. A paler shade of the same grey rather than a colour of its
 #: own: the two arms are one approach at two resolutions, and a reader should
 #: see that before seeing which is which.
 COUNTS_GREY_LIGHT = "#b0b0b0"
@@ -1817,7 +1817,7 @@ BACKGROUND_SERIES = (
 L455F_BACKGROUND_SERIES = (
     ("DASM", "dasm_effect", DASM_PURPLE, "^"),
     ("full-tree counts", "full_tree_effect", COUNTS_GREY_LIGHT, "s"),
-    ("per-subset counts", "counts_effect", COUNTS_GREY, "o"),
+    ("per-pool counts", "counts_effect", COUNTS_GREY, "o"),
 )
 
 #: Where :func:`background_panel` writes its ``absent_label``, as a fraction
@@ -1848,7 +1848,7 @@ BACKGROUND_SPREAD_CAP = 0.07
 #: What the x axis of a row is called, and the gloss under it saying which
 #: side is which. Two strings rather than one, because they are drawn at two
 #: sizes and two weights; see :func:`background_panel`.
-BACKGROUND_X_TITLE = "amino-acid identities defining each genetic background"
+BACKGROUND_X_TITLE = "amino-acid identities defining each pool of branches"
 #: The air between a row's heading and the sub-panel titles under it, as a
 #: fraction of the figure height. Enough to read as a break between the two
 #: levels of title, which are otherwise the same size and weight.

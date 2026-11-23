@@ -63,7 +63,7 @@ def _(mo):
     shrink as the pool grows, and a pool of a thousand parents that agree
     will show a shorter whisker than a pool of fifty that do not.
 
-    **The three arms, and what makes them comparable.** The per-subset
+    **The three arms, and what makes them comparable.** The per-pool
     counts estimate is `log(actual / expected)` over the branches in that
     pool. The DASM estimate is the pool average: the mean log selection
     factor over the distinct parent haplotypes the pool contains, weighted by
@@ -76,7 +76,7 @@ def _(mo):
     across both backgrounds of every sub-panel. It is what the counts
     approach says about this mutation when it is handed no split at all, and
     it is in the panel because a reader is entitled to ask that -- the
-    per-subset arm is given the contrast the figure is about, and this one
+    per-pool arm is given the contrast the figure is about, and this one
     shows what is there without it.
 
     **GISAID**: reads pooled counts and scores from the artifact root; writes
@@ -196,7 +196,7 @@ def _(CELLS_PATH, POOLED_PATH, SELECTION, SHIFTS_PATH, mo, panels, pd, spec):
 
     # The counts approach over the whole tree: one number, joined onto every
     # row, so it is drawn flat across both backgrounds of every sub-panel.
-    # What it is there for is the question a reader of the per-subset arm is
+    # What it is there for is the question a reader of the per-pool arm is
     # entitled to ask -- what does this approach say when it is not handed the
     # split? -- and the answer is a level, not a slope.
     FOCAL["full_tree_effect"] = panels.pooled_counts_estimate(
