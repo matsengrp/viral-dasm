@@ -120,6 +120,7 @@ ENTRY_POINTS = {
     # panels and its composition run notebooks, like every other panel rule.
     "l455f_pools": "scripts/l455f_pools.py",
     "l455f_backgrounds": "notebooks/l455f_backgrounds.py",
+    "l455f_jian": "notebooks/l455f_jian.py",
     "compose_l455f": "notebooks/l455f.py",
     "compose_within_clade_shifts": "notebooks/within_clade_shifts.py",
     "subsampling_depth": "notebooks/subsampling_depth.py",

@@ -71,6 +71,8 @@ from panel_spec import (
     EMERGENCE_CSV,
     ECDF_CLADES,
     L455F_BACKGROUND_PANEL,
+    L455F_JIAN_DATA,
+    L455F_JIAN_PANEL,
     L455F_CLADE_NAMES,
     L455F_FIGURE_STEM,
     L455F_HAPLOTYPE_TABLE,
@@ -1891,6 +1893,11 @@ rule l455f_backgrounds:
         notebook="notebooks/l455f_backgrounds.py",
         cells=str(L455F_POOL_CELLS),
         shifts=str(L455F_POOL_SHIFTS),
+        # The clade-pooled grid, for the whole-tree counts arm. Declared
+        # rather than reached for inside the notebook: it is a published
+        # input, so a rule that did not name it would not re-draw when it
+        # changed.
+        pooled=str(mat_pcp_path("aamut_fitness_pooled_file")),
         clade_founders=clade_founder_fastas,
         masked_nt_sites=str(mat_pcp_path("masked_nt_sites_file")),
         reference=str(mat_pcp_path("reference_sequence_file")),
@@ -1905,7 +1912,40 @@ rule l455f_backgrounds:
         "marimo export html {input.notebook} -o {output.html} --force"
         " -- --cells {input.cells}"
         " --shifts {input.shifts}"
+        " --pooled {input.pooled}"
         " --selection {wildcards.selection}"
+        " > {log} 2>&1"
+
+
+rule l455f_jian:
+    """`fig:l455f` panel A: the same contrast, measured by Jian et al.
+
+    Jesse asked that this figure compare the model to an experiment and not
+    only to another model. The input is four pairs of numbers transcribed from
+    that paper, so this rule reads a small CSV and draws: no corpus, no pool,
+    no score and no tree.
+    """
+    wildcard_constraints:
+        selection="|".join(SELECTIONS),
+    input:
+        panels="scripts/panels.py",
+        spec="scripts/panel_spec.py",
+        charts="scripts/panel_charts.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        notebook="notebooks/l455f_jian.py",
+        measurements=L455F_JIAN_DATA,
+    output:
+        html=f"{NOTEBOOK_DIR}/l455f_jian_{{selection}}.html",
+        panels=panel_outputs([L455F_JIAN_PANEL], "{selection}"),
+    log:
+        f"{ARTIFACT_ROOT}/logs/l455f_jian_{{selection}}.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "marimo export html {input.notebook} -o {output.html} --force"
+        " -- --selection {wildcards.selection}"
+        " --measurements {input.measurements}"
         " > {log} 2>&1"
 
 

@@ -1,0 +1,5 @@
+assay,candidate,background,background_order,parent_variant,parent_value,mutant_variant,mutant_value,measured_effect,pool_zero_count_pseudocount,pool_permutation_draws,pool_permutation_sided,pool_background_source
+affinity,L455F,F456,0,XBB.1.5,6.4,XBB.1.5 + L455F,25.0,-1.3625778345025743,0.5,10000,two,branch frequency
+affinity,L455F,L456,1,XBB.1.5 + F456L,11.0,XBB.1.5 + F456L + L455F,2.0,1.7047480922384253,0.5,10000,two,branch frequency
+neutralization,L455F,F456,0,XBB.1.5,59.0,XBB.1.5 + L455F,43.0,0.3163373282121573,0.5,10000,two,branch frequency
+neutralization,L455F,L456,1,XBB.1.5 + F456L,45.0,XBB.1.5 + F456L + L455F,37.0,0.19574457712609528,0.5,10000,two,branch frequency

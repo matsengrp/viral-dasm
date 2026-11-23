@@ -20,18 +20,22 @@ def _(mo):
     recomputes a shift: the panel is a PNG that `l455f_backgrounds.py`
     already wrote at its own settings, and this notebook places it on a page.
 
-    One row of one, and so **no panel letter**: a lone panel has no second
-    panel to be told apart from, and the caption has none to refer to.
-    `spec.L455F_FIGURE_LABELS` is what says so, and the left margin loses the
-    strip a letter would have sat in.
+    Two rows of one, both lettered: the figure now makes a distinction its
+    caption refers to, between what was measured and what was estimated.
 
     | panel | drawn by | what it shows |
     |---|---|---|
-    | — | `l455f_backgrounds` | L455F in each XBB clade, on F456 parents against L456 parents |
+    | A | `l455f_jian` | L455F measured by Jian et al. on an F456 and an L456 XBB.1.5 background |
+    | B | `l455f_backgrounds` | L455F in each XBB clade, on F456 parents against L456 parents |
 
     **What it is for.** Inside a single clade, where elapsed time is nearly
     fixed, the same mutation is measured on two sets of parents that differ
-    at one site, and both approaches see it move.
+    at one site, and both approaches see it move -- and panel A shows an
+    experiment seeing the same thing, which is what Jesse asked for.
+
+    The two panels plot **different quantities** in the same units: a log fold
+    change in a laboratory measurement is not a log selection factor. They are
+    not on a shared axis, and the caption has to say why.
 
     **GISAID**: reads one rendered panel and writes a figure. No sequence, no
     per-site table and no count passes through this notebook.
@@ -101,19 +105,19 @@ def _(PANELS, dataclasses, fl, spec):
     # title size is still given in Vega-Lite's units: both renderers write at
     # `VEGA_WRITE_PPI`, and a Vega-Lite pixel and a matplotlib point both land
     # at `size * ppi / 72` on disk -- `BACKGROUND_FONT_PT` is
-    # `PANEL_FONT_SIZE` converted on that basis. Nothing is lettered here, so
-    # this now sizes only the figure, not a label; it is left in place so that
-    # the dpi this figure is solved at stays comparable to its neighbours'.
-    #
-    # `labels` suppresses the letter. The margin would still reserve the
-    # strip it sits in, so `label_w_in` goes to zero as well and the left
-    # margin becomes the same `margin_pad_in` the right side gets.
+    # `PANEL_FONT_SIZE` converted on that basis. It sizes the two letters and
+    # the figure both, so the dpi this figure is solved at stays comparable to
+    # its neighbours'.
     composed = fl.compose(
         PANELS,
         [list(_row) for _row in spec.L455F_FIGURE_ROWS],
         box_in=spec.L455F_BOX_IN,
         scale=spec.L455F_FIGURE_SCALE,
-        spacing=dataclasses.replace(fl.DEFAULT_SPACING, label_w_in=0.0),
+        # The default gaps, widened between the rows: each panel carries a
+        # heading of its own, and at the default the two read as one block.
+        spacing=dataclasses.replace(
+            fl.DEFAULT_SPACING, row_gap_in=spec.L455F_ROW_GAP_IN
+        ),
         labels=spec.L455F_FIGURE_LABELS,
         title_px_on_disk=fl.vega_title_px_on_disk(title_px=spec.PANEL_TITLE_PX),
     )
