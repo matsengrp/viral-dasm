@@ -1083,6 +1083,51 @@ def arm_counts_estimate(
     )
 
 
+def pooled_counts_estimate(
+    pooled_csv: Path,
+    mutation: str,
+    *,
+    gene: str = GENE,
+) -> float:
+    """The counts approach's estimate for one mutation over the whole tree.
+
+    One number, from the clade-pooled grid: every branch of every clade, with
+    no clade and no background resolution at all. That is the comparator
+    `fig:l455f`'s panel B needs beside its per-subset fits -- what the
+    approach says about this mutation when it is not handed the split the
+    panel is about -- and it is drawn flat across both backgrounds of every
+    sub-panel, which is the whole of what it has to say.
+
+    ``delta_fitness_ratio``, the same statistic the panel's per-subset
+    estimate is, so the two share a value axis without a conversion.
+
+    **The gene filter is not optional.** The grids carry one row per gene a
+    site falls in, and site 455 is a row of ``S`` *and* a row of ``nsp13``
+    -- whose L455F runs the other way, -1.99 against +0.69. Taking the first
+    row would silently plot the wrong protein's mutation.
+
+    Not :func:`aamut_grid_path`: that is the per-clade layout, and this table
+    is the one `config.yaml` names separately under
+    ``aamut_fitness_pooled_file`` because it sits inside the same directory
+    with a different column order. Read without
+    :func:`normalize_fitness_columns`, which expects the per-clade columns.
+
+    Raises:
+        KeyError: If the table has no row for this mutation in this gene, or
+            more than one. A missing row would otherwise be drawn as a blank
+            arm with nothing saying the arm was never found.
+    """
+    frame = pd.read_csv(pooled_csv)
+    in_gene = frame["gene"].fillna("").str.split(";").apply(lambda g: gene in g)
+    rows = frame.loc[in_gene & (frame["aa_mutation"] == mutation)]
+    if len(rows) != 1:
+        raise KeyError(
+            f"{pooled_csv} has {len(rows)} rows for {mutation} in {gene}, not "
+            f"one, so the whole-tree estimate for it is undefined."
+        )
+    return float(rows.iloc[0]["delta_fitness_ratio"])
+
+
 def ladder_frames(
     table_path: str | Path,
     aamut_dir: Path,

@@ -65,6 +65,12 @@ FIT_FIREBRICK = "#b22222"
 #: neither reuses a scatter colour -- borrowing those hues would imply one of
 #: them was a reference line.
 COUNTS_GREY = "#4d4d4d"
+#: The same approach fit over the whole tree rather than inside one
+#: background of one clade, which `fig:l455f`'s panel B draws beside the
+#: per-subset fits. A paler shade of the same grey rather than a colour of its
+#: own: the two arms are one approach at two resolutions, and a reader should
+#: see that before seeing which is which.
+COUNTS_GREY_LIGHT = "#b0b0b0"
 DASM_PURPLE = "#8172b3"
 #: The measured series of `fig:l455f`'s panel A. Neither of the model
 #: colours, because an experiment is not one of the two approaches being
@@ -1794,6 +1800,26 @@ BACKGROUND_SERIES = (
     ("DASM", "dasm_effect", DASM_PURPLE, "^"),
 )
 
+#: `fig:l455f`'s panel B, which draws a third arm the within-clade rows do
+#: not have: the counts approach over the whole tree, which is what that
+#: approach says about this mutation when it is not handed the split the panel
+#: is about. One number, so it is flat across both backgrounds and the same in
+#: every sub-panel -- a level the other two arms are read against.
+#:
+#: The DASM leads, because it is the panel's subject; the two counts arms
+#: follow together, coarser first, so the key reads as one approach at two
+#: resolutions rather than as three unrelated marks. Its own tuple rather than
+#: a third entry in :data:`BACKGROUND_SERIES`, which would put an arm with no
+#: column in every panel of `fig:within_clade_shifts` and -- because
+#: :func:`background_panel` orders its sub-panels by the first series named --
+#: would also reorder that figure's mutations by the DASM, the thing under
+#: test, instead of by the observation.
+L455F_BACKGROUND_SERIES = (
+    ("DASM", "dasm_effect", DASM_PURPLE, "^"),
+    ("full-tree counts", "full_tree_effect", COUNTS_GREY_LIGHT, "s"),
+    ("per-subset counts", "counts_effect", COUNTS_GREY, "o"),
+)
+
 #: Where :func:`background_panel` writes its ``absent_label``, as a fraction
 #: of the value axis above its floor. Clear of the axis line, and low enough
 #: that the note cannot be mistaken for a point.
@@ -1808,7 +1834,11 @@ BACKGROUND_SPREAD_CAP = 0.07
 #: What the x axis of a row is called, and the gloss under it saying which
 #: side is which. Two strings rather than one, because they are drawn at two
 #: sizes and two weights; see :func:`background_panel`.
-BACKGROUND_X_TITLE = "amino-acid identities defining each subset"
+BACKGROUND_X_TITLE = "amino-acid identities defining each background"
+#: The air between a row's heading and the sub-panel titles under it, as a
+#: fraction of the figure height. Enough to read as a break between the two
+#: levels of title, which are otherwise the same size and weight.
+BACKGROUND_TITLE_GAP = 0.02
 BACKGROUND_X_GLOSS = "(left: clade-founder identities; right: derived identities)"
 
 
@@ -1862,12 +1892,64 @@ def background_y_domain(
     return (low - BACKGROUND_FOOTROOM * span, high + BACKGROUND_HEADROOM * span)
 
 
+def proportional_y_domain(
+    reference: tuple[float, float],
+    frame: pd.DataFrame,
+    *,
+    series: Sequence[tuple[str, str, str, str]] = BACKGROUND_SERIES,
+) -> tuple[tuple[float, float], int]:
+    """A value axis that is ``reference`` divided by a whole number.
+
+    For a sub-panel whose effects are far smaller than its neighbour's, where
+    one axis across both would draw the small one as a flat line and two
+    unrelated axes would let a reader take the two slopes for equals. Dividing
+    the reference by a scalar keeps zero at the same height -- scaling about
+    zero cannot move it -- so the two sub-panels still share their baseline,
+    and the only thing a reader has to carry between them is a single whole
+    number, which the caption can state.
+
+    The number is the largest that still fits ``frame``'s padded range, so the
+    smaller sub-panel is as tight as an integer factor allows.
+
+    Args:
+        reference: ``(low, high)`` of the neighbouring sub-panel, from
+            :func:`background_y_domain`. It has to straddle zero: a reference
+            that does not has no zero to share, and dividing it would move
+            both ends towards a level that is not on either axis.
+        frame: The rows this axis has to contain.
+        series: The arms drawn, as :func:`background_y_domain` takes them.
+
+    Returns:
+        ``((low, high), divisor)`` -- the axis, and the whole number the
+        reference was divided by.
+    """
+    low, high = reference
+    if not low < 0.0 < high:
+        raise ValueError(
+            f"proportional_y_domain was given the reference axis {reference}, "
+            f"which does not straddle zero. The two axes are made to share "
+            f"their zero, so the reference has to have one."
+        )
+    inner_low, inner_high = background_y_domain(frame, series=series)
+    needed = max(inner_low / low, inner_high / high)
+    if needed > 1.0:
+        raise ValueError(
+            f"proportional_y_domain was asked to fit {(inner_low, inner_high)} "
+            f"inside {reference}, which needs {needed:.2f} of it. This "
+            f"sub-panel's effects are the larger ones, so it is the reference."
+        )
+    divisor = max(int(math.floor(1.0 / needed)), 1)
+    return (low / divisor, high / divisor), divisor
+
+
 def background_panel(
     frame: pd.DataFrame,
     clade: str,
     *,
     y_domain: tuple[float, float],
     columns: int,
+    cell_w_in: float | None = None,
+    legend: bool = True,
     h_params: tuple[float, float, float] | None = None,
     group_column: str = "candidate",
     members: Sequence[tuple[str, str]] | None = None,
@@ -1876,7 +1958,10 @@ def background_panel(
     spread_columns: Mapping[str, tuple[str, str]] | None = None,
     absent_label: str | None = None,
     value_label: str | None = None,
-    x_gloss: str = BACKGROUND_X_GLOSS,
+    value_labels: Mapping[object, str] | None = None,
+    y_domains: Mapping[object, tuple[float, float]] | None = None,
+    figure_title: str | None = None,
+    x_gloss: str | None = BACKGROUND_X_GLOSS,
     series: Sequence[tuple[str, str, str, str]] = BACKGROUND_SERIES,
     legend_title: str = ARM_LEGEND_TITLE,
 ) -> matplotlib.figure.Figure:
@@ -1909,7 +1994,23 @@ def background_panel(
         y_domain: ``(low, high)`` shared by every sub-panel of every row,
             from :func:`background_y_domain`.
         columns: How many slots wide every row is -- the widest clade's
-            candidate count plus one for the legend.
+            candidate count plus one for the legend, or plus none when
+            ``legend`` is off.
+
+            **A slot is 2.30 inches, not the 1.76 its constant reads as**:
+            :data:`BACKGROUND_CELL_W_EM` counts ems of a thirteen-point
+            reference and :func:`_em_in` is the rows' seventeen.
+        legend: Whether a slot is spent on a key. ``False`` for a row drawing
+            one series that the page already names -- `fig:l455f`'s panel A,
+            whose heading says who measured it -- where a key would be the
+            same two words a third time.
+        cell_w_in: How wide one slot is, in inches. ``None`` keeps
+            :data:`BACKGROUND_CELL_W_EM`, which was measured for a row whose
+            sub-panels *share* one labelled value axis, so that only the
+            leftmost slot pays for a label and its ticks. A row labelling
+            every sub-panel pays that width in every slot and needs wider
+            ones, or its plots come out narrower than its labels and its x
+            ticks overprint each other.
         h_params: ``(left, right, wspace)`` taken from the first row drawn
             and imposed on the rest, after ``tight_layout`` has run. Without
             it the slots do not line up even at equal width, because
@@ -1970,16 +2071,37 @@ def background_panel(
             the gap legible: the reader sees the position the pool would have
             held, and the note saying there is nothing to put there. ``None``
             writes nothing.
-        value_label: The value axis' label. ``None`` keeps
-            ``f"fitness effect in\nclade {clade} subset"``, which names the
-            one clade every sub-panel of the row belongs to. A row whose
-            sub-panels are *different* clades has no such clade and must pass
-            its own.
-        x_gloss: The second line of the x label, under
-            :data:`BACKGROUND_X_TITLE`. The default names the two sides as
-            clade-founder against derived identities, which is what a
+        value_label: The value axis' label, written once down the left of
+            the row. ``None`` keeps ``f"fitness effect in\nclade {clade}
+            subset"``, which names the one clade every sub-panel of the row
+            belongs to. A row whose sub-panels are *different* clades has no
+            such clade and must pass its own.
+        value_labels: ``{group value: label}``, a label per sub-panel instead
+            of one down the side of the row. For a row whose sub-panels plot
+            *different quantities* -- `fig:l455f`'s panel A measures a binding
+            constant in one and a neutralization titer in the other -- where
+            one label down the side would have to name both and so would name
+            neither. Mutually exclusive with ``value_label``, and it must
+            name every sub-panel drawn.
+        y_domains: ``{group value: (low, high)}``, an axis per sub-panel
+            instead of one across the row, which also unshares the ticks.
+            Every sub-panel drawn must be named: one left out would quietly
+            fall back to the shared ``y_domain``, which is the thing this
+            argument exists to override.
+
+            **A row that passes this gives up what the shared axis buys**, so
+            the sub-panels can no longer be compared by eye. Use
+            :func:`proportional_y_domain` to keep their zero at one height and
+            their scales a stated whole number apart.
+        figure_title: A heading over the whole row, set above the sub-panel
+            titles. ``None`` writes none, which is what the rows of
+            `fig:within_clade_shifts` want: their heading is the figure
+            caption and their panel letter.
+        x_gloss: The line under :data:`BACKGROUND_X_TITLE`. The default names the two sides
+            as clade-founder against derived identities, which is what a
             frequency-derived split is; a split specified by hand at one site
-            is not that, and says so instead.
+            is not that, and says so instead. ``None`` writes no second line,
+            for a row whose heading already says which side is which.
         series: ``[(legend label, value column, colour, marker)]`` -- the
             arms to draw. The default is the two approaches being compared,
             which is what every panel of `fig:within_clade_shifts` and
@@ -2100,27 +2222,48 @@ def background_panel(
                 f"{clade}: {absent} named in `members` but not in the frame's "
                 f"{group_column!r} column, so those sub-panels would be blank."
             )
-    if len(drawn) > columns - 1:
+    if len(drawn) > columns - (1 if legend else 0):
         raise ValueError(
             f"{clade} has {len(drawn)} {group_column} groups and the row is "
             f"{columns} slots wide, which leaves no slot for the legend."
+            if legend
+            else f"{columns} slots wide, which is too few to draw them."
         )
+    if value_label is not None and value_labels is not None:
+        raise ValueError(
+            "background_panel was given both `value_label` and `value_labels`, "
+            "which label the same axis in two places. A row labels its value "
+            "axis once down the side or once per sub-panel, not both."
+        )
+    for name, mapping in (("value_labels", value_labels), ("y_domains", y_domains)):
+        if mapping is None:
+            continue
+        keys = {member for member, _ in drawn}
+        if set(mapping) != keys:
+            raise KeyError(
+                f"{clade}: `{name}` names {sorted(map(str, mapping))} and the "
+                f"row draws {sorted(map(str, keys))}. Every sub-panel drawn "
+                f"has to be named, and only those."
+            )
 
     figure, axes = plt.subplots(
         1,
         columns,
         figsize=(
-            BACKGROUND_CELL_W_EM * _em_in() * columns,
+            (cell_w_in if cell_w_in is not None else BACKGROUND_CELL_W_EM * _em_in())
+            * columns,
             BACKGROUND_ROW_H_EM * _em_in(),
         ),
         squeeze=False,
-        sharey=True,
+        sharey=y_domains is None,
     )
     for empty in axes[0][len(drawn) :]:
         empty.set_axis_off()
 
     for slot, (member, title) in enumerate(drawn):
         axis = axes[0][slot]
+        # The row's axis unless this sub-panel was given its own.
+        limits = y_domain if y_domains is None else y_domains[member]
         part = frame[frame[group_column] == member].sort_values("background_order")
         x = list(range(len(part)))
         for label, column, colour, marker in series:
@@ -2158,10 +2301,10 @@ def background_panel(
                 zorder=3,
             )
         if absent_label is not None:
-            # Just above the floor of the shared domain rather than above the
+            # Just above the floor of the domain rather than above the
             # sub-panel's own data: a note about a pool that does not exist
             # should not move when a neighbouring clade's points do.
-            low, high = y_domain
+            low, high = limits
             for position, missing in zip(
                 x, part[value_columns].isna().all(axis=1).tolist()
             ):
@@ -2187,12 +2330,24 @@ def background_panel(
             fontsize=BACKGROUND_FONT_PT,
         )
         axis.set_xlim(-0.45, len(part) - 0.55)
-        axis.set_ylim(*y_domain)
+        axis.set_ylim(*limits)
         # The mutation alone. Every sub-panel of a row is one clade's, so
         # "in clade 20B" would be the same five words on every one of them --
         # and on a two-candidate row they are wide enough to collide. The
         # clade is on the value-axis label instead, once.
         axis.set_title(title, fontsize=BACKGROUND_FONT_PT, fontweight="bold")
+        if value_labels is not None:
+            # On the axes rather than through `supylabel`, because the point of
+            # a label per sub-panel is that it sits against the sub-panel it
+            # belongs to. `ma="center"` for the same reason it is passed to the
+            # row-wide label below: rotated text left-justifies, which for a
+            # vertical label aligns the lines along their lower edge.
+            axis.set_ylabel(
+                value_labels[member],
+                fontsize=BACKGROUND_FONT_PT,
+                fontweight="bold",
+                ma="center",
+            )
         axis.tick_params(axis="y", labelsize=BACKGROUND_FONT_PT)
         # On every sub-panel, not only the one carrying the ticks: the grid is
         # how a reader carries a level across a row, and `sharey` hides the
@@ -2210,7 +2365,9 @@ def background_panel(
     # names what membership requires rather than the parent's whole
     # background.
     placed_xlabel = figure.supxlabel(
-        f"{BACKGROUND_X_TITLE}\n{x_gloss}",
+        BACKGROUND_X_TITLE
+        if x_gloss is None
+        else f"{BACKGROUND_X_TITLE}\n{x_gloss}",
         fontsize=BACKGROUND_FONT_PT,
         fontweight="bold",
         ma="center",
@@ -2223,15 +2380,44 @@ def background_panel(
     # centres the two lines on each other -- rotated text left-justifies by
     # default, which for a vertical label means the lines align along their
     # lower edge and the shorter one hangs off the top.
-    placed_ylabel = figure.supylabel(
-        value_label
-        if value_label is not None
-        else f"fitness effect in\nclade {clade} subset",
-        fontsize=BACKGROUND_FONT_PT,
-        fontweight="bold",
-        ma="center",
-    )
-    figure.tight_layout(rect=(0.02, 0.02, 1.0, 1.0))
+    placed_ylabel = None
+    if value_labels is None:
+        placed_ylabel = figure.supylabel(
+            value_label
+            if value_label is not None
+            else f"fitness effect in\nclade {clade} subset",
+            fontsize=BACKGROUND_FONT_PT,
+            fontweight="bold",
+            ma="center",
+        )
+    # Before `tight_layout`, and measured, so the sub-panels are laid out into
+    # what the heading leaves rather than under it: `tight_layout` reserves no
+    # room for a figure-level title, and a heading it has not been told about
+    # is drawn over the sub-panel titles.
+    top = 1.0
+    if figure_title is not None:
+        placed_title = figure.suptitle(
+            figure_title,
+            fontsize=BACKGROUND_FONT_PT,
+            fontweight="bold",
+            ma="center",
+        )
+        block = placed_title.get_window_extent(
+            _measuring_renderer(figure)
+        ).transformed(figure.transFigure.inverted())
+        # A heading wider than the row is centred on it and clipped at both
+        # ends, and `save_mpl_panel` deliberately does not crop to the drawn
+        # extent, so nothing downstream would reveal it. Caught here, where
+        # the fix -- fewer words, or a wider row -- is the caller's.
+        if block.x0 < 0.0 or block.x1 > 1.0:
+            raise ValueError(
+                f"`figure_title` is {block.width:.2f} of the row wide, so it "
+                f"would be clipped at both ends. Shorten it, break it over "
+                f"another line, or widen the row with `columns` or "
+                f"`cell_w_in`."
+            )
+        top = block.y0 - BACKGROUND_TITLE_GAP
+    figure.tight_layout(rect=(0.02, 0.02, 1.0, top))
     if h_params is not None:
         left, right, wspace = h_params
         figure.subplots_adjust(left=left, right=right, wspace=wspace)
@@ -2248,7 +2434,8 @@ def background_panel(
         min(axis.get_position().y0 for axis in axes.ravel())
         + max(axis.get_position().y1 for axis in axes.ravel())
     ) / 2
-    placed_ylabel.set_y(panel_middle)
+    if placed_ylabel is not None:
+        placed_ylabel.set_y(panel_middle)
 
     # On this clade's own sub-panels rather than on the row's slots: the label
     # belongs under the plots it describes, not under the middle of a padding
@@ -2257,6 +2444,24 @@ def background_panel(
     label_x = (
         min(span.x0 for span in occupied) + max(span.x1 for span in occupied)
     ) / 2
+    # Slid back onto the row if centring it there would put either end off the
+    # figure. A row is left justified with its spare slots on the right, so
+    # its sub-panels sit left of the figure's centre and a label wider than
+    # they are would otherwise hang off the left edge -- where
+    # `save_mpl_panel` does not crop to the drawn extent, so it is cut and
+    # nothing downstream says so. Against the sub-panels is where the label
+    # belongs; on the page at all comes first.
+    half = (
+        placed_xlabel.get_window_extent(_measuring_renderer(figure))
+        .transformed(figure.transFigure.inverted())
+        .width
+        / 2
+    )
+    # No check that it fits: a label wider than the whole row is clipped
+    # whatever is done with it, and a row that narrow is a test fixture rather
+    # than a panel -- `max` before `min` keeps such a row centred instead of
+    # pushed off the right.
+    label_x = min(max(label_x, half), max(1.0 - half, half))
     placed_xlabel.set_x(label_x)
 
     # Split the reserved block in two: the label keeps its top, the gloss
@@ -2280,41 +2485,44 @@ def background_panel(
     placed_xlabel.set_text(BACKGROUND_X_TITLE)
     placed_xlabel.set_va("top")
     placed_xlabel.set_y(block.y1 + lift)
-    # `x_gloss`, not :data:`BACKGROUND_X_GLOSS`: the two-line label above was
-    # measured with the caller's gloss, and drawing the default here instead
-    # would silently put the wrong one on the page -- naming a hand-specified
-    # split as a frequency-derived one, at the size a reader trusts least.
-    figure.text(
-        label_x,
-        block.y0 + lift,
-        x_gloss,
-        fontsize=BACKGROUND_FONT_PT - 1,
-        ha="center",
-        va="bottom",
-    )
+    if x_gloss is not None:
+        # `x_gloss`, not :data:`BACKGROUND_X_GLOSS`: the block above was
+        # measured with the caller's gloss, and drawing the default here
+        # instead would silently put the wrong one on the page -- naming a
+        # hand-specified split as a frequency-derived one, at the size a
+        # reader trusts least.
+        figure.text(
+            label_x,
+            block.y0 + lift,
+            x_gloss,
+            fontsize=BACKGROUND_FONT_PT - 1,
+            ha="center",
+            va="bottom",
+        )
 
     # In the first slot past this clade's sub-panels, level with them: a key
     # beside the plots rather than a band above them. Every row reserves that
     # slot, which is what the surplus column is for.
-    handles, labels = axes[0][0].get_legend_handles_labels()
-    spare = axes[0][len(drawn)] if columns > len(drawn) else axes[0][-1]
-    drawn = figure.legend(
-        handles,
-        labels,
-        loc="center left",
-        bbox_to_anchor=(spare.get_position().x0, panel_middle),
-        ncol=1,
-        frameon=False,
-        fontsize=BACKGROUND_FONT_PT,
-        title=legend_title,
-        # A multi-line key is one entry, so its lines sit under each other
-        # rather than beside the marker. Harmless on the one-word keys the
-        # published rows use, which have no second line.
-        alignment="left",
-        labelspacing=0.9,
-    )
-    drawn.get_title().set_fontsize(BACKGROUND_FONT_PT)
-    drawn.get_title().set_fontweight("bold")
+    if legend:
+        handles, labels = axes[0][0].get_legend_handles_labels()
+        spare = axes[0][len(drawn)] if columns > len(drawn) else axes[0][-1]
+        key = figure.legend(
+            handles,
+            labels,
+            loc="center left",
+            bbox_to_anchor=(spare.get_position().x0, panel_middle),
+            ncol=1,
+            frameon=False,
+            fontsize=BACKGROUND_FONT_PT,
+            title=legend_title,
+            # A multi-line key is one entry, so its lines sit under each other
+            # rather than beside the marker. Harmless on the one-word keys the
+            # published rows use, which have no second line.
+            alignment="left",
+            labelspacing=0.9,
+        )
+        key.get_title().set_fontsize(BACKGROUND_FONT_PT)
+        key.get_title().set_fontweight("bold")
     return figure
 
 

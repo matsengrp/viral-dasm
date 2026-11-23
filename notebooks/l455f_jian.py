@@ -41,6 +41,15 @@ def _(mo):
     effects already run in. Natural logarithms, so the axis is in the same
     units as panel B's log selection factor.
 
+    ## The two axes
+
+    The sub-panels measure **different quantities** -- a dissociation
+    constant and a neutralization titer -- and the binding effects are far
+    the larger, so one axis across both would draw escape as a flat line.
+    Each gets its own, with the escape axis the binding axis divided by a
+    whole number: dividing cannot move zero, so the two keep one baseline,
+    and the one thing a reader carries between them is that number.
+
     **These are not log selection factors.** A log fold change in $K_D$ and a
     log selection factor are the same *units* and different *quantities*. The
     panel is here to corroborate the direction and rough size of the shift,
@@ -138,43 +147,55 @@ def _(MEASURED, SELECTION, charts, mo, panels, spec):
     # named for what it holds. See `background_panel`'s `series` argument.
     _series = (("Jian et al.", "measured_effect", charts.MEASURED_GREEN, "s"),)
 
-    # Panel B's domain is solved from its own estimates and this one from its
-    # own measurements: the two panels plot different quantities, so a shared
-    # axis would assert a comparability the caption is careful not to claim.
-    _y_domain = charts.background_y_domain(MEASURED, series=_series)
+    # One axis per sub-panel, because the two measure different quantities: a
+    # dissociation constant and a neutralization titer. Binding sets the
+    # scale and escape is nested inside it, so the two keep one zero and
+    # differ by one whole number -- see `charts.proportional_y_domain`. The
+    # unpacking is the check that there are exactly two.
+    _reference, _nested = list(spec.L455F_JIAN_ASSAYS)
+    _reference_domain = charts.background_y_domain(
+        MEASURED[MEASURED["assay"] == _reference], series=_series
+    )
+    _nested_domain, Y_AXIS_DIVISOR = charts.proportional_y_domain(
+        _reference_domain,
+        MEASURED[MEASURED["assay"] == _nested],
+        series=_series,
+    )
 
     _figure = charts.background_panel(
         MEASURED,
         spec.L455F_MUTATION,
-        y_domain=_y_domain,
-        # Two assays plus a slot for the key, as panel B leaves slots for its
-        # own. Panel B is five clades plus two, so this row is narrower and
-        # `compose` scales the two to a common width.
-        columns=len(spec.L455F_JIAN_ASSAYS) + 2,
+        # Unused, since every sub-panel is named in `y_domains`, and passed as
+        # the reference axis so that a sub-panel added without an axis of its
+        # own would raise rather than be drawn against something arbitrary.
+        y_domain=_reference_domain,
+        y_domains={_reference: _reference_domain, _nested: _nested_domain},
+        # Named by their value axes, not by titles of their own: the quantity
+        # differs between them, and `L455F_JIAN_TITLE` says what they have in
+        # common once, over both.
+        value_labels=spec.L455F_JIAN_ASSAYS,
+        figure_title=spec.L455F_JIAN_TITLE,
+        # Two assays and nothing else: no slot for a key, because there is
+        # one series and the heading names it. Panel B spends two slots on
+        # its own key, which has three arms to tell apart.
+        columns=len(spec.L455F_JIAN_ASSAYS),
+        cell_w_in=spec.L455F_JIAN_CELL_W_IN,
+        legend=False,
         group_column="assay",
-        members=list(spec.L455F_JIAN_ASSAYS.items()),
+        members=[(assay, "") for assay in spec.L455F_JIAN_ASSAYS],
         marker_size=14,
         # No whiskers. Jian et al. report a single value per variant per assay,
         # so there is no spread to draw -- unlike panel B's DASM pools, whose
         # whiskers span their parent haplotypes.
         spread_columns=None,
-        value_label=(
-            f"measured effect of {spec.L455F_MUTATION}\n"
-            r"($-\Delta \ln$ of the assay value)"
-        ),
-        # The same two ticks as panel B, named the same way, so the reader
-        # carries one contrast down the figure.
-        # Short, because a three-slot row is narrow and a gloss wider than
-        # the figure is centred on it and clipped at both ends. The variants
-        # name the backgrounds; the residues are already on the ticks.
-        x_gloss=(
-            "(left: XBB.1.5; right: XBB.1.5 + "
-            f"F{spec.L455F_MARKER_SITE}{spec.L455F_MARKER_AA})"
-        ),
+        # The same two ticks as panel B, named the same way and under the
+        # same words, so the reader carries one contrast down the figure.
+        # No gloss. Panel B's names which side is which because its x ticks
+        # are residues and its sub-panels are clades; here the heading already
+        # says "in the presence and absence of F456L", and a line repeating it
+        # under the ticks would be the third place one figure says so.
+        x_gloss=None,
         series=_series,
-        # Not "approach": this panel draws a measurement, not one of the two
-        # approaches panel B compares.
-        legend_title="measurement",
     )
     PANEL = charts.save_mpl_panel(_figure, spec.L455F_JIAN_PANEL, selection=SELECTION)
     panels.write_pool_csv(
@@ -195,6 +216,19 @@ def _(MEASURED, SELECTION, charts, mo, panels, spec):
         selection=SELECTION,
     )
     mo.output.replace(PANEL)
+    return (Y_AXIS_DIVISOR,)
+
+
+@app.cell
+def _(Y_AXIS_DIVISOR, mo):
+    mo.md(
+        f"""
+        The escape axis spans **one {Y_AXIS_DIVISOR}th** of the binding axis,
+        with both zeroes at the same height. A caption claiming the two
+        sub-panels can be read against each other has to state that number;
+        one that does not should say the axes differ instead.
+        """
+    )
     return
 
 

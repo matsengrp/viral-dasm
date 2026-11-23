@@ -1232,15 +1232,45 @@ L455F_JIAN_PANEL = "l455f_jian"
 #: difference computed from these, not a number copied from the paper.
 L455F_JIAN_DATA = "data/jian2023/l455f_backgrounds.csv"
 
-#: Sub-panel titles for panel A, keyed by the CSV's `assay`, naming the
-#: assay and the quantity measured. **Short**: a sub-panel is 1.76 inches
-#: wide and matplotlib does not shrink or wrap a title to fit, so a long
-#: one silently overprints its neighbour. The transform the two share --
-#: the negated log difference -- is on the value axis instead, said once.
+#: Value-axis labels for panel A, keyed by the CSV's `assay`, in the order
+#: the sub-panels are drawn. One per sub-panel rather than one down the side
+#: of the row, because the two measure *different quantities* -- a binding
+#: constant and a neutralization titer -- and a single label would have to
+#: name both. The sub-panels carry no titles of their own: these labels name
+#: them, and :data:`L455F_JIAN_TITLE` heads the row.
 L455F_JIAN_ASSAYS: dict[str, str] = {
-    "affinity": "RBD affinity\n($K_D$)",
-    "neutralization": "plasma escape\n(NT$_{50}$)",
+    "affinity": "effect of L455F on\nACE2 binding ($\\Delta \\log K_D$)",
+    "neutralization": "effect of L455F on\nsera escape ($\\Delta \\log$ NT$_{50}$)",
 }
+
+#: How wide one of panel A's slots is, in inches, against the 2.30 the
+#: shared-axis rows use. Panel A spends no slot on a key and has only two
+#: sub-panels, but both of them carry a value label and its ticks, which a
+#: shared axis pays for once -- so a slot has to be wider or the plots come
+#: out narrower than their own labels and the two x ticks overprint each
+#: other.
+#:
+#: **Set so that panel A's plot boxes come out 1.90 inches wide, which is
+#: what panel B's are.** That matters more here than it looks: both panels
+#: draw a two-point line and the figure's claim is about its slope, so the
+#: same shift drawn across a narrower box would read as a steeper one. The
+#: two were measured off the rendered panels, not derived -- `tight_layout`
+#: sizes the margins from the tick and axis labels it finds.
+L455F_JIAN_CELL_W_IN = 3.49
+
+#: Panel A's heading, over both sub-panels: what was measured, on what, and
+#: by whom. It also stands in for a key -- the row draws one series, and the
+#: heading already names who measured it.
+#:
+#: **Three lines, broken at the phrases.** The row is as wide as its two
+#: sub-panels need and no wider, and one line of this would be half again as
+#: wide as that; `background_panel` raises on a heading wider than its row
+#: rather than centring it and clipping both ends.
+L455F_JIAN_TITLE = (
+    "Effect of L455F on XBB.1.5\n"
+    "in the presence and absence of F456L\n"
+    "experimentally measured by Jian et al."
+)
 
 L455F_PANELS: tuple[str, ...] = (L455F_JIAN_PANEL, L455F_BACKGROUND_PANEL)
 

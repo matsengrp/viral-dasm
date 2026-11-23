@@ -1893,6 +1893,11 @@ rule l455f_backgrounds:
         notebook="notebooks/l455f_backgrounds.py",
         cells=str(L455F_POOL_CELLS),
         shifts=str(L455F_POOL_SHIFTS),
+        # The clade-pooled grid, for the whole-tree counts arm. Declared
+        # rather than reached for inside the notebook: it is a published
+        # input, so a rule that did not name it would not re-draw when it
+        # changed.
+        pooled=str(mat_pcp_path("aamut_fitness_pooled_file")),
         clade_founders=clade_founder_fastas,
         masked_nt_sites=str(mat_pcp_path("masked_nt_sites_file")),
         reference=str(mat_pcp_path("reference_sequence_file")),
@@ -1907,6 +1912,7 @@ rule l455f_backgrounds:
         "marimo export html {input.notebook} -o {output.html} --force"
         " -- --cells {input.cells}"
         " --shifts {input.shifts}"
+        " --pooled {input.pooled}"
         " --selection {wildcards.selection}"
         " > {log} 2>&1"
 

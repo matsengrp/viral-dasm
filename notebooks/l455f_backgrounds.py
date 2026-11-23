@@ -47,14 +47,14 @@ def _(mo):
     not be a 456 contrast at all; and for 23B the hand specification confirms
     what the chooser already finds rather than overriding it.
 
-    **Two clades of the roster are special, for two different reasons.**
-    23F has no founder-side pool -- EG.5.1's founder already carries 456L, so
-    a founder pool and a derived pool would be the same branches -- so
-    `scripts/l455f_pools.py`, upstream of this notebook, measures it on its
-    derived pool alone, and it is drawn here as a named tick with no point on
-    the 456F side. 23E is measured and then gated out here: its 456L pool
-    holds one event against an expected 0.06, which is below the cutoff the
-    rest of the figure is drawn at.
+    **Two clades of the roster are measured and not drawn, for two
+    different reasons.** 23F has no founder-side pool -- EG.5.1's founder
+    already carries 456L, so a founder pool and a derived pool would be the
+    same branches -- so `scripts/l455f_pools.py`, upstream of this notebook,
+    measures it on its derived pool alone, and a sub-panel for it would be a
+    single point with nothing to compare it to. 23E has two pools and its
+    456L pool holds one event against an expected 0.06, below the cutoff the
+    rest of the figure is drawn at. Both are in the panel CSV.
 
     **The whiskers.** The purple triangle is the pool average, and the
     whisker on it is the 5th to 95th percentile of the same haplotypes'
@@ -63,13 +63,21 @@ def _(mo):
     shrink as the pool grows, and a pool of a thousand parents that agree
     will show a shorter whisker than a pool of fifty that do not.
 
-    **Both estimates, and what makes them comparable.** The counts estimate is
-    `log(actual / expected)` over the branches in that pool. The DASM estimate
-    is the pool average: the mean log selection factor over the distinct
-    parent haplotypes the pool contains, weighted by each one's synonymous
-    count. Matching the counts side -- a sum of events over a sum of expected
-    counts -- needs an arithmetic mean of the selection factors, not a mean of
-    their logs.
+    **The three arms, and what makes them comparable.** The per-subset
+    counts estimate is `log(actual / expected)` over the branches in that
+    pool. The DASM estimate is the pool average: the mean log selection
+    factor over the distinct parent haplotypes the pool contains, weighted by
+    each one's synonymous count. Matching the counts side -- a sum of events
+    over a sum of expected counts -- needs an arithmetic mean of the selection
+    factors, not a mean of their logs.
+
+    The **full-tree counts** arm is the same statistic over every branch of
+    every clade, read from the clade-pooled grid: one number, drawn flat
+    across both backgrounds of every sub-panel. It is what the counts
+    approach says about this mutation when it is handed no split at all, and
+    it is in the panel because a reader is entitled to ask that -- the
+    per-subset arm is given the contrast the figure is about, and this one
+    shows what is there without it.
 
     **GISAID**: reads pooled counts and scores from the artifact root; writes
     effects, shifts and p-values, which are publishable, and names a
@@ -104,12 +112,22 @@ def _(mo):
     _args = mo.cli_args()
     CELLS_PATH = Path(str(_args["cells"]))
     SHIFTS_PATH = Path(str(_args["shifts"]))
+    POOLED_PATH = Path(str(_args["pooled"]))
     SELECTION = str(_args.get("selection") or panels.DEFAULT_SELECTION)
-    return CELLS_PATH, SELECTION, SHIFTS_PATH, charts, panels, pd, spec
+    return (
+        CELLS_PATH,
+        POOLED_PATH,
+        SELECTION,
+        SHIFTS_PATH,
+        charts,
+        panels,
+        pd,
+        spec,
+    )
 
 
 @app.cell
-def _(CELLS_PATH, SELECTION, SHIFTS_PATH, mo, panels, pd, spec):
+def _(CELLS_PATH, POOLED_PATH, SELECTION, SHIFTS_PATH, mo, panels, pd, spec):
     CELLS = pd.read_parquet(CELLS_PATH)
     SHIFTS = pd.read_parquet(SHIFTS_PATH)
 
@@ -136,65 +154,54 @@ def _(CELLS_PATH, SELECTION, SHIFTS_PATH, mo, panels, pd, spec):
     FOCAL["panel_gate"] = panels.passes_evidence_gate(
         FOCAL["actual"], FOCAL["expected"], minimum=panels.PANEL_MIN_COUNT
     )
-    # Every pool a clade has must clear the cutoff. For a clade with two
-    # that is the contrast's thinner side; for 23F, which has one by
-    # construction, it is that one.
+    # Two conditions, and both are about the contrast rather than about a
+    # point. Every pool a clade has must clear the cutoff -- a contrast is
+    # only as good as its thinner side -- and the clade must have both pools.
+    # 23F is the clade that fails the second: EG.5.1's founder already carries
+    # 456L, so a founder pool and a derived pool would be the same branches.
+    # It was drawn as a named tick with no point on the F456 side, which asked
+    # the reader to carry an absence along a row whose every other sub-panel
+    # is a slope. It is still measured and still in this notebook's CSV; it is
+    # not drawn.
     _clears = FOCAL.groupby("cluster")["panel_gate"].all()
-    DRAWN = sorted(clade for clade in spec.L455F_CLADES if _clears.get(clade, False))
-    GATED = {
-        clade: (
-            "below the cutoff"
-            if clade in _clears.index
-            else "not measured -- see the pools script"
+    _pools = FOCAL.groupby("cluster")["pool"].nunique()
+    DRAWN = sorted(
+        clade
+        for clade in spec.L455F_CLADES
+        if _clears.get(clade, False) and int(_pools.get(clade, 0)) == 2
+    )
+
+    def _gated_why(clade: str) -> str:
+        if clade not in _clears.index:
+            return "not measured -- see the pools script"
+        if not bool(_clears[clade]):
+            return "below the cutoff"
+        return (
+            f"{int(_pools[clade])} background measured, not two -- "
+            f"no contrast to draw"
         )
+
+    GATED = {
+        clade: _gated_why(clade)
         for clade in spec.L455F_CLADES
         if clade not in DRAWN
     }
     if not DRAWN:
         raise ValueError(
-            f"no clade of {list(spec.L455F_CLADES)} clears "
-            f"{panels.PANEL_MIN_COUNT} actual or expected counts on every "
-            f"pool it has, so the panel would be blank."
+            f"no clade of {list(spec.L455F_CLADES)} has two pools that both "
+            f"clear {panels.PANEL_MIN_COUNT} actual or expected counts, so "
+            f"the panel would be blank."
         )
     FOCAL = FOCAL[FOCAL["cluster"].isin(DRAWN)]
 
-    # A named tick with no point, for a clade whose founder already carries
-    # the derived residue and so has no founder-side pool to measure. The row
-    # is added **here and not by the producer**: the pools file records what
-    # was measured, and a row of NaNs is a drawing instruction rather than a
-    # measurement.
-    #
-    # The tick keeps the background's name, and `n.a.` is written inside the
-    # plot instead (`absent_label` below). Naming the tick `n.a.` hid what the
-    # sub-panel is missing: the reader could see that something was absent but
-    # not that it was the F456 side, which is the comparison every other
-    # sub-panel is making. The label is taken from the clades that do have
-    # that pool rather than spelled again here.
-    ONE_POOL = [clade for clade, n in FOCAL.groupby("cluster").size().items() if n == 1]
-    if ONE_POOL:
-        _founder_labels = sorted(
-            FOCAL.loc[FOCAL["background_order"] == 0, "background"].dropna().unique()
-        )
-        if len(_founder_labels) != 1:
-            raise ValueError(
-                f"the drawn clades name their founder-side pool "
-                f"{_founder_labels}; one name is needed for the tick the "
-                f"one-pool clade borrows."
-            )
-        _placeholder = FOCAL[FOCAL["cluster"].isin(ONE_POOL)].copy()
-        _placeholder["background"] = _founder_labels[0]
-        _placeholder["background_order"] = 0
-        for _column in (
-            "counts_effect",
-            "dasm_effect",
-            "dasm_low",
-            "dasm_high",
-            "se",
-            "actual",
-            "expected",
-        ):
-            _placeholder[_column] = float("nan")
-        FOCAL = pd.concat([FOCAL, _placeholder], ignore_index=True)
+    # The counts approach over the whole tree: one number, joined onto every
+    # row, so it is drawn flat across both backgrounds of every sub-panel.
+    # What it is there for is the question a reader of the per-subset arm is
+    # entitled to ask -- what does this approach say when it is not handed the
+    # split? -- and the answer is a level, not a slope.
+    FOCAL["full_tree_effect"] = panels.pooled_counts_estimate(
+        POOLED_PATH, spec.L455F_MUTATION
+    )
 
     # One p-value per clade, not per candidate: the candidate is the same
     # mutation in every sub-panel here, and keying on it would collapse the
@@ -214,9 +221,7 @@ def _(CELLS_PATH, SELECTION, SHIFTS_PATH, mo, panels, pd, spec):
 
     FOCAL["p_label"] = [_p_label(clade) for clade in FOCAL["cluster"]]
     mo.md(
-        f"Selection **{SELECTION}**. Drawn: `{'`, `'.join(DRAWN)}`"
-        + (f", of which `{'`, `'.join(ONE_POOL)}` on one pool" if ONE_POOL else "")
-        + ". "
+        f"Selection **{SELECTION}**. Drawn: `{'`, `'.join(DRAWN)}`. "
         + (
             "Not drawn: "
             + ", ".join(f"**{clade}** ({why})" for clade, why in GATED.items())
@@ -234,7 +239,9 @@ def _(DRAWN, FOCAL, SELECTION, charts, mo, panels, spec):
     # The whiskers' ends as well as the points, so an interval reaching past
     # its dot is drawn whole rather than clipped at the axis.
     _y_domain = charts.background_y_domain(
-        FOCAL, extra_columns=("dasm_low", "dasm_high")
+        FOCAL,
+        extra_columns=("dasm_low", "dasm_high"),
+        series=charts.L455F_BACKGROUND_SERIES,
     )
 
     # One slot per clade, plus one for the legend, exactly as a background row
@@ -253,17 +260,16 @@ def _(DRAWN, FOCAL, SELECTION, charts, mo, panels, spec):
         # one, and a key wider than its slot runs off the panel's right edge.
         columns=len(DRAWN) + 2,
         group_column="cluster",
+        # Three arms rather than the two the within-clade rows draw, in the
+        # order the key reads them: the DASM, then the counts approach at its
+        # two resolutions. See `charts.L455F_BACKGROUND_SERIES` on why this is
+        # its own tuple and not a third entry in the shared one.
+        series=charts.L455F_BACKGROUND_SERIES,
         # Clade order, not steepest-first. These sub-panels are clades, which
         # have an order of their own that also runs roughly in time, and the
         # one-pool clade has no shift to be sorted by. Titled as the tree's
         # own metadata names them, so the panel and the paper's prose agree.
         members=[(clade, spec.L455F_CLADE_NAMES[clade]) for clade in DRAWN],
-        # Each key says what that approach was applied to, because the two
-        # are not applied to the same thing: the counts approach is fit
-        # separately within each subset of branches, while the DASM is one
-        # model evaluated on each parent sequence. Saying it here puts it
-        # where a reader meets the marks rather than in the caption.
-        series_labels={"counts": "counts\n(separately applied\nto each subset)"},
         # Twice the diameter of the published rows' dots. `markersize` is a
         # diameter in points, so a factor of two here is a factor of two on
         # the page.
@@ -273,17 +279,16 @@ def _(DRAWN, FOCAL, SELECTION, charts, mo, panels, spec):
         # one: the counts estimate is a ratio of sums over the whole pool and
         # has no per-parent value to spread.
         spread_columns={"DASM": ("dasm_low", "dasm_high")},
-        # Written at the F456 position of the one-pool clade, just above the
-        # floor of the shared axis.
-        absent_label="n.a.",
         # One line. The two-line form exists because
         # `fig:within_clade_shifts`' label names a clade as well as a
         # quantity and is too long for its panels; this one is short enough
         # to set on one line, which reads better beside a single row.
         value_label=f"fitness effect of {spec.L455F_MUTATION}",
-        # Named by residue alone, not as "the clade founder's F456": 23F's
-        # founder carries L456, so that phrasing is false of the one
-        # sub-panel whose left-hand tick is `n.a.` in the first place.
+        # Named by residue alone rather than as "the clade founder's F456".
+        # Every clade now drawn does carry F456 at its founder, 23F having
+        # been dropped for having no second background, but the x axis names
+        # what membership of a pool requires and not what the founder happens
+        # to be -- which is also what the shared `BACKGROUND_X_TITLE` says.
         x_gloss=(
             f"(left: parents carrying F{spec.L455F_MARKER_SITE}; "
             f"right: parents carrying "
@@ -308,6 +313,7 @@ def _(DRAWN, FOCAL, SELECTION, charts, mo, panels, spec):
                 "actual",
                 "expected",
                 "counts_effect",
+                "full_tree_effect",
                 "se",
                 "dasm_effect",
                 "dasm_low",
