@@ -148,14 +148,23 @@ def _(MEASURED, SELECTION, charts, mo, panels, spec):
     _series = (("Jian et al.", "measured_effect", charts.MEASURED_GREEN, "s"),)
 
     # One axis per sub-panel, because the two measure different quantities: a
-    # dissociation constant and a neutralization titer. Binding sets the
-    # scale and escape is nested inside it, so the two keep one zero and
-    # differ by one whole number -- see `charts.proportional_y_domain`. The
-    # unpacking is the check that there are exactly two.
-    _reference, _nested = list(spec.L455F_JIAN_ASSAYS)
-    _reference_domain = charts.background_y_domain(
-        MEASURED[MEASURED["assay"] == _reference], series=_series
-    )
+    # neutralization titer and a dissociation constant. The wider range sets
+    # the scale and the other is nested inside it, so the two keep one zero
+    # and differ by one whole number -- see `charts.proportional_y_domain`.
+    #
+    # Found rather than named: which assay is the wider is a fact about the
+    # measurements, and naming it here would be a second place to keep right
+    # when the sub-panels are reordered. The unpacking is the check that
+    # there are exactly two.
+    _own = {
+        assay: charts.background_y_domain(
+            MEASURED[MEASURED["assay"] == assay], series=_series
+        )
+        for assay in spec.L455F_JIAN_ASSAYS
+    }
+    _reference = max(_own, key=lambda assay: _own[assay][1] - _own[assay][0])
+    (_nested,) = (assay for assay in _own if assay != _reference)
+    _reference_domain = _own[_reference]
     _nested_domain, Y_AXIS_DIVISOR = charts.proportional_y_domain(
         _reference_domain,
         MEASURED[MEASURED["assay"] == _nested],
@@ -174,12 +183,17 @@ def _(MEASURED, SELECTION, charts, mo, panels, spec):
         # differs between them, and `L455F_JIAN_TITLE` says what they have in
         # common once, over both.
         value_labels=spec.L455F_JIAN_ASSAYS,
+        # Which way is better for the virus, said beside each axis. The label
+        # names the quantity; these name the direction, which a negated log
+        # fold change does not wear on its face.
+        value_arrows=spec.L455F_JIAN_ARROWS,
         figure_title=spec.L455F_JIAN_TITLE,
         # Two assays and nothing else: no slot for a key, because there is
         # one series and the heading names it. Panel B spends two slots on
         # its own key, which has three arms to tell apart.
         columns=len(spec.L455F_JIAN_ASSAYS),
         cell_w_in=spec.L455F_JIAN_CELL_W_IN,
+        row_h_in=spec.L455F_JIAN_ROW_H_IN,
         legend=False,
         group_column="assay",
         members=[(assay, "") for assay in spec.L455F_JIAN_ASSAYS],

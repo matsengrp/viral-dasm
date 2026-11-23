@@ -1825,6 +1825,20 @@ L455F_BACKGROUND_SERIES = (
 #: that the note cannot be mistaken for a point.
 BACKGROUND_ABSENT_LIFT = 0.04
 
+#: Where :func:`background_panel` draws a value-axis arrow, in axes
+#: fractions past the axis's right edge: the arrow's x, its text's x, and the
+#: two ends of the upward arrow. The downward one is their reflection in the
+#: axis's middle, so the pair is symmetric about zero height without saying
+#: so twice.
+#:
+#: Outside the axes, which is why the arrows need no space reserved for them
+#: by hand: the text is an axes child and `tight_layout` measures it through
+#: `get_tightbbox`, so a row carrying arrows comes out with wider gaps and
+#: narrower plots unless it is also drawn wider.
+BACKGROUND_ARROW_X = 0.09
+BACKGROUND_ARROW_TEXT_X = 0.22
+BACKGROUND_ARROW_SPAN = (0.56, 0.97)
+
 #: Half the width of the cap on a spread whisker, in x-axis units -- the x
 #: positions are 0 and 1, so this is a fourteenth of the gap between the two
 #: backgrounds. Wide enough to read as a cap rather than as a tick of the
@@ -1949,6 +1963,7 @@ def background_panel(
     y_domain: tuple[float, float],
     columns: int,
     cell_w_in: float | None = None,
+    row_h_in: float | None = None,
     legend: bool = True,
     h_params: tuple[float, float, float] | None = None,
     group_column: str = "candidate",
@@ -1959,6 +1974,7 @@ def background_panel(
     absent_label: str | None = None,
     value_label: str | None = None,
     value_labels: Mapping[object, str] | None = None,
+    value_arrows: Mapping[object, tuple[str, str]] | None = None,
     y_domains: Mapping[object, tuple[float, float]] | None = None,
     figure_title: str | None = None,
     x_gloss: str | None = BACKGROUND_X_GLOSS,
@@ -2004,6 +2020,12 @@ def background_panel(
             one series that the page already names -- `fig:l455f`'s panel A,
             whose heading says who measured it -- where a key would be the
             same two words a third time.
+        row_h_in: How tall the row is, in inches. ``None`` keeps
+            :data:`BACKGROUND_ROW_H_EM`. A row carrying a heading and a label
+            on every sub-panel has less of that height left for its plots than
+            a row with one title and one label, so two panels of one figure
+            whose plot boxes should match in height do not match at one
+            figure height.
         cell_w_in: How wide one slot is, in inches. ``None`` keeps
             :data:`BACKGROUND_CELL_W_EM`, which was measured for a row whose
             sub-panels *share* one labelled value axis, so that only the
@@ -2083,6 +2105,16 @@ def background_panel(
             one label down the side would have to name both and so would name
             neither. Mutually exclusive with ``value_label``, and it must
             name every sub-panel drawn.
+        value_arrows: ``{group value: (upward text, downward text)}``, an
+            arrow each way beside the value axis with its text alongside,
+            just outside the axes on the right. For a row whose value axis
+            runs in a direction a reader has to be told -- a negated log fold
+            change, where up is better for the virus and the label says only
+            which quantity was measured.
+
+            It must name every sub-panel drawn, and the space it needs comes
+            out of the row: the texts are axes children, so ``tight_layout``
+            reserves room for them by narrowing the plots.
         y_domains: ``{group value: (low, high)}``, an axis per sub-panel
             instead of one across the row, which also unshares the ticks.
             Every sub-panel drawn must be named: one left out would quietly
@@ -2235,7 +2267,11 @@ def background_panel(
             "which label the same axis in two places. A row labels its value "
             "axis once down the side or once per sub-panel, not both."
         )
-    for name, mapping in (("value_labels", value_labels), ("y_domains", y_domains)):
+    for name, mapping in (
+        ("value_labels", value_labels),
+        ("value_arrows", value_arrows),
+        ("y_domains", y_domains),
+    ):
         if mapping is None:
             continue
         keys = {member for member, _ in drawn}
@@ -2252,7 +2288,7 @@ def background_panel(
         figsize=(
             (cell_w_in if cell_w_in is not None else BACKGROUND_CELL_W_EM * _em_in())
             * columns,
-            BACKGROUND_ROW_H_EM * _em_in(),
+            row_h_in if row_h_in is not None else BACKGROUND_ROW_H_EM * _em_in(),
         ),
         squeeze=False,
         sharey=y_domains is None,
@@ -2348,6 +2384,38 @@ def background_panel(
                 fontweight="bold",
                 ma="center",
             )
+        if value_arrows is not None:
+            # In axes fractions past the right edge, so the pair moves with
+            # the sub-panel whatever the layout does to it, and unclipped, so
+            # it is drawn there rather than at the edge.
+            _near, _far = BACKGROUND_ARROW_SPAN
+            for _text, _from, _to in (
+                (value_arrows[member][0], _near, _far),
+                (value_arrows[member][1], 1 - _near, 1 - _far),
+            ):
+                axis.annotate(
+                    "",
+                    xy=(1 + BACKGROUND_ARROW_X, _to),
+                    xytext=(1 + BACKGROUND_ARROW_X, _from),
+                    xycoords="axes fraction",
+                    arrowprops={
+                        "arrowstyle": "-|>",
+                        "color": "black",
+                        "linewidth": 1.4,
+                        "mutation_scale": 14,
+                    },
+                    annotation_clip=False,
+                )
+                axis.text(
+                    1 + BACKGROUND_ARROW_TEXT_X,
+                    (_from + _to) / 2,
+                    _text,
+                    transform=axis.transAxes,
+                    ha="left",
+                    va="center",
+                    fontsize=BACKGROUND_FONT_PT - 1,
+                    clip_on=False,
+                )
         axis.tick_params(axis="y", labelsize=BACKGROUND_FONT_PT)
         # On every sub-panel, not only the one carrying the ticks: the grid is
         # how a reader carries a level across a row, and `sharey` hides the

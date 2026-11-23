@@ -1232,15 +1232,31 @@ L455F_JIAN_PANEL = "l455f_jian"
 #: difference computed from these, not a number copied from the paper.
 L455F_JIAN_DATA = "data/jian2023/l455f_backgrounds.csv"
 
-#: Value-axis labels for panel A, keyed by the CSV's `assay`, in the order
-#: the sub-panels are drawn. One per sub-panel rather than one down the side
-#: of the row, because the two measure *different quantities* -- a binding
-#: constant and a neutralization titer -- and a single label would have to
-#: name both. The sub-panels carry no titles of their own: these labels name
-#: them, and :data:`L455F_JIAN_TITLE` heads the row.
+#: Value-axis labels for panel A, keyed by the CSV's `assay`, **in the order
+#: the sub-panels are drawn**: escape first, then binding. One per sub-panel
+#: rather than one down the side of the row, because the two measure
+#: *different quantities* -- a neutralization titer and a binding constant --
+#: and a single label would have to name both. The sub-panels carry no titles
+#: of their own: these labels name them, and :data:`L455F_JIAN_TITLE` heads
+#: the row.
+#:
+#: Which of them sets the value axis is **not** this order: the wider range
+#: is the reference and the other is nested inside it, which the notebook
+#: finds rather than assumes, so that reordering the sub-panels cannot
+#: silently swap the two.
 L455F_JIAN_ASSAYS: dict[str, str] = {
-    "affinity": "effect of L455F on\nACE2 binding ($\\Delta \\log K_D$)",
     "neutralization": "effect of L455F on\nsera escape ($\\Delta \\log$ NT$_{50}$)",
+    "affinity": "effect of L455F on\nACE2 binding ($\\Delta \\log K_D$)",
+}
+
+#: What each of panel A's value axes means in each direction, as
+#: `(upward, downward)`. The plotted quantity is a *negated* log fold change,
+#: so up is better for the virus in both sub-panels -- which is the whole
+#: reason the two assays can sit side by side, and is not something a reader
+#: can get from an axis label naming the quantity measured.
+L455F_JIAN_ARROWS: dict[str, tuple[str, str]] = {
+    "neutralization": ("better escape", "worse escape"),
+    "affinity": ("better binder", "worse binder"),
 }
 
 #: How wide one of panel A's slots is, in inches, against the 2.30 the
@@ -1256,19 +1272,24 @@ L455F_JIAN_ASSAYS: dict[str, str] = {
 #: same shift drawn across a narrower box would read as a steeper one. The
 #: two were measured off the rendered panels, not derived -- `tight_layout`
 #: sizes the margins from the tick and axis labels it finds.
-L455F_JIAN_CELL_W_IN = 3.49
+L455F_JIAN_CELL_W_IN = 5.95
+
+#: How tall panel A is, in inches, against the 5.49 the shared-axis rows use.
+#: Set so that its plot boxes come out 3.77 inches tall, which is what panel
+#: B's are: A spends height on a three-line heading that B does not, so at
+#: one figure height its plots would be the shorter of the two. Measured off
+#: the rendered panels, as the width is.
+L455F_JIAN_ROW_H_IN = 6.49
 
 #: Panel A's heading, over both sub-panels: what was measured, on what, and
 #: by whom. It also stands in for a key -- the row draws one series, and the
 #: heading already names who measured it.
 #:
-#: **Three lines, broken at the phrases.** The row is as wide as its two
-#: sub-panels need and no wider, and one line of this would be half again as
-#: wide as that; `background_panel` raises on a heading wider than its row
-#: rather than centring it and clipping both ends.
+#: **Two lines**, which is what sets :data:`L455F_JIAN_CELL_W_IN`: the first
+#: of them is 10.4 inches wide and `background_panel` raises on a heading
+#: wider than its row rather than centring it and clipping both ends.
 L455F_JIAN_TITLE = (
-    "Effect of L455F on XBB.1.5\n"
-    "in the presence and absence of F456L\n"
+    "Effect of L455F on XBB.1.5 phenotypes in the presence and absence of F456L\n"
     "experimentally measured by Jian et al."
 )
 
