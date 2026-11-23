@@ -1245,7 +1245,7 @@ L455F_JIAN_DATA = "data/jian2023/l455f_backgrounds.csv"
 #: finds rather than assumes, so that reordering the sub-panels cannot
 #: silently swap the two.
 L455F_JIAN_ASSAYS: dict[str, str] = {
-    "neutralization": "effect of L455F on\nsera escape ($\\Delta \\log$ NT$_{50}$)",
+    "neutralization": "effect of L455F on\nserum escape ($\\Delta \\log$ NT$_{50}$)",
     "affinity": "effect of L455F on\nACE2 binding ($\\Delta \\log K_D$)",
 }
 
@@ -1280,7 +1280,7 @@ L455F_JIAN_CELL_W_IN = 5.95
 #: B's are: A spends height on a three-line heading that B does not, so at
 #: one figure height its plots would be the shorter of the two. Measured off
 #: the rendered panels, as the width is.
-L455F_JIAN_ROW_H_IN = 6.08
+L455F_JIAN_ROW_H_IN = 5.63
 
 #: Panel A's heading, over both sub-panels: what was measured, on what, and
 #: by whom. It also stands in for a key -- the row draws one series, and the
@@ -1295,17 +1295,19 @@ L455F_JIAN_TITLE = (
     "and absence of F456L, experimentally measured by Jian et al."
 )
 
-#: The second line of panel A's x label, naming the two variants its ticks
-#: are the 456 residues of. Panel B's names pools of branches; this one names
-#: the constructs the assays were run on.
-L455F_JIAN_X_GLOSS = "(left: XBB.1.5; right: XBB.1.5 + F456L)"
+#: Panel A's x label, one under each sub-panel rather than one sentence and
+#: a gloss under the row. Two words is all its axis needs: the heading names
+#: the two variants assayed and the ticks name the residue that tells them
+#: apart, so a row-wide label would be a third telling.
+L455F_JIAN_X_LABEL = "genetic background"
 
-#: Panel B's heading. One line -- it is 9.9 inches against a 13.8-inch row
-#: -- and it says what the sub-panel titles cannot: that these are lineages
-#: of XBB and that the estimates come from the tree rather than from an
-#: experiment, which is the contrast with panel A above it.
+#: Panel B's heading. One line -- it is about ten inches against a 13.8-inch
+#: row -- and it says what the sub-panel titles cannot: that these are XBB
+#: sequences and that the estimates come from the tree rather than from an
+#: experiment, which is the contrast with panel A above it. Centred on the
+#: sub-panels, not on the row, so the legend's slots do not pull it right.
 L455F_BACKGROUND_TITLE = (
-    "Fitness effect of L455F in XBB lineages, as estimated from the UShER tree"
+    "Fitness effect of L455F in XBB sequences, as estimated from the UShER tree"
 )
 
 #: How tall panel B is, in inches, against the 5.49 the shared-axis rows use.

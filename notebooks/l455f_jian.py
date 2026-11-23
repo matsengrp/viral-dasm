@@ -27,12 +27,13 @@ def _(mo):
 
     ## What is plotted
 
-    Jian et al. report two assays on four XBB.1.5 variants. Each assay gives
-    the effect of L455F twice: once on a parent carrying F456, once on a
-    parent carrying L456 (that is, carrying F456L).
+    Jian et al. report two assays on four XBB.1.5 variants -- serum
+    neutralization in their Figure 2 and receptor binding in their Figure 4.
+    Each assay gives the effect of L455F twice: once on a parent carrying
+    F456, once on a parent carrying L456 (that is, carrying F456L).
 
     Both assays run **opposite** to benefit for the virus -- a lower $K_D$ is
-    tighter receptor binding, and a lower NT$_{50}$ is more escape from plasma
+    tighter receptor binding, and a lower NT$_{50}$ is more escape from serum
     neutralization -- so both are negated, and the plotted effect is
 
     $$-\Delta \ln(\text{measurement}) = \ln(\text{parent}) - \ln(\text{mutant})$$
@@ -202,12 +203,12 @@ def _(MEASURED, SELECTION, charts, mo, panels, spec):
         # so there is no spread to draw -- unlike panel B's DASM pools, whose
         # whiskers span their parent haplotypes.
         spread_columns=None,
-        # The same two ticks as panel B, named the same way and under the
-        # same words, so the reader carries one contrast down the figure --
-        # and, like B, a second line saying which side is which. The heading
-        # says which two variants were assayed; this says which is on which
-        # tick.
-        x_gloss=spec.L455F_JIAN_X_GLOSS,
+        # One label under each sub-panel rather than a sentence and a gloss
+        # under the row: the heading names the two variants and the ticks name
+        # the residue that tells them apart, so two words is all that is left
+        # to say. `x_gloss=None` because there is no row-wide label to gloss.
+        sub_x_label=spec.L455F_JIAN_X_LABEL,
+        x_gloss=None,
         series=_series,
     )
     PANEL = charts.save_mpl_panel(_figure, spec.L455F_JIAN_PANEL, selection=SELECTION)

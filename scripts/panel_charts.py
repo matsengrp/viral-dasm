@@ -1848,7 +1848,7 @@ BACKGROUND_SPREAD_CAP = 0.07
 #: What the x axis of a row is called, and the gloss under it saying which
 #: side is which. Two strings rather than one, because they are drawn at two
 #: sizes and two weights; see :func:`background_panel`.
-BACKGROUND_X_TITLE = "amino-acid identities defining each background"
+BACKGROUND_X_TITLE = "amino-acid identities defining each genetic background"
 #: The air between a row's heading and the sub-panel titles under it, as a
 #: fraction of the figure height. Enough to read as a break between the two
 #: levels of title, which are otherwise the same size and weight.
@@ -1978,6 +1978,7 @@ def background_panel(
     y_domains: Mapping[object, tuple[float, float]] | None = None,
     figure_title: str | None = None,
     x_gloss: str | None = BACKGROUND_X_GLOSS,
+    sub_x_label: str | None = None,
     series: Sequence[tuple[str, str, str, str]] = BACKGROUND_SERIES,
     legend_title: str = ARM_LEGEND_TITLE,
 ) -> matplotlib.figure.Figure:
@@ -2129,6 +2130,12 @@ def background_panel(
             titles. ``None`` writes none, which is what the rows of
             `fig:within_clade_shifts` want: their heading is the figure
             caption and their panel letter.
+        sub_x_label: One x label under every sub-panel, in place of the one
+            under the row. For a row whose x axis needs two words rather than
+            a sentence and a gloss -- `fig:l455f`'s panel A, whose two ticks
+            are the two variants its heading already names. ``x_gloss`` has
+            to be ``None`` with it, since there is no row-wide label for a
+            gloss to sit under.
         x_gloss: The line under :data:`BACKGROUND_X_TITLE`. The default names the two sides
             as clade-founder against derived identities, which is what a
             frequency-derived split is; a split specified by hand at one site
@@ -2261,6 +2268,12 @@ def background_panel(
             if legend
             else f"{columns} slots wide, which is too few to draw them."
         )
+    if sub_x_label is not None and x_gloss is not None:
+        raise ValueError(
+            "background_panel was given both `sub_x_label` and `x_gloss`. The "
+            "gloss is the second line of the row-wide x label, and a row "
+            "labelling each sub-panel has no row-wide label to gloss."
+        )
     if value_label is not None and value_labels is not None:
         raise ValueError(
             "background_panel was given both `value_label` and `value_labels`, "
@@ -2365,6 +2378,10 @@ def background_panel(
             [label.replace(", ", "\n") for label in part["background"]],
             fontsize=BACKGROUND_FONT_PT,
         )
+        if sub_x_label is not None:
+            axis.set_xlabel(
+                sub_x_label, fontsize=BACKGROUND_FONT_PT, fontweight="bold"
+            )
         axis.set_xlim(-0.45, len(part) - 0.55)
         axis.set_ylim(*limits)
         # The mutation alone. Every sub-panel of a row is one clade's, so
@@ -2437,14 +2454,16 @@ def background_panel(
     # carries those three and whatever else it happens to have, so the label
     # names what membership requires rather than the parent's whole
     # background.
-    placed_xlabel = figure.supxlabel(
-        BACKGROUND_X_TITLE
-        if x_gloss is None
-        else f"{BACKGROUND_X_TITLE}\n{x_gloss}",
-        fontsize=BACKGROUND_FONT_PT,
-        fontweight="bold",
-        ma="center",
-    )
+    placed_xlabel = None
+    if sub_x_label is None:
+        placed_xlabel = figure.supxlabel(
+            BACKGROUND_X_TITLE
+            if x_gloss is None
+            else f"{BACKGROUND_X_TITLE}\n{x_gloss}",
+            fontsize=BACKGROUND_FONT_PT,
+            fontweight="bold",
+            ma="center",
+        )
     # "fitness effect", the paper's name for this quantity everywhere else,
     # over two lines: one line of it is taller than the panels and would set
     # the figure's height rather than read as its label. Bold to match the
@@ -2468,6 +2487,7 @@ def background_panel(
     # room for a figure-level title, and a heading it has not been told about
     # is drawn over the sub-panel titles.
     top = 1.0
+    placed_title = None
     if figure_title is not None:
         placed_title = figure.suptitle(
             figure_title,
@@ -2488,11 +2508,11 @@ def background_panel(
         # ends, and `save_mpl_panel` deliberately does not crop to the drawn
         # extent, so nothing downstream would reveal it. Caught here, where
         # the fix -- fewer words, or a wider row -- is the caller's.
-        if block.x0 < 0.0 or block.x1 > 1.0:
+        if block.width > 1.0:
             raise ValueError(
-                f"`figure_title` is {block.width:.2f} of the row wide, so it "
-                f"would be clipped at both ends. Shorten it, break it over "
-                f"another line, or widen the row with `columns` or "
+                f"`figure_title` is {block.width:.2f} of the row wide, so no "
+                f"position on it would hold the heading. Shorten it, break it "
+                f"over another line, or widen the row with `columns` or "
                 f"`cell_w_in`."
             )
         top = block.y0 - BACKGROUND_TITLE_GAP
@@ -2516,68 +2536,78 @@ def background_panel(
     if placed_ylabel is not None:
         placed_ylabel.set_y(panel_middle)
 
-    # On this clade's own sub-panels rather than on the row's slots: the label
-    # belongs under the plots it describes, not under the middle of a padding
-    # that exists only to make the rows line up.
+    # On this clade's own sub-panels rather than on the row's slots: a label
+    # and a heading belong against the plots they describe, not against the
+    # middle of a padding that exists only to make the rows line up.
     occupied = [axes[0][slot].get_position() for slot in range(len(drawn))]
     label_x = (
         min(span.x0 for span in occupied) + max(span.x1 for span in occupied)
     ) / 2
-    # Slid back onto the row if centring it there would put either end off the
-    # figure. A row is left justified with its spare slots on the right, so
-    # its sub-panels sit left of the figure's centre and a label wider than
-    # they are would otherwise hang off the left edge -- where
-    # `save_mpl_panel` does not crop to the drawn extent, so it is cut and
-    # nothing downstream says so. Against the sub-panels is where the label
-    # belongs; on the page at all comes first.
-    half = (
-        placed_xlabel.get_window_extent(_measuring_renderer(figure))
-        .transformed(figure.transFigure.inverted())
-        .width
-        / 2
-    )
-    # No check that it fits: a label wider than the whole row is clipped
-    # whatever is done with it, and a row that narrow is a test fixture rather
-    # than a panel -- `max` before `min` keeps such a row centred instead of
-    # pushed off the right.
-    label_x = min(max(label_x, half), max(1.0 - half, half))
-    placed_xlabel.set_x(label_x)
 
-    # Split the reserved block in two: the label keeps its top, the gloss
-    # takes its bottom at one point smaller and regular weight. Measured
-    # rather than offset by a guessed line height, so the pair occupies
-    # exactly the space the two-line label was measured into.
-    block = placed_xlabel.get_window_extent(renderer).transformed(
-        figure.transFigure.inverted()
-    )
-    # `tight_layout` leaves the label a full line of air under the tick
-    # labels, which on a row this short reads as a gap rather than as spacing.
-    # Half of it is taken back by sliding the whole two-line block up,
-    # measured against the lowest tick label rather than offset by a guessed
-    # amount, so the label keeps the same clearance whatever the tick labels
-    # turn out to be.
-    ticks_bottom = min(
-        axis.get_tightbbox(renderer).transformed(figure.transFigure.inverted()).y0
-        for axis in axes.ravel()
-    )
-    lift = max(ticks_bottom - block.y1, 0.0) / 2
-    placed_xlabel.set_text(BACKGROUND_X_TITLE)
-    placed_xlabel.set_va("top")
-    placed_xlabel.set_y(block.y1 + lift)
-    if x_gloss is not None:
-        # `x_gloss`, not :data:`BACKGROUND_X_GLOSS`: the block above was
-        # measured with the caller's gloss, and drawing the default here
-        # instead would silently put the wrong one on the page -- naming a
-        # hand-specified split as a frequency-derived one, at the size a
-        # reader trusts least.
-        figure.text(
-            label_x,
-            block.y0 + lift,
-            x_gloss,
-            fontsize=BACKGROUND_FONT_PT - 1,
-            ha="center",
-            va="bottom",
+    def _centred_on_panels(artist) -> float:
+        """``label_x``, slid back onto the row if the artist would hang off it.
+
+        A row is left justified with its spare slots on the right, so its
+        sub-panels sit left of the figure's centre, and anything centred on
+        them that is wider than they are would otherwise run off the left
+        edge -- where `save_mpl_panel` does not crop to the drawn extent, so
+        it is cut and nothing downstream says so. Against the sub-panels is
+        where it belongs; on the page at all comes first.
+
+        No check that it fits: something wider than the whole row is clipped
+        wherever it is put, and a row that narrow is a test fixture rather
+        than a panel. ``max`` before ``min`` keeps such a row centred instead
+        of pushed off the right.
+        """
+        half = (
+            artist.get_window_extent(renderer)
+            .transformed(figure.transFigure.inverted())
+            .width
+            / 2
         )
+        return min(max(label_x, half), max(1.0 - half, half))
+
+    if placed_title is not None:
+        placed_title.set_x(_centred_on_panels(placed_title))
+
+    if placed_xlabel is not None:
+        placed_xlabel.set_x(_centred_on_panels(placed_xlabel))
+
+        # Split the reserved block in two: the label keeps its top, the gloss
+        # takes its bottom at one point smaller and regular weight. Measured
+        # rather than offset by a guessed line height, so the pair occupies
+        # exactly the space the two-line label was measured into.
+        block = placed_xlabel.get_window_extent(renderer).transformed(
+            figure.transFigure.inverted()
+        )
+        # `tight_layout` leaves the label a full line of air under the tick
+        # labels, which on a row this short reads as a gap rather than as
+        # spacing. Half of it is taken back by sliding the whole two-line
+        # block up, measured against the lowest tick label rather than offset
+        # by a guessed amount, so the label keeps the same clearance whatever
+        # the tick labels turn out to be.
+        ticks_bottom = min(
+            axis.get_tightbbox(renderer).transformed(figure.transFigure.inverted()).y0
+            for axis in axes.ravel()
+        )
+        lift = max(ticks_bottom - block.y1, 0.0) / 2
+        placed_xlabel.set_text(BACKGROUND_X_TITLE)
+        placed_xlabel.set_va("top")
+        placed_xlabel.set_y(block.y1 + lift)
+        if x_gloss is not None:
+            # `x_gloss`, not :data:`BACKGROUND_X_GLOSS`: the block above was
+            # measured with the caller's gloss, and drawing the default here
+            # instead would silently put the wrong one on the page -- naming a
+            # hand-specified split as a frequency-derived one, at the size a
+            # reader trusts least.
+            figure.text(
+                placed_xlabel.get_position()[0],
+                block.y0 + lift,
+                x_gloss,
+                fontsize=BACKGROUND_FONT_PT - 1,
+                ha="center",
+                va="bottom",
+            )
 
     # In the first slot past this clade's sub-panels, level with them: a key
     # beside the plots rather than a band above them. Every row reserves that
