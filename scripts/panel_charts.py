@@ -66,6 +66,10 @@ FIT_FIREBRICK = "#b22222"
 #: them was a reference line.
 COUNTS_GREY = "#4d4d4d"
 DASM_PURPLE = "#8172b3"
+#: The measured series of `fig:l455f`'s panel A. Neither of the model
+#: colours, because an experiment is not one of the two approaches being
+#: compared; a reader should not have to check the key to see that.
+MEASURED_GREEN = "#4c9a52"
 
 #: The name on a mutation `fig:within_clade_shifts`' panel A calls out.
 #: Near-black rather than a fourth hue: the mark it names is already
@@ -1780,6 +1784,11 @@ BACKGROUND_FOOTROOM = 0.08
 #: legend that can come to disagree with the marks it names. The colours are
 #: the figure's own, so a reader who learned grey-circle/purple-triangle in
 #: `fig:agreement`'s lookup panels does not have to re-learn it here.
+#: What a key over a pair of arms is headed. Shared by the background rows
+#: and by `fig:subsampling`, and defined here because the background rows
+#: are drawn first in this module.
+ARM_LEGEND_TITLE = "approach"
+
 BACKGROUND_SERIES = (
     ("counts", "counts_effect", COUNTS_GREY, "o"),
     ("DASM", "dasm_effect", DASM_PURPLE, "^"),
@@ -1809,7 +1818,10 @@ def _em_in() -> float:
 
 
 def background_y_domain(
-    frame: pd.DataFrame, *, extra_columns: Sequence[str] = ()
+    frame: pd.DataFrame,
+    *,
+    extra_columns: Sequence[str] = (),
+    series: Sequence[tuple[str, str, str, str]] = BACKGROUND_SERIES,
 ) -> tuple[float, float]:
     """The value axis every sub-panel of every background row shares.
 
@@ -1827,12 +1839,15 @@ def background_y_domain(
             a spread whisker, which can reach past the points it belongs to.
             A domain that does not see them clips the whisker at the axis and
             draws a bounded interval as an open one.
+        series: The arms that will be drawn, matching what is passed to
+            :func:`background_panel`. A panel drawing its own series scales
+            against its own value column, not against the model arms'.
 
     Returns:
         ``(low, high)``, the data range padded by :data:`BACKGROUND_FOOTROOM`
         below and :data:`BACKGROUND_HEADROOM` above.
     """
-    columns = [column for _, column, _, _ in BACKGROUND_SERIES] + list(extra_columns)
+    columns = [column for _, column, _, _ in series] + list(extra_columns)
     missing = sorted(set(columns) - set(frame.columns))
     if missing:
         raise KeyError(f"background_y_domain was asked to scale against {missing}.")
@@ -1862,6 +1877,8 @@ def background_panel(
     absent_label: str | None = None,
     value_label: str | None = None,
     x_gloss: str = BACKGROUND_X_GLOSS,
+    series: Sequence[tuple[str, str, str, str]] = BACKGROUND_SERIES,
+    legend_title: str = ARM_LEGEND_TITLE,
 ) -> matplotlib.figure.Figure:
     """One row of background estimates: `fig:within_clade_shifts`' panels
     B, D and F, and the single panel of `fig:l455f`.
@@ -1963,6 +1980,19 @@ def background_panel(
             clade-founder against derived identities, which is what a
             frequency-derived split is; a split specified by hand at one site
             is not that, and says so instead.
+        series: ``[(legend label, value column, colour, marker)]`` -- the
+            arms to draw. The default is the two approaches being compared,
+            which is what every panel of `fig:within_clade_shifts` and
+            `fig:l455f`'s panel B draws.
+
+            **A panel of measurements passes its own**, rather than putting
+            them in ``counts_effect`` and relabelling the key: the column
+            names are what the panel CSV is written under, so a reader of
+            that file would find an experiment filed as a counts estimate.
+            `fig:l455f`'s panel A is the one such caller.
+        legend_title: The key's heading. The default names the two arms as
+            approaches, which is what they are. A panel of measurements is
+            not comparing approaches and says so instead.
 
     Returns:
         The row, as a matplotlib figure, ordered left to right by decreasing
@@ -1971,7 +2001,7 @@ def background_panel(
     import matplotlib.pyplot as plt
 
     required = {"candidate", "background", "background_order"} | {
-        column for _, column, _, _ in BACKGROUND_SERIES
+        column for _, column, _, _ in series
     }
     missing = sorted(required - set(frame.columns))
     if missing:
@@ -1984,7 +2014,7 @@ def background_panel(
         )
 
     intervals = dict(spread_columns or {})
-    known = {label for label, _, _, _ in BACKGROUND_SERIES}
+    known = {label for label, _, _, _ in series}
     unknown = sorted(set(intervals) - known)
     if unknown:
         raise KeyError(
@@ -2004,7 +2034,7 @@ def background_panel(
     # with no point. Its label is its own (`n.a.`), which would otherwise read
     # as a third background and fail this check. What the check is for is
     # unchanged: the *measured* backgrounds are a pair.
-    value_columns = [column for _, column, _, _ in BACKGROUND_SERIES]
+    value_columns = [column for _, column, _, _ in series]
     measured = frame[frame[value_columns].notna().any(axis=1)]
     order = (
         measured.sort_values("background_order")["background"]
@@ -2041,8 +2071,13 @@ def background_panel(
     # by the data and not by the thing under test.
     def shift_of(member: str) -> float:
         part = frame[frame[group_column] == member].sort_values("background_order")
+        # The first series named, which for the default is the counts arm.
+        # A caller passing its own `series` has no `counts_effect`, and
+        # ordering by whatever it put first is the same rule: order by the
+        # observation, not by the thing under test.
+        ordering_column = series[0][1]
         shift = abs(
-            float(part.iloc[-1]["counts_effect"]) - float(part.iloc[0]["counts_effect"])
+            float(part.iloc[-1][ordering_column]) - float(part.iloc[0][ordering_column])
         )
         # A sub-panel with an unmeasured side has no shift. Sorting it last
         # rather than letting a NaN through, which orders unpredictably.
@@ -2088,7 +2123,7 @@ def background_panel(
         axis = axes[0][slot]
         part = frame[frame[group_column] == member].sort_values("background_order")
         x = list(range(len(part)))
-        for label, column, colour, marker in BACKGROUND_SERIES:
+        for label, column, colour, marker in series:
             # Under the markers, so a whisker shorter than the dot is hidden
             # by it rather than drawn over it: the dot is the estimate and the
             # whisker is context for it.
@@ -2271,7 +2306,7 @@ def background_panel(
         ncol=1,
         frameon=False,
         fontsize=BACKGROUND_FONT_PT,
-        title="approach",
+        title=legend_title,
         # A multi-line key is one entry, so its lines sit under each other
         # rather than beside the marker. Harmless on the one-word keys the
         # published rows use, which have no second line.
@@ -2855,7 +2890,6 @@ ARM_LADDER_HEIGHT = 82
 #: -- the two ends the same distance from 1 on a log2 axis, so a line's
 #: distance from the middle tick reads the same whichever way it is off.
 ARM_X_TITLE = "sampling depth"
-ARM_LEGEND_TITLE = "approach"
 ARM_X_AXIS = alt.Axis(labelAngle=-90, labelAlign="right", labelBaseline="middle")
 ARM_SLOPE_TICKS = (0.25, 1.0, 4.0)
 #: Wide enough to hold both the data and the labelled ticks with room to spare

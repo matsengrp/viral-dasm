@@ -1,0 +1,14 @@
+# Measurements from Jian et al. 2023 (jian2023convergent), transcribed as reported.
+# One row per (assay, 456 background): the variant without L455F and the variant
+# with it, so the effect of L455F is a difference computed in code rather than a
+# number copied from the paper.
+#
+# Both assays run OPPOSITE to benefit for the virus: a lower Kd is tighter
+# receptor binding, and a lower NT50 is more escape from plasma neutralization.
+# So the plotted effect is -(ln mutant - ln parent) = ln(parent) - ln(mutant) for
+# both, which puts beneficial-to-the-virus upward, as panel B's fitness effects are.
+assay,background,background_order,parent_variant,parent_value,mutant_variant,mutant_value
+affinity,F456,0,XBB.1.5,6.4,XBB.1.5 + L455F,25.0
+affinity,L456,1,XBB.1.5 + F456L,11.0,XBB.1.5 + F456L + L455F,2.0
+neutralization,F456,0,XBB.1.5,59.0,XBB.1.5 + L455F,43.0
+neutralization,L456,1,XBB.1.5 + F456L,45.0,XBB.1.5 + F456L + L455F,37.0

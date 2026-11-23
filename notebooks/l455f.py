@@ -20,18 +20,22 @@ def _(mo):
     recomputes a shift: the panel is a PNG that `l455f_backgrounds.py`
     already wrote at its own settings, and this notebook places it on a page.
 
-    One row of one, and so **no panel letter**: a lone panel has no second
-    panel to be told apart from, and the caption has none to refer to.
-    `spec.L455F_FIGURE_LABELS` is what says so, and the left margin loses the
-    strip a letter would have sat in.
+    Two rows of one, both lettered: the figure now makes a distinction its
+    caption refers to, between what was measured and what was estimated.
 
     | panel | drawn by | what it shows |
     |---|---|---|
-    | — | `l455f_backgrounds` | L455F in each XBB clade, on F456 parents against L456 parents |
+    | A | `l455f_jian` | L455F measured by Jian et al. on an F456 and an L456 XBB.1.5 background |
+    | B | `l455f_backgrounds` | L455F in each XBB clade, on F456 parents against L456 parents |
 
     **What it is for.** Inside a single clade, where elapsed time is nearly
     fixed, the same mutation is measured on two sets of parents that differ
-    at one site, and both approaches see it move.
+    at one site, and both approaches see it move -- and panel A shows an
+    experiment seeing the same thing, which is what Jesse asked for.
+
+    The two panels plot **different quantities** in the same units: a log fold
+    change in a laboratory measurement is not a log selection factor. They are
+    not on a shared axis, and the caption has to say why.
 
     **GISAID**: reads one rendered panel and writes a figure. No sequence, no
     per-site table and no count passes through this notebook.
@@ -41,7 +45,6 @@ def _(mo):
 
 @app.cell
 def _(mo):
-    import dataclasses
     import sys
     from pathlib import Path
 
@@ -58,7 +61,7 @@ def _(mo):
     # statement of it.
     SELECTION = str(mo.cli_args()["selection"])
     PANEL_DIR = spec.figure_dir(SELECTION)
-    return PANEL_DIR, SELECTION, dataclasses, fl, spec
+    return PANEL_DIR, SELECTION, fl, spec
 
 
 @app.cell
@@ -96,7 +99,7 @@ def _(PANEL_DIR, SELECTION, fl, mo, spec):
 
 
 @app.cell
-def _(PANELS, dataclasses, fl, spec):
+def _(PANELS, fl, spec):
     # The panel is matplotlib, from `panel_charts.save_mpl_panel`, but the
     # title size is still given in Vega-Lite's units: both renderers write at
     # `VEGA_WRITE_PPI`, and a Vega-Lite pixel and a matplotlib point both land
@@ -113,7 +116,7 @@ def _(PANELS, dataclasses, fl, spec):
         [list(_row) for _row in spec.L455F_FIGURE_ROWS],
         box_in=spec.L455F_BOX_IN,
         scale=spec.L455F_FIGURE_SCALE,
-        spacing=dataclasses.replace(fl.DEFAULT_SPACING, label_w_in=0.0),
+        spacing=fl.DEFAULT_SPACING,
         labels=spec.L455F_FIGURE_LABELS,
         title_px_on_disk=fl.vega_title_px_on_disk(title_px=spec.PANEL_TITLE_PX),
     )

@@ -1827,7 +1827,7 @@ def test_the_subsampling_clip_is_not_the_library_clip():
     assert panel_spec.SUBSAMPLING_SCATTER_CLADE in panel_spec.SUBSAMPLING_LADDER_CLADES
 
 
-def test_the_l455f_panel_is_placed_once_and_drawn_without_a_letter():
+def test_the_l455f_panels_are_each_placed_once_and_lettered():
     """`fig:l455f` is one panel, placed once, with nothing lettered on it.
 
     Three spellings of the same panel: ``L455F_PANELS`` is what the rule
@@ -1836,10 +1836,12 @@ def test_the_l455f_panel_is_placed_once_and_drawn_without_a_letter():
     in one and not the others is a panel that is drawn and never composed, or
     a cell of the figure with nothing to put in it.
 
-    And the label: ``compose`` draws a key's own name beside the panel unless
-    told otherwise, so a figure of one panel acquires a bold "A" by default --
-    naming a distinction it does not make, and one the caption has nothing to
-    refer to.
+    And the labels: ``compose`` draws a key's own name beside each panel
+    unless told otherwise. This figure wants exactly that -- a bold "A" over
+    the measurements and "B" over the estimates -- so the check is that every
+    panel is lettered, and lettered as its own key, rather than that none is.
+    It read the other way until the Jian et al. panel was added: a figure of
+    one panel acquires an "A" naming a distinction it does not make.
     """
     import panel_spec as spec
 
@@ -1856,17 +1858,26 @@ def test_the_l455f_panel_is_placed_once_and_drawn_without_a_letter():
         f"a panel is placed twice: {placed}. The same panel would be drawn "
         f"in two cells of the figure."
     )
-    assert len(spec.L455F_PANELS) == 1, (
-        f"`fig:l455f` now has {len(spec.L455F_PANELS)} panels. More than one "
-        f"needs letters, and this figure is composed without them."
+    assert len(spec.L455F_PANELS) == 2, (
+        f"`fig:l455f` now has {len(spec.L455F_PANELS)} panels, not the two it "
+        f"is composed as: A, the measurements from Jian et al., over B, the "
+        f"two approaches' estimates."
     )
     assert set(spec.L455F_FIGURE_LABELS) == set(spec.L455F_PANEL_LETTERS), (
         f"labels are given for {sorted(spec.L455F_FIGURE_LABELS)} and the "
         f"figure places {sorted(spec.L455F_PANEL_LETTERS)}; a panel with no "
         f"entry is lettered with its key."
     )
-    assert not any(spec.L455F_FIGURE_LABELS.values()), (
-        f"{spec.L455F_FIGURE_LABELS} letters a figure that has one panel."
+    assert all(spec.L455F_FIGURE_LABELS.values()), (
+        f"{spec.L455F_FIGURE_LABELS} leaves a panel of this figure unlettered. "
+        f"Both are lettered: the caption distinguishes what was measured from "
+        f"what was estimated, so it has letters to refer to."
+    )
+    assert all(
+        letter == label for letter, label in spec.L455F_FIGURE_LABELS.items()
+    ), (
+        f"{spec.L455F_FIGURE_LABELS} letters a panel as something other than "
+        f"its own key, so the caption's letter and the layout's would differ."
     )
 
 

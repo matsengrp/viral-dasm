@@ -71,6 +71,8 @@ from panel_spec import (
     EMERGENCE_CSV,
     ECDF_CLADES,
     L455F_BACKGROUND_PANEL,
+    L455F_JIAN_DATA,
+    L455F_JIAN_PANEL,
     L455F_CLADE_NAMES,
     L455F_FIGURE_STEM,
     L455F_HAPLOTYPE_TABLE,
@@ -1906,6 +1908,38 @@ rule l455f_backgrounds:
         " -- --cells {input.cells}"
         " --shifts {input.shifts}"
         " --selection {wildcards.selection}"
+        " > {log} 2>&1"
+
+
+rule l455f_jian:
+    """`fig:l455f` panel A: the same contrast, measured by Jian et al.
+
+    Jesse asked that this figure compare the model to an experiment and not
+    only to another model. The input is four pairs of numbers transcribed from
+    that paper, so this rule reads a small CSV and draws: no corpus, no pool,
+    no score and no tree.
+    """
+    wildcard_constraints:
+        selection="|".join(SELECTIONS),
+    input:
+        panels="scripts/panels.py",
+        spec="scripts/panel_spec.py",
+        charts="scripts/panel_charts.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        notebook="notebooks/l455f_jian.py",
+        measurements=L455F_JIAN_DATA,
+    output:
+        html=f"{NOTEBOOK_DIR}/l455f_jian_{{selection}}.html",
+        panels=panel_outputs([L455F_JIAN_PANEL], "{selection}"),
+    log:
+        f"{ARTIFACT_ROOT}/logs/l455f_jian_{{selection}}.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "marimo export html {input.notebook} -o {output.html} --force"
+        " -- --selection {wildcards.selection}"
+        " --measurements {input.measurements}"
         " > {log} 2>&1"
 
 

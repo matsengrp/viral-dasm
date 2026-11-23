@@ -1224,27 +1224,48 @@ L455F_BACKGROUND_PANEL = "l455f_backgrounds"
 
 #: One panel, kept as a tuple because `rule panels` collects panel stems by
 #: figure and a bare string there would be collected as its characters.
-L455F_PANELS: tuple[str, ...] = (L455F_BACKGROUND_PANEL,)
+#: `fig:l455f`'s panel A: the same contrast measured in the laboratory by
+#: Jian et al., which is the experiment the DASM is being checked against.
+L455F_JIAN_PANEL = "l455f_jian"
+
+#: The measurements panel A draws, as reported. The effect of L455F is a
+#: difference computed from these, not a number copied from the paper.
+L455F_JIAN_DATA = "data/jian2023/l455f_backgrounds.csv"
+
+#: Sub-panel titles for panel A, keyed by the CSV's `assay`, naming the
+#: assay and the quantity measured. **Short**: a sub-panel is 1.76 inches
+#: wide and matplotlib does not shrink or wrap a title to fit, so a long
+#: one silently overprints its neighbour. The transform the two share --
+#: the negated log difference -- is on the value axis instead, said once.
+L455F_JIAN_ASSAYS: dict[str, str] = {
+    "affinity": "RBD affinity\n($K_D$)",
+    "neutralization": "plasma escape\n(NT$_{50}$)",
+}
+
+L455F_PANELS: tuple[str, ...] = (L455F_JIAN_PANEL, L455F_BACKGROUND_PANEL)
 
 #: `fig:l455f`'s stem, which is its LaTeX label: `main.tex` includes
 #: `figures/l455f.pdf`. One spelling, so the file the manuscript includes and
 #: the file this pipeline writes cannot drift.
 L455F_FIGURE_STEM = "l455f"
 
-#: One row of one. The panel is a single image of several sub-panels, unlike
-#: `fig:within_clade_shifts`' one image per clade, because here the clade is
-#: the sub-panel rather than the row.
-L455F_FIGURE_ROWS: tuple[tuple[str, ...], ...] = (("A",),)
+#: Two rows of one. Each panel is a single image of several sub-panels,
+#: unlike `fig:within_clade_shifts`' one image per clade, because here the
+#: sub-panel is a clade (panel B) or an assay (panel A) rather than the row.
+L455F_FIGURE_ROWS: tuple[tuple[str, ...], ...] = (("A",), ("B",))
 
 #: Which panel stem each layout key is. "A" is a key into the images
 #: `compose` is handed, not a letter drawn on the page: see
 #: :data:`L455F_FIGURE_LABELS`.
-L455F_PANEL_LETTERS: dict[str, str] = {"A": L455F_BACKGROUND_PANEL}
+L455F_PANEL_LETTERS: dict[str, str] = {
+    "A": L455F_JIAN_PANEL,
+    "B": L455F_BACKGROUND_PANEL,
+}
 
-#: Nothing drawn beside the panel. A figure of one panel has no second panel
-#: to be told apart from, so a bold "A" over it would name a distinction the
-#: figure does not make -- and the caption has none to refer to either.
-L455F_FIGURE_LABELS: dict[str, str] = {"A": ""}
+#: Both lettered. The figure now makes a distinction its caption refers to:
+#: A is what was measured in the laboratory, B is what the two approaches
+#: estimate from the tree.
+L455F_FIGURE_LABELS: dict[str, str] = {"A": "A", "B": "B"}
 
 #: The box this figure has to fit inside, in inches. The width is the text
 #: block's; the height is slack and stays generous, because a single row of
