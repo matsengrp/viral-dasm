@@ -3379,8 +3379,8 @@ PROBABILITIES_BAR_COLOR = DMS_ROW_COLORS[0]
 #: How each arm is named under its bar. Short, because they are set vertically.
 PROBABILITIES_ARM_LABELS: dict[str, str] = {
     "dasm": "DASM fitness effect",
-    "dasm_prob": "DASM probability",
-    "antigen": "antiGen probability",
+    "dasm_prob": "DASM-probability",
+    "antigen": "antiGen-probability",
 }
 
 #: The scatter's side. Square, and that is the whole point: one nat on x is one
