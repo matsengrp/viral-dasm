@@ -45,6 +45,7 @@ def _(mo):
 
 @app.cell
 def _(mo):
+    import dataclasses
     import sys
     from pathlib import Path
 
@@ -61,7 +62,7 @@ def _(mo):
     # statement of it.
     SELECTION = str(mo.cli_args()["selection"])
     PANEL_DIR = spec.figure_dir(SELECTION)
-    return PANEL_DIR, SELECTION, fl, spec
+    return PANEL_DIR, SELECTION, dataclasses, fl, spec
 
 
 @app.cell
@@ -99,24 +100,24 @@ def _(PANEL_DIR, SELECTION, fl, mo, spec):
 
 
 @app.cell
-def _(PANELS, fl, spec):
+def _(PANELS, dataclasses, fl, spec):
     # The panel is matplotlib, from `panel_charts.save_mpl_panel`, but the
     # title size is still given in Vega-Lite's units: both renderers write at
     # `VEGA_WRITE_PPI`, and a Vega-Lite pixel and a matplotlib point both land
     # at `size * ppi / 72` on disk -- `BACKGROUND_FONT_PT` is
-    # `PANEL_FONT_SIZE` converted on that basis. Nothing is lettered here, so
-    # this now sizes only the figure, not a label; it is left in place so that
-    # the dpi this figure is solved at stays comparable to its neighbours'.
-    #
-    # `labels` suppresses the letter. The margin would still reserve the
-    # strip it sits in, so `label_w_in` goes to zero as well and the left
-    # margin becomes the same `margin_pad_in` the right side gets.
+    # `PANEL_FONT_SIZE` converted on that basis. It sizes the two letters and
+    # the figure both, so the dpi this figure is solved at stays comparable to
+    # its neighbours'.
     composed = fl.compose(
         PANELS,
         [list(_row) for _row in spec.L455F_FIGURE_ROWS],
         box_in=spec.L455F_BOX_IN,
         scale=spec.L455F_FIGURE_SCALE,
-        spacing=fl.DEFAULT_SPACING,
+        # The default gaps, widened between the rows: each panel carries a
+        # heading of its own, and at the default the two read as one block.
+        spacing=dataclasses.replace(
+            fl.DEFAULT_SPACING, row_gap_in=spec.L455F_ROW_GAP_IN
+        ),
         labels=spec.L455F_FIGURE_LABELS,
         title_px_on_disk=fl.vega_title_px_on_disk(title_px=spec.PANEL_TITLE_PX),
     )

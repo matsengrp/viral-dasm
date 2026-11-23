@@ -1240,13 +1240,20 @@ L455F_JIAN_DATA = "data/jian2023/l455f_backgrounds.csv"
 #: of their own: these labels name them, and :data:`L455F_JIAN_TITLE` heads
 #: the row.
 #:
+#: **The minus sign is not decoration.** What is plotted is
+#: ``log(value without L455F) - log(value with L455F)``, which is minus the
+#: change in the assay value, so that a mutation good for the virus goes up
+#: in both sub-panels -- a lower $K_D$ binds tighter and a lower NT$_{50}$ is
+#: more escape. Written ``\Delta \log`` the labels would name the quantity
+#: whose sign is the opposite of every value drawn under them.
+#:
 #: Which of them sets the value axis is **not** this order: the wider range
 #: is the reference and the other is nested inside it, which the notebook
 #: finds rather than assumes, so that reordering the sub-panels cannot
 #: silently swap the two.
 L455F_JIAN_ASSAYS: dict[str, str] = {
-    "neutralization": "effect of L455F on\nserum escape ($\\Delta \\log$ NT$_{50}$)",
-    "affinity": "effect of L455F on\nACE2 binding ($\\Delta \\log K_D$)",
+    "neutralization": "effect of L455F on\nserum escape ($-\\Delta \\log$ NT$_{50}$)",
+    "affinity": "effect of L455F on\nACE2 binding ($-\\Delta \\log K_D$)",
 }
 
 #: What each of panel A's value axes means in each direction, as
@@ -1301,19 +1308,26 @@ L455F_JIAN_TITLE = (
 #: apart, so a row-wide label would be a third telling.
 L455F_JIAN_X_LABEL = "genetic background"
 
-#: Panel B's heading. One line -- it is about ten inches against a 13.8-inch
-#: row -- and it says what the sub-panel titles cannot: that these are XBB
-#: sequences and that the estimates come from the tree rather than from an
-#: experiment, which is the contrast with panel A above it. Centred on the
-#: sub-panels, not on the row, so the legend's slots do not pull it right.
+#: Panel B's heading, in two lines broken at its comma. It says what the
+#: sub-panel titles cannot: that these are XBB variants and that the
+#: estimates come from the tree rather than from an experiment, which is the
+#: contrast with panel A above it. Centred on the sub-panels, not on the row,
+#: so the legend's slots do not pull it right.
 L455F_BACKGROUND_TITLE = (
-    "Fitness effect of L455F in XBB sequences, as estimated from the UShER tree"
+    "Fitness effect of L455F in XBB variants,\nestimated from the UShER tree"
 )
 
 #: How tall panel B is, in inches, against the 5.49 the shared-axis rows use.
 #: The heading costs it the height of a line, and its plot boxes have to stay
 #: the height of panel A's: see :data:`L455F_JIAN_ROW_H_IN`.
-L455F_BACKGROUND_ROW_H_IN = 5.98
+L455F_BACKGROUND_ROW_H_IN = 6.36
+
+#: The gap between this figure's two panels, in inches of the composed page,
+#: against the 0.18 of :data:`figure_layout.DEFAULT_SPACING`. A line of the
+#: panels' own type lands at about 0.15 inches once a 13.8-inch panel is
+#: scaled into a 7.2-inch column, so this is that default plus one line --
+#: which is what the two panels want, each carrying a heading of its own.
+L455F_ROW_GAP_IN = 0.33
 
 L455F_PANELS: tuple[str, ...] = (L455F_JIAN_PANEL, L455F_BACKGROUND_PANEL)
 

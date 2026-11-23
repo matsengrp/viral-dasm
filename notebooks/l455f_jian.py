@@ -36,7 +36,8 @@ def _(mo):
     tighter receptor binding, and a lower NT$_{50}$ is more escape from serum
     neutralization -- so both are negated, and the plotted effect is
 
-    $$-\Delta \ln(\text{measurement}) = \ln(\text{parent}) - \ln(\text{mutant})$$
+    $$-\Delta \ln(\text{measurement})
+      = \ln(\text{without L455F}) - \ln(\text{with L455F})$$
 
     which puts beneficial-to-the-virus upward, the direction panel B's fitness
     effects already run in. Natural logarithms, so the axis is in the same
