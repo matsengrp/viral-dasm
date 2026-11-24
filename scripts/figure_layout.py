@@ -32,6 +32,8 @@ from pathlib import Path
 
 import matplotlib.figure
 import matplotlib.image as mpimg
+import matplotlib.lines
+import matplotlib.text
 import numpy as np
 
 # A panel's type is sized in whatever units its renderer uses, and what the
@@ -55,6 +57,11 @@ VECTOR_FORMATS = ("pdf", "svg")
 # What the composed figure is rendered at for display in the notebook. The
 # files on disk are written at the solved layout dpi instead; see `compose`.
 SCREEN_DPI = 150
+
+#: Stroke width of a `row_groups` bracket. A hairline: it is a grouping mark,
+#: not data, and at the sizes these figures print a heavier rule reads as an
+#: axis.
+BRACKET_LW_PT = 0.8
 
 
 def vega_title_px_on_disk(
@@ -101,6 +108,25 @@ class Spacing:
     # reserved strip, a hair below the top edge.
     label_dy_in: float = 0.02
 
+    # The gutter `compose`'s `row_groups` draws into, right of the panels: a
+    # gap, the bracket's own depth, a gap, then the group's name. Only
+    # `group_text_w_in` is a guess about type rather than a measured length,
+    # so it is the one `compose` checks against what it actually drew.
+    group_gap_in: float = 0.10
+    group_arm_in: float = 0.07
+    group_text_gap_in: float = 0.06
+    group_text_w_in: float = 0.60
+
+    @property
+    def group_gutter_in(self) -> float:
+        """Total width reserved right of the panels for one bracket."""
+        return (
+            self.group_gap_in
+            + self.group_arm_in
+            + self.group_text_gap_in
+            + self.group_text_w_in
+        )
+
     @property
     def margin_left_in(self) -> float:
         return self.margin_pad_in + self.label_w_in
@@ -117,6 +143,10 @@ class Spacing:
             col_gap_in=self.col_gap_in * scale,
             row_gap_in=self.row_gap_in * scale,
             label_dy_in=self.label_dy_in * scale,
+            group_gap_in=self.group_gap_in * scale,
+            group_arm_in=self.group_arm_in * scale,
+            group_text_gap_in=self.group_text_gap_in * scale,
+            group_text_w_in=self.group_text_w_in * scale,
         )
 
 
@@ -208,6 +238,7 @@ def compose(
     title_px_on_disk: float = vega_title_px_on_disk(),
     label_title_ratio: float = 1.7,
     labels: Mapping[str, str] | None = None,
+    row_groups: Sequence[tuple[str, Sequence[str]]] | None = None,
 ) -> Composed:
     """Lay `panels` out row by row and return the figure.
 
@@ -239,6 +270,16 @@ def compose(
             above it needs: a figure whose panel A is two rows of scatters
             is still one panel, and lettering the second row would make it
             two.
+        row_groups: Optional `[(name, letters), ...]`, drawn as a bracket
+            right of the panels spanning those panels, with `name` beside
+            it. For a figure whose rows come in groups that share something
+            the panel letters cannot say -- three DMS experiments, two rows
+            each. The bracket spans from the top of the group's highest
+            panel to the bottom of its lowest, so the letters it covers
+            must be contiguous down the page; `compose` does not reorder
+            them. Groups reserve `Spacing.group_gutter_in` on the right
+            whether or not the names are short enough to need it, so a
+            figure with one group is the same width as a figure with four.
 
     Returns:
         The figure, with the dpi and type sizes it was placed at.
@@ -262,10 +303,23 @@ def compose(
     # inches by choice, so they stay the same thickness whatever size the
     # panels end up. A column's internal gaps are counted against the row
     # that holds the deepest column, which is the row they are spent in.
+    groups = [(name, list(letters)) for name, letters in (row_groups or ())]
+    _grouped: list[str] = [letter for _name, letters in groups for letter in letters]
+    _unknown = [letter for letter in _grouped if letter not in panels]
+    if _unknown:
+        raise KeyError(f"row_groups name panels that were not passed: {_unknown}")
+    if len(set(_grouped)) != len(_grouped):
+        raise ValueError(f"row_groups overlap: {_grouped}")
+
+    # Reserved whether or not a name needs the whole width, so that the
+    # panels sit at one size regardless of what the groups are called.
+    gutter_in = gaps.group_gutter_in if groups else 0.0
+
     widest = max(len(row) for row in grid)
     fixed_w_in = (
         gaps.margin_left_in
         + gaps.margin_right_in
+        + gutter_in
         + (gaps.col_gap_in + gaps.label_w_in) * (widest - 1)
     )
     stacked_gaps = sum(max(len(cell) - 1 for cell in row) for row in grid)
@@ -312,7 +366,7 @@ def compose(
     extents = [row_extent_in(row) for row in grid]
     content_w_in = max(w for w, _ in extents)
     content_h_in = sum(h for _, h in extents) + gaps.row_gap_in * (len(grid) - 1)
-    fig_w_in = gaps.margin_left_in + content_w_in + gaps.margin_right_in
+    fig_w_in = gaps.margin_left_in + content_w_in + gutter_in + gaps.margin_right_in
     fig_h_in = gaps.margin_top_in + content_h_in + gaps.margin_bottom_in
     assert fig_w_in <= box_w_in + 1e-6 and fig_h_in <= box_h_in + 1e-6, (
         f"{fig_w_in:.2f} x {fig_h_in:.2f} in does not fit "
@@ -328,10 +382,14 @@ def compose(
     fig = plt.figure(figsize=(fig_w_in, fig_h_in), dpi=SCREEN_DPI)
 
     drawn_label = dict(labels or {})
+    # Where each panel ended up, for the group brackets to span. Filled by
+    # `place`, which is the only thing that knows a panel's final box.
+    placed: dict[str, tuple[float, float, float]] = {}
 
     def place(letter: str, x_in: float, top_in: float) -> float:
         """Draw one panel with its letter; return the height it took."""
         w_in, h_in = panel_size_in(letter)
+        placed[letter] = (x_in + w_in, top_in, top_in - h_in)
         bottom_in = top_in - h_in
         ax = fig.add_axes(
             (
@@ -369,6 +427,73 @@ def compose(
                 cell_top_in -= place(letter, x_in, cell_top_in) + gaps.row_gap_in
             x_in += cell_size_in(cell)[0] + gaps.col_gap_in + gaps.label_w_in
         y_top_in -= row_h_in + gaps.row_gap_in
+
+    # The brackets, once every panel has a box. Each spans its group from the
+    # top of the highest panel to the bottom of the lowest, and is drawn in
+    # figure fractions like the panel letters are. The bracket's left edge is
+    # the same for every group -- the right edge of the widest panel -- so the
+    # names line up in a column rather than following each row's ragged end.
+    if groups:
+        drawn: list[matplotlib.text.Text] = []
+        content_right_in = max(right for right, _top, _bottom in placed.values())
+        arm_x_in = content_right_in + gaps.group_gap_in
+        tip_x_in = arm_x_in + gaps.group_arm_in
+        text_x_in = tip_x_in + gaps.group_text_gap_in
+        for name, letters in groups:
+            boxes = [placed[letter] for letter in letters]
+            top_in = max(top for _right, top, _bottom in boxes)
+            bottom_in = min(bottom for _right, _top, bottom in boxes)
+            fig.add_artist(
+                matplotlib.lines.Line2D(
+                    [
+                        arm_x_in / fig_w_in,
+                        tip_x_in / fig_w_in,
+                        tip_x_in / fig_w_in,
+                        arm_x_in / fig_w_in,
+                    ],
+                    [
+                        top_in / fig_h_in,
+                        top_in / fig_h_in,
+                        bottom_in / fig_h_in,
+                        bottom_in / fig_h_in,
+                    ],
+                    transform=fig.transFigure,
+                    color="black",
+                    linewidth=BRACKET_LW_PT,
+                    solid_capstyle="projecting",
+                    solid_joinstyle="miter",
+                )
+            )
+            drawn.append(
+                fig.text(
+                    text_x_in / fig_w_in,
+                    (top_in + bottom_in) / 2.0 / fig_h_in,
+                    name,
+                    fontsize=title_pt,
+                    fontweight="bold",
+                    va="center",
+                    ha="left",
+                )
+            )
+
+        # **Checked, not corrected**, as the panel widths are: the gutter was
+        # reserved from `group_text_w_in`, a guess about type, and a name that
+        # outgrows it runs off the page rather than wrapping. Widening it here
+        # would move every panel to fit one long name, silently, so this says
+        # which name and by how much and leaves the choice to the caller.
+        _renderer = fig.canvas.get_renderer()
+        _over = {
+            text.get_text(): text.get_window_extent(_renderer).width / SCREEN_DPI
+            for text in drawn
+            if text.get_window_extent(_renderer).width / SCREEN_DPI
+            > gaps.group_text_w_in + 1e-6
+        }
+        if _over:
+            raise ValueError(
+                f"group names do not fit the {gaps.group_text_w_in:.2f} in "
+                f"reserved by `Spacing.group_text_w_in` (scaled): "
+                + ", ".join(f"{k!r} needs {v:.2f} in" for k, v in _over.items())
+            )
 
     return Composed(
         figure=fig,

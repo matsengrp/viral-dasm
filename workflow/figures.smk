@@ -57,6 +57,8 @@ from panel_spec import (
     dms_strata_figure_stem,
     dms_strata_panel_letters,
     dms_strata_panels,
+    dms_strata_supplement_figure_stem,
+    dms_strata_supplement_panel_letters,
     homolog_for_slug,
     scores_flags,
     PROBABILITIES_FIGURE_STEM,
@@ -456,6 +458,11 @@ def dms_strata_figure_paths(*_):
         str(path)
         for slug in DMS_STRATA_SLUGS
         for path in composed_paths(DMS_SELECTION, dms_strata_figure_stem(slug))
+    ] + [
+        str(path)
+        for path in composed_paths(
+            DMS_SELECTION, dms_strata_supplement_figure_stem()
+        )
     ]
 
 
@@ -1040,6 +1047,46 @@ rule compose_dms_strata:
     shell:
         "marimo export html {input.notebook} -o {output.html} --force"
         " -- --homolog {params.homolog}"
+        " > {log} 2>&1"
+
+
+rule compose_dms_strata_supplement:
+    """Every assay `main.tex` does not show, as one figure of six rows.
+
+    `rule compose_dms_strata`'s shape without its wildcard: this figure is the
+    whole roster minus one, so there is nothing to parametrise. It takes no
+    argument for the same reason, and reads the roster from `config.yaml` the
+    way the notebook does.
+
+    No scoring, no assay and no table: it reads the same PNGs those figures
+    read. The manuscript copy is not a declared output, for the reason
+    `rule compose_agreement` gives.
+    """
+    input:
+        layout="scripts/figure_layout.py",
+        spec="scripts/panel_spec.py",
+        lib="scripts/lib.py",
+        config="config.yaml",
+        charts="scripts/panel_charts.py",
+        notebook="notebooks/dms_strata_supplement.py",
+        panels=[
+            str(figure_dir(DMS_SELECTION) / f"{stem}.png")
+            for stem in dms_strata_supplement_panel_letters(dms_homologs()).values()
+        ],
+    output:
+        html=f"{NOTEBOOK_DIR}/dms_strata_supplement.html",
+        figure=[
+            str(path)
+            for path in composed_paths(
+                DMS_SELECTION, dms_strata_supplement_figure_stem()
+            )
+        ],
+    log:
+        f"{ARTIFACT_ROOT}/logs/compose_dms_strata_supplement.log",
+    resources:
+        mem_mb=PANEL_MEM_MB,
+    shell:
+        "marimo export html {input.notebook} -o {output.html} --force"
         " > {log} 2>&1"
 
 

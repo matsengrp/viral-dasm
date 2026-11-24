@@ -883,6 +883,84 @@ DMS_STRATA_BOX_IN: tuple[float, float] = (7.5, 8.0)
 #: so `main.tex` includes the PDF at its natural size and scales nothing.
 DMS_STRATA_FIGURE_SCALE = 0.7
 
+
+# ---------------------------------------------------------------------------
+# `fig:dms_strata_supplement`
+# ---------------------------------------------------------------------------
+#
+# The assays `main.tex` does not show, on one page: six panels down a column,
+# two per assay, with a bracket naming each pair. One figure rather than three
+# because the three say the same thing about three experiments, and a reader
+# comparing them wants them on one page rather than three.
+
+
+def dms_strata_supplement_homologs(homologs: Iterable[str]) -> list[str]:
+    """The assays this figure draws: every one `main.tex` does not.
+
+    **The roster is passed in**, for :func:`homolog_for_slug`'s reason: this
+    module reads no config of its own. Order is the roster's, which
+    `config.yaml` lists oldest first, so the figure reads down the phylogeny.
+    """
+    return [homolog for homolog in homologs if homolog != SCATTER_HOMOLOG]
+
+
+def dms_strata_supplement_panel_letters(homologs: Iterable[str]) -> dict[str, str]:
+    """`{letter: stem}` for the whole figure, reading down.
+
+    Two letters an assay, in `dms_strata_panels`' order, so A and B are the
+    first assay's antiGen and DASM rows, C and D the second's, and so on.
+    """
+    return {
+        chr(ord("A") + index): stem
+        for index, stem in enumerate(
+            stem
+            for homolog in dms_strata_supplement_homologs(homologs)
+            for stem in dms_strata_panels(homolog_slug(homolog))
+        )
+    }
+
+
+def dms_strata_supplement_rows(homologs: Iterable[str]) -> tuple[tuple[str, ...], ...]:
+    """One panel a row, stacked: `dms_strata_figure_rows`' reason, six deep."""
+    return tuple(
+        (letter,) for letter in dms_strata_supplement_panel_letters(homologs)
+    )
+
+
+def dms_strata_supplement_groups(
+    homologs: Iterable[str],
+) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """`[(assay, letters)]` for `figure_layout.compose`'s `row_groups`.
+
+    The brackets are what carry the assay names, so the panels keep the
+    titles they are rendered with and no caption has to say which pair is
+    which.
+    """
+    letters = list(dms_strata_supplement_panel_letters(homologs))
+    return tuple(
+        (homolog, tuple(letters[index * 2 : index * 2 + 2]))
+        for index, homolog in enumerate(dms_strata_supplement_homologs(homologs))
+    )
+
+
+def dms_strata_supplement_figure_stem() -> str:
+    """The composed stem, which is `si.tex`'s ``\\label`` for this figure."""
+    return "dms_strata_supplement"
+
+
+#: **Six panels have to fit one page, so height binds here where width binds
+#: in `fig:dms_strata`.** One assay's figure is 5.25 x 3.73 in: wide enough to
+#: overhang the text block and short enough to leave 1.9 in of the page unused.
+#: Three of them stacked is 11 in of panel, so the box is the page rather than
+#: the text block -- 7.0 in tall leaves about an inch for a short caption --
+#: and the width follows from it. The panels come out 4.3 pt against
+#: `fig:dms_strata`'s 7.6 pt, which is small but legible: checked by eye on the
+#: composed figure, which is the only way to check it.
+DMS_STRATA_SUPPLEMENT_BOX_IN: tuple[float, float] = (6.7, 7.0)
+
+#: No shrink: the box above is already the space this figure has.
+DMS_STRATA_SUPPLEMENT_SCALE = 1.0
+
 #: The type the panels are drawn at. The same size `fig:dms` is drawn at, and
 #: taken from it rather than respelled: both figures are Vega-Lite at
 #: `panel_charts.DMS_FONT_SIZE`, so a change there has to move both.
