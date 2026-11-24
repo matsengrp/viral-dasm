@@ -1199,21 +1199,25 @@ SHIFT_POINT_BUDGET = 40_000
 #: domain do not render, so the set is safe whatever the selection spans.
 SHIFT_TICKS = [-6, -3, 0, 3, 6]
 
-#: The arrow between the two clades in a panel D cell title, U+2794 HEAVY
-#: WIDE-HEADED RIGHTWARDS ARROW.
+#: The arrow between the two clades in a panel D cell title, U+2192.
 #:
-#: Not U+2192, which the titles used first: at this size its stroke is
-#: markedly lighter than the bold type either side of it, and it sits on the
-#: maths axis, which is above the optical centre of a line of capitals and
-#: digits. It read as a stray mark rather than as a relation. U+2794 is drawn
-#: to the weight of surrounding text and sits on the text centre.
+#: **It has to be a glyph the title font itself carries.** A title line is
+#: laid out in one face, so a character the face lacks sends that *whole line*
+#: to a fallback -- and the fallback renders larger and heavier, which leaves
+#: the two lines of a cell title at visibly different sizes and weights with
+#: the same text on both.
 #:
-#: Checked against the renderer rather than picked from a chart: U+2B95 and
-#: U+1F812 are both nominally heavy arrows and both come out as tofu in the
-#: font vl-convert resolves, so a glyph here is only safe once it has been
-#: rendered. U+27F6 and U+21D2 render but are no heavier, and U+21D2 reads as
-#: "implies".
-SHIFT_PAIR_ARROW = "\u2794"
+#: Measured, not assumed: rendering ``["21L (BA.2) <arrow>", "21L (BA.2)"]``
+#: and comparing the identical halves, U+2794, U+27F6, U+21D2, U+21E8 and
+#: U+2799 all leave the first line larger and blacker than the second, and
+#: U+2B95 and U+1F812 come out as tofu. Only U+2192 and the word ``to`` keep
+#: both lines in one face.
+#:
+#: So U+2192 is thin here on purpose. It is lighter than the bold type either
+#: side of it and sits on the maths axis rather than the optical centre of the
+#: line; that is the price of the line matching its neighbour. A heavier arrow
+#: needs a title font that *has* one, not a different codepoint.
+SHIFT_PAIR_ARROW = "\u2192"
 
 
 def shift_panel(
