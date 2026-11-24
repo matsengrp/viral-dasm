@@ -922,9 +922,7 @@ def dms_strata_supplement_panel_letters(homologs: Iterable[str]) -> dict[str, st
 
 def dms_strata_supplement_rows(homologs: Iterable[str]) -> tuple[tuple[str, ...], ...]:
     """One panel a row, stacked: `dms_strata_figure_rows`' reason, six deep."""
-    return tuple(
-        (letter,) for letter in dms_strata_supplement_panel_letters(homologs)
-    )
+    return tuple((letter,) for letter in dms_strata_supplement_panel_letters(homologs))
 
 
 def dms_strata_supplement_groups(
