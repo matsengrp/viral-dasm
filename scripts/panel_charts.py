@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import shutil
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -1199,11 +1199,31 @@ SHIFT_POINT_BUDGET = 40_000
 #: domain do not render, so the set is safe whatever the selection spans.
 SHIFT_TICKS = [-6, -3, 0, 3, 6]
 
+#: The arrow between the two clades in a panel D cell title, U+2192.
+#:
+#: **It has to be a glyph the title font itself carries.** A title line is
+#: laid out in one face, so a character the face lacks sends that *whole line*
+#: to a fallback -- and the fallback renders larger and heavier, which leaves
+#: the two lines of a cell title at visibly different sizes and weights with
+#: the same text on both.
+#:
+#: Measured, not assumed: rendering ``["21L (BA.2) <arrow>", "21L (BA.2)"]``
+#: and comparing the identical halves, U+2794, U+27F6, U+21D2, U+21E8 and
+#: U+2799 all leave the first line larger and blacker than the second, and
+#: U+2B95 and U+1F812 come out as tofu. Only U+2192 and the word ``to`` keep
+#: both lines in one face.
+#:
+#: So U+2192 is thin here on purpose. It is lighter than the bold type either
+#: side of it and sits on the maths axis rather than the optical centre of the
+#: line; that is the price of the line matching its neighbour. A heavier arrow
+#: needs a title font that *has* one, not a different codepoint.
+SHIFT_PAIR_ARROW = "\u2192"
+
 
 def shift_panel(
     frame: pd.DataFrame,
     *,
-    title: str,
+    title: str | list[str],
     stat: str,
     domain: list[float],
     size: int,
@@ -1293,6 +1313,7 @@ def shift_grid(
     shift_df: pd.DataFrame,
     metrics: pd.DataFrame,
     clades: list[str],
+    clade_label: Callable[[str], str] | None = None,
 ) -> alt.VConcatChart:
     """Panel D: a lower-triangular grid of clade pairs, one cell per pair.
 
@@ -1304,6 +1325,13 @@ def shift_grid(
     Built by hand rather than with ``.facet()`` so each cell can carry that
     pair's own r and n. A facet header gives the pair label only, and the
     per-pair numbers are the reason to separate the pairs rather than pool them.
+
+    ``clade_label`` titles each cell with the name the paper uses --
+    ``21J (Delta)`` for ``21J`` -- leaving the **pair key untouched**: the
+    lookup into ``metrics`` and the ``pair`` column of the panel CSV are both
+    still the bare ``21J->23A``. Titles run over two lines because a cell is
+    165 px and a glossed pair is about 25 characters at this font size, which
+    would overrun it on one.
 
     **Shared, explicit domains over the whole selection**, one for both axes.
     The cells are square, so equal ranges make a degree of slope on the screen a
@@ -1325,6 +1353,7 @@ def shift_grid(
         if len(shift_df) <= SHIFT_POINT_BUDGET
         else max(600, SHIFT_POINT_BUDGET // max(len(pairs), 1))
     )
+    name = clade_label or (lambda clade: clade)
     order = sorted(clades)
     # Cells shrink as the triangle grows: five clades is ten cells, six is
     # fifteen, and a fixed large cell turns those into a page of scrolling.
@@ -1359,7 +1388,7 @@ def shift_grid(
             cells.append(
                 shift_panel(
                     drawn,
-                    title=pair,
+                    title=[f"{name(earlier)} {SHIFT_PAIR_ARROW}", name(later)],
                     stat=stat,
                     domain=domain,
                     size=cell,

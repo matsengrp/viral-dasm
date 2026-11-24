@@ -139,6 +139,13 @@ def _(PANEL_MODEL, SELECTION, SPEC, TABLE_PATH, charts, mo, panels):
     )
 
     if len(LOOKUP):
+        # **Bare clades on this axis, deliberately.** Panels B and D carry the
+        # paper's names, and this one does not: its ticks are rotated, so a
+        # `21J (Delta)` costs vertical space, and 15 of them made panel A 1,783
+        # px against panel B's 1,354. Panel A sets the height of its row, so
+        # that shrank every panel's type from 12.2 pt to 11.9 and the figure
+        # from 6.37 in to 6.74. `test_the_rendered_panel_a_is_no_taller_than_
+        # panel_b` is the guard that measures it.
         _chart = charts.mutation_lookup_line(
             LOOKUP,
             panels.LOOKUP_MUTATION,
@@ -236,7 +243,7 @@ def _(BASE, MODELS, PANEL_MODEL, SELECTION, SPEC, charts, panels, pd):
         charts.scatter_panel(
             _drawn,
             metric=SPEC.fitness_metric,
-            clade=panels.SCATTER_CLADE,
+            clade=panels.clade_label(panels.SCATTER_CLADE),
             clip_lower=SPEC.clip_lower,
             stat=charts.stat_label(
                 SCATTER_METRICS[SCATTER_METRICS["model"] == PANEL_MODEL].iloc[0],
@@ -334,7 +341,7 @@ def _(
     SKIPPED = panels.identical_founder_pairs(FOUNDERS, list(_at_cutoff))
 
     panel_d = charts.save_panel(
-        charts.shift_grid(SHIFTS, SHIFT_METRICS, list(_at_cutoff)),
+        charts.shift_grid(SHIFTS, SHIFT_METRICS, list(_at_cutoff), panels.clade_label),
         "panel_d_shift_grid",
         selection=SELECTION,
     )
