@@ -1203,7 +1203,7 @@ SHIFT_TICKS = [-6, -3, 0, 3, 6]
 def shift_panel(
     frame: pd.DataFrame,
     *,
-    title: str,
+    title: str | list[str],
     stat: str,
     domain: list[float],
     size: int,
@@ -1293,6 +1293,7 @@ def shift_grid(
     shift_df: pd.DataFrame,
     metrics: pd.DataFrame,
     clades: list[str],
+    clade_names: dict[str, str] | None = None,
 ) -> alt.VConcatChart:
     """Panel D: a lower-triangular grid of clade pairs, one cell per pair.
 
@@ -1304,6 +1305,15 @@ def shift_grid(
     Built by hand rather than with ``.facet()`` so each cell can carry that
     pair's own r and n. A facet header gives the pair label only, and the
     per-pair numbers are the reason to separate the pairs rather than pool them.
+
+    ``clade_names`` titles each cell with the name the paper uses --
+    ``21J (Delta)`` for ``21J`` -- leaving the **pair key untouched**: the
+    lookup into ``metrics`` and the ``pair`` column of the panel CSV are both
+    still the bare ``21J->23A``. A clade absent from the mapping titles as its
+    bare self, so a roster that grows past the mapping loses the alias on the
+    new cells rather than failing. Titles run over two lines because a cell is
+    165 px and a glossed pair is about 25 characters at this font size, which
+    would overrun it on one.
 
     **Shared, explicit domains over the whole selection**, one for both axes.
     The cells are square, so equal ranges make a degree of slope on the screen a
@@ -1325,6 +1335,7 @@ def shift_grid(
         if len(shift_df) <= SHIFT_POINT_BUDGET
         else max(600, SHIFT_POINT_BUDGET // max(len(pairs), 1))
     )
+    names = clade_names or {}
     order = sorted(clades)
     # Cells shrink as the triangle grows: five clades is ten cells, six is
     # fifteen, and a fixed large cell turns those into a page of scrolling.
@@ -1359,7 +1370,7 @@ def shift_grid(
             cells.append(
                 shift_panel(
                     drawn,
-                    title=pair,
+                    title=[f"{names.get(earlier, earlier)} →", names.get(later, later)],
                     stat=stat,
                     domain=domain,
                     size=cell,

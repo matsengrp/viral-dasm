@@ -122,6 +122,7 @@ from panel_spec import (  # noqa: F401  (re-exported for the notebooks)
     PCP_CHUNK_ROWS,
     SCATTER_CLADE,
     SELECTIONS,
+    SHIFT_CLADE_NAMES,
     SHIFT_CLADES,
     SHIFT_ERROR_PANELS,
     SUBSAMPLING_CLIP_LOWER,

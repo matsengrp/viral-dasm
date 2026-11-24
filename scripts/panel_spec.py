@@ -152,6 +152,30 @@ PANEL_MIN_COUNT = COUNT_LADDER[0]
 #: selection rather than the roster.
 SHIFT_CLADES: tuple[str, ...] = ("21J", "21L", "23A", "24A")
 
+#: Each shift clade under the name the paper gives it, on the
+#: :data:`ECDF_CLADES` and :data:`L455F_CLADE_NAMES` precedent: `main.tex`
+#: names clades by their Pango or WHO alias and every table here is keyed by
+#: the bare Nextstrain clade. `main.tex` introduces exactly this roster as
+#: "21J (Delta), 21L (BA.2), 23A (XBB.1.5), and 24A (JN.1)", and these are
+#: those four spellings, so panel D's cells and the prose that sends a reader
+#: to them name the same clades.
+#:
+#: **Labels only.** The pair key `fig:agreement` panel D joins on is still the
+#: bare `21J->23A`, matching `pair` in the panel CSV and `pair_label` in the
+#: metrics table. Renaming the key would silently drop every cell's r and n,
+#: because the lookup would miss.
+#:
+#: Note the alias is not a unique name for a clade: Nextstrain calls both 21I
+#: and 21J "Delta", and 21K through 22D are all "Omicron" something. That is
+#: why the bare clade leads and the alias follows in parentheses, rather than
+#: the alias replacing it.
+SHIFT_CLADE_NAMES: dict[str, str] = {
+    "21J": "21J (Delta)",
+    "21L": "21L (BA.2)",
+    "23A": "23A (XBB.1.5)",
+    "24A": "24A (JN.1)",
+}
+
 #: The clade panel B scatters. One clade, because the panel's job is to show
 #: the cloud behind one of panel C's dots.
 SCATTER_CLADE = "21J"

@@ -334,7 +334,9 @@ def _(
     SKIPPED = panels.identical_founder_pairs(FOUNDERS, list(_at_cutoff))
 
     panel_d = charts.save_panel(
-        charts.shift_grid(SHIFTS, SHIFT_METRICS, list(_at_cutoff)),
+        charts.shift_grid(
+            SHIFTS, SHIFT_METRICS, list(_at_cutoff), panels.SHIFT_CLADE_NAMES
+        ),
         "panel_d_shift_grid",
         selection=SELECTION,
     )

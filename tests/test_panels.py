@@ -1227,23 +1227,40 @@ def test_each_cell_of_the_shift_grid_names_the_pair_it_draws():
             "sf_shift_is_constant": [False, False, False],
         }
     )
-    grid = charts.shift_grid(shift_df, metrics, clades).to_dict()
+    def titles(chart):
+        return [
+            [cell.get("title", {}).get("text") for cell in row["hconcat"]]
+            for row in chart.to_dict()["vconcat"]
+        ]
 
     # Row r holds clades[1:][r] as its later clade and clades[:r+1] as its
     # columns, which is the layout the docstring promises and what a reader
-    # reads the grid by.
-    expected = [
-        [f"{earlier}\u2192{later}" for earlier in clades[:row]]
-        for row, later in enumerate(clades[1:], start=1)
-    ]
-    drawn = [
-        [cell.get("title", {}).get("text") for cell in row["hconcat"]]
-        for row in grid["vconcat"]
-    ]
-    assert drawn == expected, (
-        f"the grid's cells are titled {drawn}, and their positions say they "
-        f"hold {expected}. A cell titled with another cell's pair attributes "
-        f"its correlation to the wrong clades."
+    # reads the grid by. A title is two lines -- the earlier clade with the
+    # arrow, then the later -- because a glossed pair overruns one line at a
+    # cell's width.
+    def expected_titles(name):
+        return [
+            [[f"{name(earlier)} \u2192", name(later)] for earlier in clades[:row]]
+            for row, later in enumerate(clades[1:], start=1)
+        ]
+
+    bare = titles(charts.shift_grid(shift_df, metrics, clades))
+    assert bare == expected_titles(lambda clade: clade), (
+        f"the grid's cells are titled {bare}, and their positions say they "
+        f"hold {expected_titles(lambda clade: clade)}. A cell titled with "
+        f"another cell's pair attributes its correlation to the wrong clades."
+    )
+
+    # The same wiring with the paper's names, which is how the figure is
+    # drawn. A mapping is a second chance to put a name on the wrong cell, and
+    # an unmapped clade must still title as itself rather than vanish.
+    names = {"21J": "21J (Delta)", "23A": "23A (XBB.1.5)"}
+    glossed = titles(charts.shift_grid(shift_df, metrics, clades, names))
+    assert glossed == expected_titles(lambda clade: names.get(clade, clade)), (
+        f"with the paper's clade names the cells are titled {glossed}, which "
+        f"is not what their positions say they hold. The mapping must rename "
+        f"each cell in place, and leave an unmapped clade -- here 21L -- "
+        f"titled as itself."
     )
 
 
