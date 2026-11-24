@@ -819,13 +819,18 @@ DMS_STRATA_TITLE_PX = DMS_TITLE_PX
 # one that added those predictors.
 
 #: The founder panel A's scatter is drawn on. One founder, because a scatter
-#: can only show one; this one, because it is the dataset the paper leads with
-#: and `fig:dms_strata` already does -- so it is :data:`SCATTER_HOMOLOG`
-#: rather than a second spelling of the same choice. Upstream drew BA.1, on the
-#: different criterion of where the probability's penalty is largest; the
-#: identity panel A draws is exact on every founder, so leading with the
-#: paper's own dataset costs the panel nothing.
-PROBABILITIES_SCATTER_HOMOLOG = SCATTER_HOMOLOG
+#: can only show one; this one, because it is where fitness effect and
+#: probability agree least, which is the panel's point.
+#:
+#: **Deliberately not :data:`SCATTER_HOMOLOG`.** `fig:dms` leads with the
+#: paper's own dataset, and for a while this panel followed it on the grounds
+#: that the identity it draws is exact on every founder, so the choice cost
+#: nothing. It does cost something: the looser the relationship on the founder
+#: drawn, the more plainly the panel shows that a probability is not a fitness
+#: effect. Measured over the four homologs' founders, the correlation between
+#: the two runs 0.68 on BA.1, 0.70 on Delta, 0.76 on XBB.1.5 and 0.77 on
+#: KP.3.1.1, so BA.1 is the honest worst case and the panel draws it.
+PROBABILITIES_SCATTER_HOMOLOG = "BA.1"
 
 #: The three arms of panel B, in bar order: the model's own two readings, then
 #: the published model's. `dasm` first because it is the reading the rest of the
