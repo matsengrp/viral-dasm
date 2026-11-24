@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import shutil
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -1199,6 +1199,22 @@ SHIFT_POINT_BUDGET = 40_000
 #: domain do not render, so the set is safe whatever the selection spans.
 SHIFT_TICKS = [-6, -3, 0, 3, 6]
 
+#: The arrow between the two clades in a panel D cell title, U+2794 HEAVY
+#: WIDE-HEADED RIGHTWARDS ARROW.
+#:
+#: Not U+2192, which the titles used first: at this size its stroke is
+#: markedly lighter than the bold type either side of it, and it sits on the
+#: maths axis, which is above the optical centre of a line of capitals and
+#: digits. It read as a stray mark rather than as a relation. U+2794 is drawn
+#: to the weight of surrounding text and sits on the text centre.
+#:
+#: Checked against the renderer rather than picked from a chart: U+2B95 and
+#: U+1F812 are both nominally heavy arrows and both come out as tofu in the
+#: font vl-convert resolves, so a glyph here is only safe once it has been
+#: rendered. U+27F6 and U+21D2 render but are no heavier, and U+21D2 reads as
+#: "implies".
+SHIFT_PAIR_ARROW = "\u2794"
+
 
 def shift_panel(
     frame: pd.DataFrame,
@@ -1293,7 +1309,7 @@ def shift_grid(
     shift_df: pd.DataFrame,
     metrics: pd.DataFrame,
     clades: list[str],
-    clade_names: dict[str, str] | None = None,
+    clade_label: Callable[[str], str] | None = None,
 ) -> alt.VConcatChart:
     """Panel D: a lower-triangular grid of clade pairs, one cell per pair.
 
@@ -1306,12 +1322,10 @@ def shift_grid(
     pair's own r and n. A facet header gives the pair label only, and the
     per-pair numbers are the reason to separate the pairs rather than pool them.
 
-    ``clade_names`` titles each cell with the name the paper uses --
+    ``clade_label`` titles each cell with the name the paper uses --
     ``21J (Delta)`` for ``21J`` -- leaving the **pair key untouched**: the
     lookup into ``metrics`` and the ``pair`` column of the panel CSV are both
-    still the bare ``21J->23A``. A clade absent from the mapping titles as its
-    bare self, so a roster that grows past the mapping loses the alias on the
-    new cells rather than failing. Titles run over two lines because a cell is
+    still the bare ``21J->23A``. Titles run over two lines because a cell is
     165 px and a glossed pair is about 25 characters at this font size, which
     would overrun it on one.
 
@@ -1335,7 +1349,7 @@ def shift_grid(
         if len(shift_df) <= SHIFT_POINT_BUDGET
         else max(600, SHIFT_POINT_BUDGET // max(len(pairs), 1))
     )
-    names = clade_names or {}
+    name = clade_label or (lambda clade: clade)
     order = sorted(clades)
     # Cells shrink as the triangle grows: five clades is ten cells, six is
     # fifteen, and a fixed large cell turns those into a page of scrolling.
@@ -1370,7 +1384,7 @@ def shift_grid(
             cells.append(
                 shift_panel(
                     drawn,
-                    title=[f"{names.get(earlier, earlier)} →", names.get(later, later)],
+                    title=[f"{name(earlier)} {SHIFT_PAIR_ARROW}", name(later)],
                     stat=stat,
                     domain=domain,
                     size=cell,

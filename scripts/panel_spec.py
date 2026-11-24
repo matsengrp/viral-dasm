@@ -152,29 +152,89 @@ PANEL_MIN_COUNT = COUNT_LADDER[0]
 #: selection rather than the roster.
 SHIFT_CLADES: tuple[str, ...] = ("21J", "21L", "23A", "24A")
 
-#: Each shift clade under the name the paper gives it, on the
-#: :data:`ECDF_CLADES` and :data:`L455F_CLADE_NAMES` precedent: `main.tex`
-#: names clades by their Pango or WHO alias and every table here is keyed by
-#: the bare Nextstrain clade. `main.tex` introduces exactly this roster as
-#: "21J (Delta), 21L (BA.2), 23A (XBB.1.5), and 24A (JN.1)", and these are
-#: those four spellings, so panel D's cells and the prose that sends a reader
-#: to them name the same clades.
+#: Each Nextstrain clade under the common name the paper uses for it, as
+#: `21J (Delta)`. `main.tex` names clades by their Pango or WHO alias and
+#: every table in this pipeline is keyed by the bare Nextstrain clade, so a
+#: panel that prints only the clade makes a reader carry the mapping.
 #:
-#: **Labels only.** The pair key `fig:agreement` panel D joins on is still the
-#: bare `21J->23A`, matching `pair` in the panel CSV and `pair_label` in the
-#: metrics table. Renaming the key would silently drop every cell's r and n,
-#: because the lookup would miss.
+#: **Both halves, in this order.** The alias is *not* a unique name for a
+#: clade: Nextstrain calls both 21I and 21J "Delta", and 21K through 22D are
+#: all Omicron. A panel titled just "Delta" would not say which Delta it drew,
+#: so the bare clade leads and the alias follows in parentheses.
 #:
-#: Note the alias is not a unique name for a clade: Nextstrain calls both 21I
-#: and 21J "Delta", and 21K through 22D are all "Omicron" something. That is
-#: why the bare clade leads and the alias follows in parentheses, rather than
-#: the alias replacing it.
-SHIFT_CLADE_NAMES: dict[str, str] = {
-    "21J": "21J (Delta)",
-    "21L": "21L (BA.2)",
-    "23A": "23A (XBB.1.5)",
-    "24A": "24A (JN.1)",
+#: Transcribed from the union of two configs this project already builds
+#: against -- `SARS2-mut-fitness-v2/config.yaml`'s `clade_synonyms` (19A-24G)
+#: and `mat-pcp/config/config.yaml`'s `roemer_nextstrain_to_pango` (23A-25C).
+#: Two edits were made to that union, both deliberate:
+#:
+#: - The `Omicron ` prefix is dropped, so 21K reads `BA.1` rather than
+#:   `Omicron BA.1`. This follows `main.tex`, which writes "BA.1 (clade 21K)"
+#:   and "21L (BA.2)", and keeps the labels narrow enough for an axis.
+#: - 23B is `XBB.1.16`. `clade_synonyms` spells it `BB.1.16`, which is a typo
+#:   -- mat-pcp's map has `23B: XBB.1.16`, and no Pango lineage `BB.1.16`
+#:   exists.
+#:
+#: Clades in neither config are absent here on purpose rather than filled in
+#: from memory: 19B, 20D, 21B, 21D, 21E, 21G, 21H, 21M and 25D-25H have no
+#: entry. :func:`clade_label` falls back to the bare clade for those, so a
+#: panel that reaches one loses the alias rather than raising.
+CLADE_NAMES: dict[str, str] = {
+    "19A": "B",
+    "20A": "B.1",
+    "20B": "B.1.1",
+    "20C": "B.1.367",
+    "20E": "B.1.177",
+    "20F": "D.2",
+    "20G": "B.1.2",
+    "20H": "Beta",
+    "20I": "Alpha",
+    "20J": "Gamma",
+    "21C": "Epsilon",
+    "21F": "Iota",
+    "21I": "Delta",
+    "21J": "Delta",
+    "21K": "BA.1",
+    "21L": "BA.2",
+    "22A": "BA.4",
+    "22B": "BA.5",
+    "22C": "BA.2.12.1",
+    "22D": "BA.2.75",
+    "22E": "BQ.1",
+    "22F": "XBB",
+    "23A": "XBB.1.5",
+    "23B": "XBB.1.16",
+    "23C": "CH.1.1",
+    "23D": "XBB.1.9",
+    "23E": "XBB.2.3",
+    "23F": "EG.5.1",
+    "23G": "XBB.1.5.70",
+    "23H": "HK.3",
+    "23I": "BA.2.86",
+    "24A": "JN.1",
+    "24B": "JN.1.11.1",
+    "24C": "KP.3",
+    "24D": "XDV.1",
+    "24E": "KP.3.1.1",
+    "24F": "XEC",
+    "24G": "KP.2.3",
+    "24H": "LF.7",
+    "24I": "MV.1",
+    "25A": "LP.8.1",
+    "25B": "NB.1.8.1",
+    "25C": "XFG",
 }
+
+
+def clade_label(clade: str) -> str:
+    """`21J` as `21J (Delta)`, or as itself when no alias is known.
+
+    The fallback is the point: :data:`CLADE_NAMES` covers the clades the two
+    upstream configs name, and a tree that grows past them should cost a panel
+    its parentheses, not its run.
+    """
+    alias = CLADE_NAMES.get(clade)
+    return f"{clade} ({alias})" if alias else clade
+
 
 #: The clade panel B scatters. One clade, because the panel's job is to show
 #: the cloud behind one of panel C's dots.
