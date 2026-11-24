@@ -1352,7 +1352,7 @@ L455F_JIAN_ASSAYS: dict[str, str] = {
 #: can get from an axis label naming the quantity measured.
 L455F_JIAN_ARROWS: dict[str, tuple[str, str]] = {
     "neutralization": ("better escape", "worse escape"),
-    "affinity": ("better binder", "worse binder"),
+    "affinity": ("better binding", "worse binding"),
 }
 
 #: How wide one of panel A's slots is, in inches, against the 2.30 the
