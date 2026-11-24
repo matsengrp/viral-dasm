@@ -140,6 +140,7 @@ ENTRY_POINTS = {
     "dms_prob_scores": "scripts/dms_prob.py",
     "dms_strata_panels": "notebooks/dms_strata.py",
     "compose_dms_strata": "notebooks/dms_strata_figure.py",
+    "compose_dms_strata_supplement": "notebooks/dms_strata_supplement.py",
     "probabilities_panels": "notebooks/probabilities.py",
     "compose_probabilities": "notebooks/probabilities_figure.py",
     "dms_predictor_summary": "scripts/dms_summary.py",
