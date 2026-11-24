@@ -272,6 +272,12 @@ def _(DRAWN, FOCAL, SELECTION, charts, mo, panels, spec):
         # two resolutions. See `charts.L455F_BACKGROUND_SERIES` on why this is
         # its own tuple and not a third entry in the shared one.
         series=charts.L455F_BACKGROUND_SERIES,
+        # Drawn over the other two, against that order. The DASM is named
+        # first so that the key reads with the panel's subject at its head,
+        # and marks of equal height are otherwise stacked in the order they
+        # are named -- which would leave the arm under test overprinted by
+        # the counts arms wherever the three land close together.
+        series_on_top="DASM",
         # Clade order, not steepest-first. These sub-panels are clades, which
         # have an order of their own that also runs roughly in time, and the
         # one-pool clade has no shift to be sorted by. Titled as the tree's

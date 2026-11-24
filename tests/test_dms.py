@@ -692,7 +692,7 @@ def test_the_laid_out_scatter_row_is_headed_by_its_homolog_in_black():
     """
     frame = _synthetic_frame()
     heading = panel_charts.dms_homolog_heading("KP.3.1.1", "24E", len(frame))
-    assert heading == f"KP.3.1.1 (clade 24E), n = {len(frame):,}"
+    assert heading == f"KP.3.1.1 (24E), n = {len(frame):,}"
     spec = panel_charts.dms_scatter_row(
         frame,
         min_count=panel_spec.DMS_FIGURE_MIN_COUNT,
