@@ -608,8 +608,13 @@ def dms_homolog_heading(homolog: str, clade: str, n: int) -> str:
     answers a question nobody asked and leaves the one a reader does ask,
     "which homolog is this?", to the caption. `n` stays because a panel
     should be readable on its own terms.
+
+    The clade is parenthesised bare, without the word "clade" in front of it,
+    because the bar panel beside this one names its groups the same way --
+    `KP.3.1.1 (24E)` -- and two spellings of one label across a single
+    figure's two panels read as two different things.
     """
-    return f"{homolog} (clade {clade}), n = {n:,}"
+    return f"{homolog} ({clade}), n = {n:,}"
 
 
 def dms_padded_domain(values: Sequence[float] | pd.Series) -> list[float]:
@@ -1874,6 +1879,17 @@ BACKGROUND_ARROW_SPAN = (0.56, 0.97)
 #: line, narrow enough that two pools' caps cannot meet.
 BACKGROUND_SPREAD_CAP = 0.07
 
+#: How a row's marks are stacked: the zero line under the spread whiskers,
+#: the whiskers under the markers, so a whisker shorter than its dot is hidden
+#: by it. Series of equal lift are drawn in the order `series` names them,
+#: which puts the *last* one named on top -- and a figure whose key leads with
+#: the series under test therefore draws it underneath the rest. `series_on_top`
+#: lifts one series clear of that by :data:`BACKGROUND_TOP_LIFT`, which is two
+#: so that the lifted series' whisker still sits under its own marker.
+BACKGROUND_SPREAD_ZORDER = 2
+BACKGROUND_MARKER_ZORDER = 3
+BACKGROUND_TOP_LIFT = 2
+
 #: What the x axis of a row is called, and the gloss under it saying which
 #: side is which. Two strings rather than one, because they are drawn at two
 #: sizes and two weights; see :func:`background_panel`.
@@ -2009,6 +2025,7 @@ def background_panel(
     x_gloss: str | None = BACKGROUND_X_GLOSS,
     sub_x_label: str | None = None,
     series: Sequence[tuple[str, str, str, str]] = BACKGROUND_SERIES,
+    series_on_top: str | None = None,
     legend_title: str = ARM_LEGEND_TITLE,
 ) -> matplotlib.figure.Figure:
     """One row of background estimates: `fig:within_clade_shifts`' panels
@@ -2180,6 +2197,12 @@ def background_panel(
             names are what the panel CSV is written under, so a reader of
             that file would find an experiment filed as a counts estimate.
             `fig:l455f`'s panel A is the one such caller.
+        series_on_top: Which series is drawn over the others, whatever its
+            place in ``series``. ``None`` leaves the stacking to that order,
+            which puts the last series named on top. `fig:l455f`'s panel B
+            names the DASM first, because that is how its key should read,
+            and so needs this to keep the arm under test from being
+            overprinted by the two counts arms it is being compared with.
         legend_title: The key's heading. The default names the two arms as
             approaches, which is what they are. A panel of measurements is
             not comparing approaches and says so instead.
@@ -2210,6 +2233,11 @@ def background_panel(
         raise KeyError(
             f"spread_columns names series {unknown}, which this panel does not "
             f"draw. Its series are {sorted(known)}."
+        )
+    if series_on_top is not None and series_on_top not in known:
+        raise KeyError(
+            f"series_on_top={series_on_top!r} is not a series this panel "
+            f"draws. Its series are {sorted(known)}."
         )
     absent = sorted(
         {column for pair in intervals.values() for column in pair} - set(frame.columns)
@@ -2345,6 +2373,7 @@ def background_panel(
         part = frame[frame[group_column] == member].sort_values("background_order")
         x = list(range(len(part)))
         for label, column, colour, marker in series:
+            lift = BACKGROUND_TOP_LIFT if label == series_on_top else 0
             # Under the markers, so a whisker shorter than the dot is hidden
             # by it rather than drawn over it: the dot is the estimate and the
             # whisker is context for it.
@@ -2358,7 +2387,12 @@ def background_panel(
                     if not (np.isfinite(low) and np.isfinite(high)):
                         continue
                     axis.vlines(
-                        position, low, high, color=colour, linewidth=1.2, zorder=2
+                        position,
+                        low,
+                        high,
+                        color=colour,
+                        linewidth=1.2,
+                        zorder=BACKGROUND_SPREAD_ZORDER + lift,
                     )
                     axis.hlines(
                         [low, high],
@@ -2366,7 +2400,7 @@ def background_panel(
                         position + BACKGROUND_SPREAD_CAP,
                         color=colour,
                         linewidth=1.2,
-                        zorder=2,
+                        zorder=BACKGROUND_SPREAD_ZORDER + lift,
                     )
             axis.plot(
                 x,
@@ -2376,7 +2410,7 @@ def background_panel(
                 markersize=marker_size,
                 linewidth=1.4,
                 label=(series_labels or {}).get(label, label),
-                zorder=3,
+                zorder=BACKGROUND_MARKER_ZORDER + lift,
             )
         if absent_label is not None:
             # Just above the floor of the domain rather than above the
